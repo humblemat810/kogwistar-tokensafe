@@ -269,20 +269,15 @@ scripts/test_chat.sh           one-command request
 
 ## Production-shaped Postgres mode
 
-Postgres is the default durable graph/event/projection store when `MODELKEYGUARD_STORE` is unset.
+The default JSONL store is useful for reading the graph quickly. For a production-shaped local run, use Postgres as the durable graph/event/projection store.
 
 ```bash
 pip install -e ".[postgres]"
 ./scripts/start_stack.sh
+export MODELKEYGUARD_STORE=postgres
 export MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:modelguard@localhost:5432/modelguard
 export MODELKEYGUARD_GRAPH_KEY='replace-this-with-a-long-random-app-key'
 ./scripts/start_gateway.sh
-```
-
-To force local JSONL storage instead, set:
-
-```bash
-export MODELKEYGUARD_STORE=jsonl
 ```
 
 What moves into Postgres:
@@ -393,3 +388,31 @@ modelkeyguard.usage_lane_head
 ```
 
 So quota counters and strict lane tail pointers are rebuildable named projections over the single authoritative graph/event stream.
+
+## FastAPI gateway
+
+The gateway is now FastAPI/Uvicorn-based. The previous stdlib `ThreadingHTTPServer` smoke server has been removed from the application path.
+
+```bash
+./scripts/start_gateway.sh
+# or
+modelkeyguard gateway --host 127.0.0.1 --port 8789 --policy config/gateway_policy.json
+```
+
+The OpenAI-compatible client shape stays the same:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://127.0.0.1:8789/v1",
+    api_key="kgw_demo_doc_ingestor",
+)
+```
+
+Gateway responsibilities:
+
+```text
+verify token -> resolve graph principal -> ACL decision -> quota projection check
+-> encrypted key resolution -> provider forwarding/dry-run -> append access + usage graph events
+```

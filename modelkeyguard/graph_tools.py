@@ -12,17 +12,17 @@ from .graph_state import GraphStateStore
 def init_graph(policy_path: str = "config/gateway_policy.json", graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
     policy = json.loads(Path(policy_path).read_text())
     path = Path(graph_path)
-    if os.getenv("MODELKEYGUARD_STORE", "postgres").lower() != "postgres" and path.exists():
+    if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() != "postgres" and path.exists():
         path.unlink()
     graph = GraphStateStore.from_policy(policy, path=path)
-    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if os.getenv("MODELKEYGUARD_STORE", "postgres").lower() == "postgres" else str(path)
+    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() == "postgres" else str(path)
     print(f"initialized encrypted graph: {target}")
     print(f"nodes={len(graph.nodes)} edges={len(graph.edges)} events={len(graph.events)} projections={len(graph.projections)}")
     return 0
 
 
 def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
-    if os.getenv("MODELKEYGUARD_STORE", "postgres").lower() == "postgres":
+    if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() == "postgres":
         from .postgres_state import PostgresGraphStateStore
         graph = PostgresGraphStateStore()
     else:
@@ -32,7 +32,7 @@ def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
     decisions = Counter(n.payload.get("reason") or n.payload.get("event_type") for n in graph.nodes.values() if n.kind == "access_conversation_event")
     usage_heads = {nid: n.payload for nid, n in graph.nodes.items() if n.kind == "usage_lane_head"}
     print(json.dumps({
-        "store": os.getenv("MODELKEYGUARD_STORE", "postgres"),
+        "store": os.getenv("MODELKEYGUARD_STORE", "jsonl"),
         "graph_path": graph_path,
         "nodes": len(graph.nodes),
         "edges": len(graph.edges),

@@ -9,12 +9,16 @@ description = "Kogwistar ACL model-key gateway with Keycloak token verification"
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [{name = "Kogwistar ModelKeyGuard"}]
-dependencies = ["kogwistar>=0.2.4"]
+dependencies = [
+  "kogwistar>=0.2.4",
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+]
 
 [project.optional-dependencies]
 postgres = ["psycopg[binary]>=3.2"]
 testcontainers = ["pytest>=8", "testcontainers[postgresql]>=4.9", "psycopg[binary]>=3.2"]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "httpx>=0.27"]
 
 [project.scripts]
 modelkeyguard = "modelkeyguard.__main__:main"

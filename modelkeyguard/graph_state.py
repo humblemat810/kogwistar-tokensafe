@@ -186,7 +186,7 @@ class GraphStateStore:
 
     @classmethod
     def from_policy(cls, policy: dict[str, Any], path: str | Path | None = None, app_key: str | None = None) -> "GraphStateStore":
-        if cls is GraphStateStore and os.getenv("MODELKEYGUARD_STORE", "postgres").lower() == "postgres":
+        if cls is GraphStateStore and os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() == "postgres":
             from .postgres_state import PostgresGraphStateStore
             return PostgresGraphStateStore.from_policy(policy, app_key=app_key)  # type: ignore[return-value]
         store = cls(path, app_key)
