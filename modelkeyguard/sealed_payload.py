@@ -9,8 +9,10 @@ from typing import Any
 
 try:  # production path
     from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+    from cryptography.exceptions import InvalidTag
 except Exception:  # pragma: no cover
     AESGCM = None  # type: ignore
+    InvalidTag = None  # type: ignore
 
 
 def _b64e(data: bytes) -> str:
@@ -51,7 +53,12 @@ def open_json(sealed: dict[str, str], app_key: str) -> dict[str, Any]:
     aad = _b64d(sealed.get("aad", _b64e(b"kgw-modelkeyguard-v1")))
     ciphertext = _b64d(sealed["ciphertext"])
     if sealed.get("alg") == "AES-256-GCM" and AESGCM is not None:
-        plain = AESGCM(key).decrypt(nonce, ciphertext, aad)
+        try:
+            plain = AESGCM(key).decrypt(nonce, ciphertext, aad)
+        except Exception as exc:
+            if InvalidTag is not None and isinstance(exc, InvalidTag):
+                raise ValueError("sealed graph payload authentication failed") from exc
+            raise
     else:
         tag = _b64d(sealed["tag"])
         expected = hmac.new(key, aad + nonce + ciphertext, hashlib.sha256).digest()

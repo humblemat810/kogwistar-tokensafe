@@ -75,10 +75,10 @@ def test_key_resolve_decrypts_only_inside_manager(prod_env):
 def test_key_wrong_graph_key_cannot_decrypt(prod_env):
     store = GraphStateStore(path=prod_env / "graph.jsonl", app_key="test-graph-key-32-bytes-minimum-abcdef")
     km = KeyManager(store, store.app_key)
-    view = km.create_key(key_id="key:test:wrong", provider="openai", models=["m"], display_name="Wrong", provider_secret="secret", created_by="tester")
-    store2 = GraphStateStore(path=prod_env / "graph.jsonl", app_key="different-graph-key-32-bytes-minimum")
+    km.create_key(key_id="key:test:wrong", provider="openai", models=["m"], display_name="Wrong", provider_secret="secret", created_by="tester")
+    # GraphStateStore decrypts payloads while loading, so wrong app_key fails at open time.
     with pytest.raises(Exception):
-        KeyManager(store2, store2.app_key).resolve_provider_secret(view.active_secret_ref)
+        GraphStateStore(path=prod_env / "graph.jsonl", app_key="different-graph-key-32-bytes-minimum")
 
 
 def test_key_rotate_changes_active_secret_ref(prod_env):

@@ -84,8 +84,12 @@ def default_persist_action(alert: dict[str, Any], graph_state: GraphStateStore) 
 class AlertEngine:
     def __init__(self, graph_state: GraphStateStore, rules: Iterable[AlertRule] | None = None, default_actions: Iterable[AlertAction] | None = None) -> None:
         self.graph_state = graph_state
-        self.rules = list(rules or default_rules())
-        self.default_actions = tuple(default_actions or (default_persist_action,))
+        # Preserve explicit empty rule sets while keeping built-in defaults when
+        # caller passes None.
+        self.rules = list(rules) if rules is not None else default_rules()
+        # Preserve explicit empty actions (evaluate-only mode) while keeping
+        # default persistence behavior when caller passes None.
+        self.default_actions = tuple(default_actions) if default_actions is not None else (default_persist_action,)
 
     def evaluate(self, events: list[dict[str, Any]], policy: dict[str, Any]) -> list[dict[str, Any]]:
         alerts: list[dict[str, Any]] = []

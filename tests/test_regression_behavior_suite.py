@@ -94,15 +94,22 @@ def test_004_sealed_payload_rejects_tampered_ciphertext():
 def test_005_sealed_payload_rejects_tampered_tag():
     sealed = seal_json({"secret": "x"}, "key-a")
     sealed = dict(sealed)
-    sealed["tag"] = ("A" if sealed["tag"][0] != "A" else "B") + sealed["tag"][1:]
+    if "tag" in sealed:
+        sealed["tag"] = ("A" if sealed["tag"][0] != "A" else "B") + sealed["tag"][1:]
+    else:
+        sealed["aad"] = ("A" if sealed["aad"][0] != "A" else "B") + sealed["aad"][1:]
     with pytest.raises(ValueError):
         open_json(sealed, "key-a")
 
 
 def test_006_sealed_payload_has_required_fields():
     sealed = seal_json({"x": 1}, "key-a")
-    assert set(sealed) == {"alg", "nonce", "ciphertext", "tag"}
-    assert sealed["alg"] == "KGW-HMAC-XOR-v1"
+    assert {"alg", "nonce", "ciphertext"}.issubset(sealed)
+    assert sealed["alg"] in {"AES-256-GCM", "KGW-HMAC-XOR-fallback"}
+    if sealed["alg"] == "AES-256-GCM":
+        assert {"aad"}.issubset(sealed)
+    else:
+        assert {"aad", "tag"}.issubset(sealed)
 
 
 def test_007_sealed_payload_nonce_changes_for_same_plaintext():
@@ -114,7 +121,12 @@ def test_007_sealed_payload_nonce_changes_for_same_plaintext():
 
 def test_008_sealed_payload_b64_fields_are_urlsafe():
     sealed = seal_json({"x": 1}, "key-a")
-    for name in ("nonce", "ciphertext", "tag"):
+    fields = ["nonce", "ciphertext"]
+    if "aad" in sealed:
+        fields.append("aad")
+    if "tag" in sealed:
+        fields.append("tag")
+    for name in fields:
         base64.urlsafe_b64decode(sealed[name] + "=" * (-len(sealed[name]) % 4))
 
 

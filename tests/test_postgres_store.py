@@ -35,11 +35,22 @@ def _policy() -> dict:
         },
         "model_keys": [{"id": "key:openai:prod", "provider": "openai", "models": ["gpt-4o-mini"], "secret_ref": "env://OPENAI_API_KEY", "quotas": {"hour": {"period": "hour", "max_requests": 100, "max_tokens": 100000, "max_usd": 100.0}}, "acl": {"mode": "scope", "namespace": "tenant:kogwistar"}}],
     }
+def _require_docker_daemon():
+    if importlib.util.find_spec("docker") is None:
+        pytest.skip("install with: pip install docker")
+    import docker
+    try:
+        client = docker.from_env()
+        client.ping()
+        client.close()
+    except Exception as exc:
+        pytest.skip(f"Docker daemon unavailable for testcontainers: {exc}")
 
 
 @pytest.fixture()
 def pg_store(monkeypatch):
     _require_testcontainers()
+    _require_docker_daemon()
     from testcontainers.postgres import PostgresContainer
 
     with PostgresContainer("postgres:16") as postgres:

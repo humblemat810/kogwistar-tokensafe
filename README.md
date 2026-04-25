@@ -23,8 +23,6 @@ Provider API key resolved inside gateway only
 ## Run in 1 minute
 
 ```bash
-unzip kogwistar_modelkeyguard_keycloak_graph_native_v2.zip
-cd modelkeyguard_keycloak
 export MODELKEYGUARD_GRAPH_KEY='dev-local-graph-encryption-key'
 ./scripts/init_graph.sh
 ./scripts/start_gateway.sh

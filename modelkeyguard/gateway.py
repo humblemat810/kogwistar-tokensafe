@@ -154,6 +154,9 @@ def _admin_html(views: list[Any]) -> str:
 def create_app(policy_path: str | Path = DEFAULT_POLICY):
     from fastapi import FastAPI, Header, Request as FastAPIRequest
     from fastapi.responses import HTMLResponse, JSONResponse, Response
+    # `from __future__ import annotations` stores this as a string; expose it in
+    # module globals so FastAPI can resolve `request: FastAPIRequest` correctly.
+    globals()["FastAPIRequest"] = FastAPIRequest
 
     settings = AppSettings.from_env()
     errors = settings.validate_for_startup()
