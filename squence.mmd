@@ -1,0 +1,34 @@
+sequenceDiagram
+    participant C as Client / LangChain / Agent
+    participant KC as Keycloak / Kogwistar Token Issuer
+    participant G as ModelKeyGuard Gateway
+    participant KG as Kogwistar Graph
+    participant S as Encrypted Secret Payload
+    participant P as Model Provider
+
+    C->>KC: Authenticate / request model token
+    KC-->>C: Short-lived token / kgw token
+
+    C->>G: POST /v1/chat/completions<br/>Authorization: Bearer kgw_token
+
+    G->>KG: Resolve token node
+    KG-->>G: principal, namespace, scopes, quota policy
+
+    G->>KG: Check ACL + namespace + quota
+    KG-->>G: allow / block / approval_required
+
+    alt blocked
+        G-->>C: 403 blocked
+        G->>KG: Append MODEL_CALL_BLOCKED event
+    else approval required
+        G-->>C: 202 approval required
+        G->>KG: Append MODEL_CALL_APPROVAL_REQUIRED event
+    else allowed
+        G->>S: Load encrypted provider key payload
+        S-->>G: ciphertext
+        G->>G: Decrypt with MODELKEYGUARD_GRAPH_KEY
+        G->>P: Forward request with real provider key
+        P-->>G: Model response
+        G->>KG: Append MODEL_CALL_COMPLETED event
+        G-->>C: OpenAI-compatible response
+    end

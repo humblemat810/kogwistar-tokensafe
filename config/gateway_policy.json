@@ -1,0 +1,121 @@
+{
+  "issuer": "keycloak:modelguard",
+  "users": {
+    "user:alice": {
+      "display_name": "Alice Example",
+      "quotas": {
+        "hour": {"period": "hour", "max_usd": 1.0, "max_tokens": 20000, "max_requests": 100},
+        "day": {"period": "day", "max_usd": 5.0, "max_tokens": 100000, "max_requests": 1000},
+        "month": {"period": "month", "max_usd": 50.0, "max_tokens": 1000000, "max_requests": 10000}
+      }
+    },
+    "user:bob": {
+      "display_name": "Bob Low Quota",
+      "quotas": {
+        "hour": {"period": "hour", "max_usd": 0.00001, "max_tokens": 10, "max_requests": 1}
+      }
+    }
+  },
+  "principal_quotas": {
+    "agent:doc-ingestor": {
+      "10s": {"period": "10s", "max_usd": 0.5, "max_tokens": 8000, "max_requests": 20},
+      "hour": {"period": "hour", "max_usd": 2.0, "max_tokens": 50000, "max_requests": 500}
+    },
+    "agent:batch-heavy": {
+      "10s": {"period": "10s", "max_usd": 0.00001, "max_tokens": 10, "max_requests": 1}
+    }
+  },
+  "local_tokens": {
+    "kgw_demo_doc_ingestor": {
+      "principal_id": "agent:doc-ingestor",
+      "kind": "agent",
+      "groups": ["agent-dev"],
+      "namespace": "tenant:kogwistar",
+      "on_behalf_of_user_id": "user:alice",
+      "scopes": ["model.invoke"],
+      "jti": "local-doc-ingestor"
+    },
+    "kgw_demo_low_user": {
+      "principal_id": "agent:doc-ingestor",
+      "kind": "agent",
+      "groups": ["agent-dev"],
+      "namespace": "tenant:kogwistar",
+      "on_behalf_of_user_id": "user:bob",
+      "scopes": ["model.invoke"],
+      "jti": "local-low-user"
+    },
+    "kgw_demo_principal_busy": {
+      "principal_id": "agent:batch-heavy",
+      "kind": "agent",
+      "groups": ["agent-dev"],
+      "namespace": "tenant:kogwistar",
+      "on_behalf_of_user_id": "user:alice",
+      "scopes": ["model.invoke"],
+      "jti": "local-principal-busy"
+    },
+    "kgw_demo_external": {
+      "principal_id": "agent:external-scraper",
+      "kind": "agent",
+      "groups": [],
+      "namespace": "tenant:other",
+      "scopes": ["model.invoke"],
+      "jti": "local-external"
+    }
+  },
+  "keycloak_clients": {
+    "langchain-agent": {
+      "principal_id": "agent:doc-ingestor",
+      "kind": "agent",
+      "groups": ["agent-dev"],
+      "namespace": "tenant:kogwistar",
+      "on_behalf_of_user_id": "user:alice",
+      "scopes": ["model.invoke"]
+    },
+    "external-agent": {
+      "principal_id": "agent:external-scraper",
+      "kind": "agent",
+      "groups": [],
+      "namespace": "tenant:other",
+      "scopes": ["model.invoke"]
+    }
+  },
+  "model_keys": [
+    {
+      "id": "key:openai:prod",
+      "provider": "openai",
+      "models": ["gpt-4o-mini", "gpt-5.3-mini", "gpt-5.3"],
+      "secret_ref": "env://OPENAI_API_KEY",
+      "display_name": "OpenAI production key",
+      "approval_threshold_usd": 2.0,
+      "quotas": {
+        "hour": {"period": "hour", "max_usd": 10.0, "max_tokens": 500000, "max_requests": 5000},
+        "month": {"period": "month", "max_usd": 200.0, "max_tokens": 10000000, "max_requests": 100000}
+      },
+      "acl": {
+        "mode": "scope",
+        "namespace": "tenant:kogwistar",
+        "created_by": "human:platform-admin",
+        "owner_id": "human:platform-admin"
+      }
+    }
+  ],
+  "model_price_per_1k_tokens_usd": {
+    "gpt-4o-mini": 0.001,
+    "gpt-5.3-mini": 0.003,
+    "gpt-5.3": 0.015
+  },
+  "usage_profiles": {
+    "agent:doc-ingestor": {
+      "description": "Summarize internal Kogwistar documents only",
+      "models": ["gpt-4o-mini", "gpt-5.3-mini"],
+      "system_prompt_hashes": ["a3900335840ba0aaa6dd1136f96fe4819c6a57ca4fe978f2984952dda9fc829a"],
+      "expected_system_prompt": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
+    },
+    "agent:batch-heavy": {
+      "description": "A deliberately tiny-principal-quota agent for tests",
+      "models": ["gpt-4o-mini"],
+      "system_prompt_hashes": ["a3900335840ba0aaa6dd1136f96fe4819c6a57ca4fe978f2984952dda9fc829a"],
+      "expected_system_prompt": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
+    }
+  }
+}

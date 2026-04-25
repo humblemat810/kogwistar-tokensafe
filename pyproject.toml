@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kogwistar-modelkeyguard-keycloak"
+version = "0.4.0"
+description = "Kogwistar ACL model-key gateway with Keycloak token verification"
+readme = "README.md"
+requires-python = ">=3.12"
+authors = [{name = "Kogwistar ModelKeyGuard"}]
+dependencies = ["kogwistar>=0.2.4"]
+
+[project.optional-dependencies]
+postgres = ["psycopg[binary]>=3.2"]
+testcontainers = ["pytest>=8", "testcontainers[postgresql]>=4.9", "psycopg[binary]>=3.2"]
+dev = ["pytest>=8"]
+
+[project.scripts]
+modelkeyguard = "modelkeyguard.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["modelkeyguard*"]
+
+[tool.pytest.ini_options]
+markers = [
+  "postgres: tests that require a disposable PostgreSQL container",
+]

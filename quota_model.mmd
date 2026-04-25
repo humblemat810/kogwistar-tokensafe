@@ -1,0 +1,20 @@
+flowchart TD
+    Principal["Principal node<br/>human / agent / service"]
+    Token["Issued token node<br/>kgw_tok_xxx / Keycloak jti"]
+    Namespace["Namespace node<br/>tenant/project/workflow"]
+    Scope["Scope node<br/>model.invoke"]
+    ModelKey["Model key node<br/>key:openai:gpt-5.3-prod"]
+    Secret["Encrypted secret payload node<br/>ciphertext only"]
+    Quota["Quota policy node<br/>usd/hour, tokens/hour, max per call"]
+    Usage["Usage event nodes<br/>append-only audit"]
+    Review["Review event nodes<br/>hourly sampled LLM review"]
+
+    Principal --> Token
+    Token --> Namespace
+    Token --> Scope
+    Token --> Quota
+    Scope --> ModelKey
+    ModelKey --> Secret
+    ModelKey --> Namespace
+    Token --> Usage
+    Usage --> Review
