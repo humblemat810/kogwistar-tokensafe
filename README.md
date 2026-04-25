@@ -416,3 +416,83 @@ Gateway responsibilities:
 verify token -> resolve graph principal -> ACL decision -> quota projection check
 -> encrypted key resolution -> provider forwarding/dry-run -> append access + usage graph events
 ```
+
+---
+
+## Production-ready secure key management update
+
+This bundle now includes a FastAPI gateway with a secure key-management surface:
+
+- `_FILE` secret loading for Docker secrets and remote deployments
+- sealed graph payloads for provider keys
+- create / rotate / revoke key lifecycle events
+- `/admin/keys` management page that never renders raw provider keys
+- `/admin/keys.json` safe metadata API
+- OpenAI-compatible `/v1/chat/completions` endpoint
+- one-minute LangChain/OpenAI-compatible client demo
+- production-oriented Docker Compose with Keycloak + Postgres + gateway
+
+See [`docs_production.md`](docs_production.md).
+
+### One-minute E2E client demo
+
+Terminal 1:
+
+```bash
+./scripts/bootstrap_secrets.sh
+MODELKEYGUARD_DRY_RUN=1 ./scripts/start_gateway.sh
+```
+
+Terminal 2:
+
+```bash
+./scripts/one_minute_e2e_demo.sh
+```
+
+This second script behaves like a normal OpenAI/LangChain client:
+
+```bash
+OPENAI_BASE_URL=http://127.0.0.1:8789/v1
+OPENAI_API_KEY=kgw_demo_doc_ingestor
+```
+
+The gateway receives the Kogwistar token, checks graph ACL/quota, decrypts only inside the server when needed, and returns an OpenAI-compatible response.
+
+### Manage keys securely
+
+Open:
+
+```text
+http://127.0.0.1:8789/admin/keys
+```
+
+Raw keys are accepted only through password fields. They are sealed into graph payloads and are never shown back in HTML, JSON, audit logs, or graph plaintext.
+
+### Tests
+
+The bundle now has more than 170 tests, including the production-readiness/key-management tests plus an extended alert and LLM-review regression suite.
+
+```bash
+pip install -e ".[dev]"
+pytest
+```
+
+## Alert and LLM-review quick start
+
+Run a one-off review over the gateway audit log:
+
+```bash
+./scripts/alert_review_once.sh
+```
+
+The review worker emits graph-native alert/review state:
+
+```text
+ALERT_RAISED
+LLM_USAGE_REVIEWED
+MODEL_USAGE_REVIEW_BATCH_COMPLETED
+```
+
+Built-in rules detect high denial rate, system-prompt signature mismatch, quota exhaustion, and usage-profile model violations. Rules are installable as `condition(ctx, events, policy)` + `action(alert, graph_state)` callbacks, so production can later plug in Slack, PagerDuty, email, ticketing, or Kogwistar approval callbacks.
+
+For the full tutorial ladder, see `docs_production.md`.

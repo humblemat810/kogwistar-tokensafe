@@ -23,7 +23,7 @@ def main() -> int:
         serve(args.host, args.port, args.policy)
         return 0
     if args.cmd == "review-once":
-        return review_main()
+        return review_main(rest)
     if args.cmd == "scenario":
         return cli_main(["scenario"] + rest)
     if args.cmd == "init-graph":

@@ -3,77 +3,49 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import random
 import time
-from collections import Counter, defaultdict
 from pathlib import Path
 from typing import Any
 
+from .alert_rules import AlertEngine, LLMUsageReviewer, load_jsonl
 from .graph_state import GraphStateStore
 
 
-def load_jsonl(path: Path) -> list[dict[str, Any]]:
-    if not path.exists():
-        return []
-    rows = []
-    for line in path.read_text().splitlines():
-        if line.strip():
-            rows.append(json.loads(line))
-    return rows
-
-
-def review_once(audit_path: Path, policy_path: Path, out_path: Path, sample_size: int = 20) -> dict[str, Any]:
-    policy = json.loads(policy_path.read_text())
+def review_once(audit_path: Path, policy_path: Path, out_path: Path, sample_size: int = 200, run_llm_review: bool = True) -> dict[str, Any]:
+    policy = json.loads(policy_path.read_text(encoding="utf-8"))
     events = load_jsonl(audit_path)
-    sample = random.sample(events, min(sample_size, len(events))) if events else []
-    findings = []
-    by_principal = defaultdict(list)
-    for e in events:
-        by_principal[e.get("principal_id")].append(e)
-    for principal, rows in by_principal.items():
-        profile = policy.get("usage_profiles", {}).get(principal, {})
-        expected_models = set(profile.get("models", []))
-        expected_hashes = set(profile.get("system_prompt_hashes", []))
-        reasons = Counter(r.get("reason") for r in rows)
-        bad_models = sorted({r.get("model") for r in rows if expected_models and r.get("model") not in expected_models})
-        bad_hashes = sorted({r.get("system_prompt_hash") for r in rows if expected_hashes and r.get("system_prompt_hash") not in expected_hashes})
-        blocked = sum(1 for r in rows if r.get("decision") == "BLOCKED")
-        if bad_models or bad_hashes or blocked:
-            findings.append({
-                "principal_id": principal,
-                "severity": "high" if bad_hashes else "medium",
-                "bad_models": bad_models,
-                "bad_system_prompt_hashes": bad_hashes,
-                "blocked_count": blocked,
-                "top_reasons": reasons.most_common(5),
-            })
+    if sample_size and len(events) > sample_size:
+        events = events[-sample_size:]
+    graph = GraphStateStore.from_policy(policy)
+    alerts = AlertEngine(graph).evaluate(events, policy)
+    reviews = LLMUsageReviewer(graph).review(events, policy) if run_llm_review else []
     result = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "event_type": "MODEL_CALL_REVIEWED",
+        "event_type": "MODEL_USAGE_REVIEW_BATCH_COMPLETED",
         "events_seen": len(events),
-        "events_sampled": len(sample),
-        "findings": findings,
-        "llm_review_note": "Set REVIEW_LLM_BASE_URL and REVIEW_LLM_API_KEY to add an external LLM reviewer; hard-rule review ran locally.",
+        "alerts": alerts,
+        "reviews": reviews,
+        "llm_review_note": "Default reviewer is deterministic. Inject LLMUsageReviewer(review_callback=...) or wire REVIEW_LLM_* to call an external LLM.",
     }
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with out_path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(result, sort_keys=True) + "\n")
-    graph = GraphStateStore.from_policy(policy)
-    review_id = f"review:{int(time.time())}"
-    graph.put_node(review_id, "review_result", result)
-    graph.append_event("MODEL_CALL_REVIEWED", review_id, result)
+    graph.put_node(f"review_batch:{int(time.time())}", "review_batch", result)
+    graph.append_event("MODEL_USAGE_REVIEW_BATCH_COMPLETED", "review_worker", result)
     return result
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--audit", default=os.getenv("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl"))
-    p.add_argument("--policy", default="config/gateway_policy.json")
+    p.add_argument("--policy", default=os.getenv("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json"))
     p.add_argument("--out", default="out/review_results.jsonl")
+    p.add_argument("--sample-size", type=int, default=200)
+    p.add_argument("--no-llm-review", action="store_true")
     p.add_argument("--loop", action="store_true", help="run once per hour")
-    args = p.parse_args()
+    args = p.parse_args(argv)
     while True:
-        result = review_once(Path(args.audit), Path(args.policy), Path(args.out))
+        result = review_once(Path(args.audit), Path(args.policy), Path(args.out), args.sample_size, not args.no_llm_review)
         print(json.dumps(result, indent=2))
         if not args.loop:
             return 0

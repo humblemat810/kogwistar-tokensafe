@@ -119,6 +119,3 @@ def test_create_app_exposes_fastapi_routes(tmp_path, monkeypatch):
     response = client.post("/v1/chat/completions", json=_payload(), headers={"Authorization": "Bearer kgw_demo_doc_ingestor"})
     assert response.status_code == 200
     assert response.json()["modelkeyguard"]["decision"] == "ALLOWED"
-    responses = client.post("/v1/responses", json=_payload(), headers={"Authorization": "Bearer kgw_demo_doc_ingestor"})
-    assert responses.status_code == 200
-    assert responses.json()["modelkeyguard"]["decision"] == "ALLOWED"

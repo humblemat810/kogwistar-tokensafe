@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - modelguard_pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U modelguard -d modelguard"]
       interval: 5s
@@ -24,7 +24,6 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      # Keycloak can use the same Postgres container for a closer production shape.
       KC_DB: postgres
       KC_DB_URL: jdbc:postgresql://postgres:5432/modelguard
       KC_DB_USERNAME: modelguard
@@ -33,6 +32,42 @@ services:
       - "8080:8080"
     volumes:
       - ./keycloak/modelguard-realm.json:/opt/keycloak/data/import/modelguard-realm.json:ro
+      - ./data/keycloak:/opt/keycloak/data/h2
 
-volumes:
-  modelguard_pgdata:
+  gateway:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_started
+    env_file: .env.example
+    environment:
+      MODELKEYGUARD_ENV: local
+      MODELKEYGUARD_STORE: postgres
+      MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard
+      MODELKEYGUARD_HOST: 0.0.0.0
+      MODELKEYGUARD_PORT: 8789
+      MODELKEYGUARD_DRY_RUN: "1"
+      MODELKEYGUARD_AUTH_MODE: local_or_keycloak
+      MODELKEYGUARD_GRAPH_KEY_FILE: /run/secrets/modelkeyguard_graph_key
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: modelguard
+      KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE: /run/secrets/keycloak_client_secret
+      MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE: /run/secrets/openai_provider_key
+    secrets:
+      - modelkeyguard_graph_key
+      - keycloak_client_secret
+      - openai_provider_key
+    ports:
+      - "8789:8789"
+    volumes:
+      - ./out:/app/out
+
+secrets:
+  modelkeyguard_graph_key:
+    file: ./secrets/modelkeyguard_graph_key
+  keycloak_client_secret:
+    file: ./secrets/keycloak_client_secret
+  openai_provider_key:
+    file: ./secrets/openai_provider_key
