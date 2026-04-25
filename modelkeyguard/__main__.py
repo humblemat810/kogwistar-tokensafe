@@ -5,6 +5,7 @@ from .gateway import serve
 from .review_worker import main as review_main
 from .cli import main as cli_main
 from .graph_tools import init_graph, inspect_graph
+from .registration import main as registration_main
 
 
 def main() -> int:
@@ -18,6 +19,7 @@ def main() -> int:
     sub.add_parser("scenario")
     sub.add_parser("init-graph")
     sub.add_parser("inspect-graph")
+    sub.add_parser("registration")
     args, rest = p.parse_known_args()
     if args.cmd == "gateway":
         serve(args.host, args.port, args.policy)
@@ -30,6 +32,8 @@ def main() -> int:
         return init_graph()
     if args.cmd == "inspect-graph":
         return inspect_graph()
+    if args.cmd == "registration":
+        return registration_main(rest)
     p.print_help()
     return 2
 

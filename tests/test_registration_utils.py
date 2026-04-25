@@ -1,0 +1,108 @@
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from modelkeyguard.gateway import build_guard, process_chat_completion
+from modelkeyguard.graph_state import GraphStateStore
+from modelkeyguard.registration import RegistrationService, register_usage_demo, safe_token_hash
+from modelkeyguard.token_auth import TokenVerifier
+
+EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
+
+
+def payload(max_tokens=16):
+    return {
+        "model": "gpt-4o-mini",
+        "messages": [
+            {"role": "system", "content": EXPECTED_SYSTEM},
+            {"role": "user", "content": "Prove this registered token works."},
+        ],
+        "max_tokens": max_tokens,
+    }
+
+
+def test_register_user_principal_application_quota_and_safe_token(tmp_path):
+    store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
+    reg = RegistrationService(store)
+    reg.register_user("user:test", "Test User")
+    reg.register_application("app:test", "Test App")
+    reg.register_principal("agent:test", kind="agent", groups=["agent-dev"], namespace="tenant:kogwistar", application_id="app:test")
+    reg.set_quota("principal", "agent:test", "hour", period="hour", max_tokens=1000, max_requests=10)
+    reg.set_quota("user", "user:test", "hour", period="hour", max_tokens=1000, max_requests=10)
+    issued = reg.issue_safe_token(principal_id="agent:test", namespace="tenant:kogwistar", on_behalf_of_user_id="user:test", application_id="app:test")
+
+    token_node = store.nodes[issued.token_node_id]
+    assert token_node.payload["safe_token_hash"] == safe_token_hash(issued.token)
+    assert "token" not in token_node.payload
+    assert issued.token not in (tmp_path / "graph.jsonl").read_text(encoding="utf-8")
+    assert any(e.kind == "AUTHENTICATES_AS" and e.target == "agent:test" for e in store.edges_from(issued.token_node_id))
+    assert any(e.kind == "ON_BEHALF_OF" and e.target == "user:test" for e in store.edges_from(issued.token_node_id))
+
+
+def test_safe_token_verifier_infers_principal_user_and_application(tmp_path, monkeypatch):
+    graph_path = tmp_path / "graph.jsonl"
+    token = register_usage_demo(graph_path, "demo-test-key").token
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
+
+    verified = TokenVerifier("config/gateway_policy.json").verify_token(token)
+
+    assert verified.principal_id == "agent:demo-saas-agent"
+    assert verified.on_behalf_of_user_id == "user:demo-saas-alice"
+    assert verified.namespace == "tenant:kogwistar"
+    assert "model.invoke" in verified.scopes
+
+
+def test_registered_safe_token_end_to_end_openai_compatible_call(tmp_path, monkeypatch):
+    graph_path = tmp_path / "graph.jsonl"
+    token = register_usage_demo(graph_path, "demo-test-key").token
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+
+    guard, policy = build_guard("config/gateway_policy.json")
+    verifier = TokenVerifier("config/gateway_policy.json")
+    status, data, _headers = process_chat_completion(payload(), f"Bearer {token}", guard, policy, verifier, source_ip="127.0.0.1")
+
+    assert status == 200
+    assert data["modelkeyguard"]["decision"] == "ALLOWED"
+    assert "agent:demo-saas-agent" in data["choices"][0]["message"]["content"]
+
+    store = GraphStateStore(graph_path, app_key="demo-test-key")
+    assert store.get_quota_used("principal", "agent:demo-saas-agent", "hour")["requests"] == 1
+    assert store.get_quota_used("user", "user:demo-saas-alice", "hour")["requests"] == 1
+    assert any(n.kind == "usage_lane_head" and n.payload["subject_id"] == "user:demo-saas-alice" for n in store.nodes.values())
+
+
+def test_registration_summary_contains_expected_objects(tmp_path):
+    graph_path = tmp_path / "graph.jsonl"
+    token = register_usage_demo(graph_path, "demo-test-key").token
+    store = GraphStateStore(graph_path, app_key="demo-test-key")
+    out = tmp_path / "summary.json"
+    RegistrationService(store).write_usage_summary(out)
+    summary = json.loads(out.read_text(encoding="utf-8"))
+    assert "user:demo-saas-alice" in summary["users"]
+    assert "agent:demo-saas-agent" in summary["principals"]
+    assert "app:demo-saas" in summary["applications"]
+    assert token not in graph_path.read_text(encoding="utf-8")
+
+
+def test_registered_user_quota_can_return_user_429(tmp_path, monkeypatch):
+    graph_path = tmp_path / "graph.jsonl"
+    token = register_usage_demo(graph_path, "demo-test-key").token
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+
+    # Tighten registered user's hour quota after demo registration.
+    store = GraphStateStore(graph_path, app_key="demo-test-key")
+    RegistrationService(store).set_quota("user", "user:demo-saas-alice", "tiny", period="hour", max_tokens=1, max_requests=1)
+
+    guard, policy = build_guard("config/gateway_policy.json")
+    verifier = TokenVerifier("config/gateway_policy.json")
+    status, data, _headers = process_chat_completion(payload(max_tokens=16), f"Bearer {token}", guard, policy, verifier, source_ip="127.0.0.1")
+
+    assert status == 429
+    assert data["error"]["message"] == "user_quota_exceeded"

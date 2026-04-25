@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import time
@@ -66,8 +67,13 @@ class TokenVerifier:
 
     def _verify_local_token(self, token: str) -> TokenPrincipal | None:
         # Graph-native lookup: token node -> AUTHENTICATES_AS edge -> principal node.
+        # Production safe tokens are stored hash-only; legacy local demo tokens may
+        # still keep a plaintext token in graph payload for compatibility.
+        token_hash = "sha256:" + hashlib.sha256(token.encode("utf-8")).hexdigest()
         for node in self.graph_state.nodes.values():
-            if node.kind != "auth_token" or node.payload.get("token") != token:
+            if node.kind != "auth_token":
+                continue
+            if node.payload.get("token") != token and node.payload.get("safe_token_hash") != token_hash:
                 continue
             exp = node.payload.get("expires_at_epoch")
             if exp is not None and int(exp) < int(time.time()):

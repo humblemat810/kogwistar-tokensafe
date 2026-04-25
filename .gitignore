@@ -38,6 +38,3 @@ Thumbs.db
 
 # Project runtime artifacts
 out/
-
-# Bundle
-*chatgpt.zip

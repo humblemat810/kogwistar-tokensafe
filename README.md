@@ -494,3 +494,40 @@ MODEL_USAGE_REVIEW_BATCH_COMPLETED
 Built-in rules detect high denial rate, system-prompt signature mismatch, quota exhaustion, and usage-profile model violations. Rules are installable as `condition(ctx, events, policy)` + `action(alert, graph_state)` callbacks, so production can later plug in Slack, PagerDuty, email, ticketing, or Kogwistar approval callbacks.
 
 For the full tutorial ladder, see `docs_production.md`.
+
+## SaaS usage registration quick start
+
+This bundle includes graph-native registration utilities for the common SaaS path:
+
+```text
+create user -> create application/principal -> attach quota -> issue safe token -> call OpenAI-compatible gateway -> inspect quota/audit graph
+```
+
+Run the registration example:
+
+```bash
+./scripts/register_usage_example.sh
+```
+
+Start the gateway against that registered graph:
+
+```bash
+MODELKEYGUARD_GRAPH_PATH=out/registration_demo_graph.jsonl \
+MODELKEYGUARD_GRAPH_KEY=dev-registration-demo-key-change-me \
+MODELKEYGUARD_DRY_RUN=1 \
+./scripts/start_gateway.sh
+```
+
+In another terminal, call it like an OpenAI-compatible client:
+
+```bash
+KGW_TOKEN=$(cat out/registration_demo_token.txt) ./scripts/test_chat.sh
+```
+
+Or run the combined demo:
+
+```bash
+./scripts/register_and_run_usage_demo.sh
+```
+
+See `docs_usage_registration.md` for the tutorial and individual registration commands.
