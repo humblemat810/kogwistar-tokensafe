@@ -4,6 +4,7 @@ import argparse
 import json
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -11,9 +12,23 @@ from .alert_rules import AlertEngine, LLMUsageReviewer, load_jsonl
 from .graph_state import GraphStateStore
 
 
-def review_once(audit_path: Path, policy_path: Path, out_path: Path, sample_size: int = 200, run_llm_review: bool = True) -> dict[str, Any]:
+def review_once(
+    audit_path: Path,
+    policy_path: Path,
+    out_path: Path,
+    sample_size: int = 200,
+    run_llm_review: bool = True,
+    lookback_minutes: int | None = None,
+    checkpoint_path: Path | None = None,
+) -> dict[str, Any]:
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     events = load_jsonl(audit_path)
+    checkpoint_ts = _load_checkpoint_ts(checkpoint_path) if checkpoint_path else None
+    if lookback_minutes:
+        since = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
+        events = [e for e in events if _parse_ts(e.get("ts")) >= since]
+    if checkpoint_ts:
+        events = [e for e in events if _parse_ts(e.get("ts")) > checkpoint_ts]
     if sample_size and len(events) > sample_size:
         events = events[-sample_size:]
     graph = GraphStateStore.from_policy(policy)
@@ -32,6 +47,8 @@ def review_once(audit_path: Path, policy_path: Path, out_path: Path, sample_size
         f.write(json.dumps(result, sort_keys=True) + "\n")
     graph.put_node(f"review_batch:{int(time.time())}", "review_batch", result)
     graph.append_event("MODEL_USAGE_REVIEW_BATCH_COMPLETED", "review_worker", result)
+    if checkpoint_path and events:
+        _save_checkpoint_ts(checkpoint_path, max(_parse_ts(e.get("ts")) for e in events))
     return result
 
 
@@ -39,17 +56,61 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--audit", default=os.getenv("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl"))
     p.add_argument("--policy", default=os.getenv("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json"))
-    p.add_argument("--out", default="out/review_results.jsonl")
-    p.add_argument("--sample-size", type=int, default=200)
+    p.add_argument("--out", default=os.getenv("MODELKEYGUARD_REVIEW_OUT", "out/review_results.jsonl"))
+    p.add_argument("--sample-size", type=int, default=int(os.getenv("MODELKEYGUARD_REVIEW_SAMPLE_SIZE", "200")))
     p.add_argument("--no-llm-review", action="store_true")
-    p.add_argument("--loop", action="store_true", help="run once per hour")
+    p.add_argument("--lookback-minutes", type=int, default=int(os.getenv("MODELKEYGUARD_REVIEW_LOOKBACK_MINUTES", "0")) or None)
+    p.add_argument("--checkpoint", default=os.getenv("MODELKEYGUARD_REVIEW_CHECKPOINT_PATH"), help="optional checkpoint JSON file path for incremental review")
+    p.add_argument("--loop", action="store_true", help="run repeatedly with interval")
+    p.add_argument("--interval-seconds", type=int, default=int(os.getenv("MODELKEYGUARD_REVIEW_INTERVAL_SECONDS", "3600")))
     args = p.parse_args(argv)
     while True:
-        result = review_once(Path(args.audit), Path(args.policy), Path(args.out), args.sample_size, not args.no_llm_review)
+        result = review_once(
+            Path(args.audit),
+            Path(args.policy),
+            Path(args.out),
+            args.sample_size,
+            not args.no_llm_review,
+            lookback_minutes=args.lookback_minutes,
+            checkpoint_path=Path(args.checkpoint) if args.checkpoint else None,
+        )
         print(json.dumps(result, indent=2))
         if not args.loop:
             return 0
-        time.sleep(3600)
+        time.sleep(max(1, args.interval_seconds))
+
+
+def _parse_ts(value: Any) -> datetime:
+    if not value:
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+    text = str(value)
+    if text.endswith("Z"):
+        text = text[:-1] + "+00:00"
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError:
+        return datetime.fromtimestamp(0, tz=timezone.utc)
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _load_checkpoint_ts(path: Path) -> datetime | None:
+    if not path.exists():
+        return None
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    value = payload.get("last_ts")
+    if not value:
+        return None
+    return _parse_ts(value)
+
+
+def _save_checkpoint_ts(path: Path, ts: datetime) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"last_ts": ts.isoformat().replace("+00:00", "Z")}, sort_keys=True), encoding="utf-8")
 
 if __name__ == "__main__":
     raise SystemExit(main())

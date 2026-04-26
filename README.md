@@ -499,6 +499,32 @@ http://127.0.0.1:8789/admin/keys
 
 Raw keys are accepted only through password fields. They are sealed into graph payloads and are never shown back in HTML, JSON, audit logs, or graph plaintext.
 
+### Usage Ops and security monitoring
+
+New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and keep one shared governance flow internally.
+
+- `GET /admin/usage` interactive usage monitor page
+- `GET /admin/usage.json` filtered usage dataset API
+- `POST /admin/review/run` manual/scheduled review trigger (`sample_size`, `lookback_minutes`, `checkpoint_path`)
+- `POST /admin/security-events` host security event intake (shared-secret protected)
+
+Example security-event intake settings:
+
+```bash
+export SECURITY_EVENT_SHARED_SECRET=change-me
+export ADMIN_WATCH_USERS=azureuser,opsadmin
+export ADMIN_SECURITY_EVENT_LOG_PATH=out/admin_security_events.jsonl
+```
+
+Host-side watcher (run on the machine host, outside Docker, to capture SSH/sudo):
+
+```bash
+python scripts/host_admin_login_watcher.py \
+  --gateway-url http://127.0.0.1:8789 \
+  --secret "$SECURITY_EVENT_SHARED_SECRET" \
+  --watch-users "$ADMIN_WATCH_USERS"
+```
+
 ### Tests
 
 The bundle now has more than 170 tests, including the production-readiness/key-management tests plus an extended alert and LLM-review regression suite.
@@ -524,7 +550,7 @@ LLM_USAGE_REVIEWED
 MODEL_USAGE_REVIEW_BATCH_COMPLETED
 ```
 
-Built-in rules detect high denial rate, system-prompt signature mismatch, quota exhaustion, and usage-profile model violations. Rules are installable as `condition(ctx, events, policy)` + `action(alert, graph_state)` callbacks, so production can later plug in Slack, PagerDuty, email, ticketing, or Kogwistar approval callbacks.
+Built-in rules detect high denial rate, deny spikes, system-prompt signature mismatch, quota exhaustion, usage-profile model violations, token-exfiltration patterns, intent drift, and sudden model-distribution shifts. Rules are installable as `condition(ctx, events, policy)` + `action(alert, graph_state)` callbacks, so production can later plug in Slack, PagerDuty, email, ticketing, or Kogwistar approval callbacks.
 
 For the full tutorial ladder, see `docs_production.md`.
 

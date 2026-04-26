@@ -188,11 +188,102 @@ def default_rules() -> list[AlertRule]:
         bad = sorted({r.get("model") for r in ctx["events"] if r.get("model") and r.get("model") not in expected})
         return Alert("usage_profile_model_violation", "high", ctx["subject_type"], ctx["subject_id"], "model usage violates assigned usage profile", {"unexpected_models": bad, "expected_models": sorted(expected)})
 
+    def token_exfiltration_condition(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> bool:
+        return any(bool((r.get("prompt_heuristics") or {}).get("token_exfiltration_attempt")) for r in ctx["events"])
+
+    def token_exfiltration_alert(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> Alert:
+        rows = [r for r in ctx["events"] if bool((r.get("prompt_heuristics") or {}).get("token_exfiltration_attempt"))]
+        signals = Counter(
+            s
+            for r in rows
+            for s in ((r.get("prompt_heuristics") or {}).get("token_exfiltration_signals") or [])
+            if isinstance(s, str)
+        ).most_common(10)
+        return Alert(
+            "token_exfiltration_attempt",
+            "high",
+            ctx["subject_type"],
+            ctx["subject_id"],
+            "potential token/secret extraction attempt observed",
+            {"count": len(rows), "signals": signals},
+        )
+
+    def intent_drift_condition(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> bool:
+        return any(bool((r.get("prompt_heuristics") or {}).get("intent_drift")) for r in ctx["events"])
+
+    def intent_drift_alert(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> Alert:
+        rows = [r for r in ctx["events"] if bool((r.get("prompt_heuristics") or {}).get("intent_drift"))]
+        disallowed = Counter(
+            i
+            for r in rows
+            for i in ((r.get("prompt_heuristics") or {}).get("disallowed_intents") or [])
+            if isinstance(i, str)
+        ).most_common(10)
+        return Alert(
+            "intent_drift",
+            "high",
+            ctx["subject_type"],
+            ctx["subject_id"],
+            "usage intent drift from configured profile detected",
+            {"count": len(rows), "disallowed_intents": disallowed},
+        )
+
+    def sudden_model_shift_condition(ctx: dict[str, Any], _events: list[dict[str, Any]], policy: dict[str, Any]) -> bool:
+        rows = [r for r in ctx["events"] if r.get("model")]
+        threshold = int(policy.get("alert_rules", {}).get("model_shift_min_events", 8))
+        if len(rows) < threshold:
+            return False
+        mid = len(rows) // 2
+        first = Counter(str(r.get("model")) for r in rows[:mid]).most_common(1)
+        second = Counter(str(r.get("model")) for r in rows[mid:]).most_common(1)
+        return bool(first and second and first[0][0] != second[0][0])
+
+    def sudden_model_shift_alert(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> Alert:
+        rows = [r for r in ctx["events"] if r.get("model")]
+        mid = len(rows) // 2
+        first = Counter(str(r.get("model")) for r in rows[:mid]).most_common(1)
+        second = Counter(str(r.get("model")) for r in rows[mid:]).most_common(1)
+        return Alert(
+            "sudden_model_shift",
+            "medium",
+            ctx["subject_type"],
+            ctx["subject_id"],
+            "subject model distribution shifted abruptly",
+            {"from_model": first[0][0] if first else None, "to_model": second[0][0] if second else None, "events": len(rows)},
+        )
+
+    def deny_spike_condition(ctx: dict[str, Any], _events: list[dict[str, Any]], policy: dict[str, Any]) -> bool:
+        rows = ctx["events"][-10:]
+        min_events = int(policy.get("alert_rules", {}).get("deny_spike_min_events", 5))
+        if len(rows) < min_events:
+            return False
+        ratio = len(_denied_rows(rows)) / max(1, len(rows))
+        threshold = float(policy.get("alert_rules", {}).get("deny_spike_ratio", 0.6))
+        return ratio >= threshold
+
+    def deny_spike_alert(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> Alert:
+        rows = ctx["events"][-10:]
+        denied = _denied_rows(rows)
+        ratio = round(len(denied) / max(1, len(rows)), 4)
+        reasons = Counter(str(r.get("reason")) for r in denied).most_common(5)
+        return Alert(
+            "deny_spike",
+            "medium",
+            ctx["subject_type"],
+            ctx["subject_id"],
+            "recent deny ratio spiked",
+            {"window": len(rows), "denied": len(denied), "ratio": ratio, "top_reasons": reasons},
+        )
+
     return [
         AlertRule("high_denial_rate", "Raise when denied/blocked requests exceed threshold", "medium", high_denial_condition, high_denial_alert),
+        AlertRule("deny_spike", "Raise when recent deny ratio spikes", "medium", deny_spike_condition, deny_spike_alert),
         AlertRule("system_prompt_signature_mismatch", "Raise when system prompt hash mismatches profile", "high", prompt_mismatch_condition, prompt_mismatch_alert),
         AlertRule("quota_exhausted", "Raise on principal/user/key quota exhaustion", "medium", quota_condition, quota_alert),
         AlertRule("usage_profile_model_violation", "Raise on unexpected model for profile", "high", unexpected_model_condition, unexpected_model_alert),
+        AlertRule("token_exfiltration_attempt", "Raise on token/secret extraction attempt patterns", "high", token_exfiltration_condition, token_exfiltration_alert),
+        AlertRule("intent_drift", "Raise when observed intent drifts from configured profile intent", "high", intent_drift_condition, intent_drift_alert),
+        AlertRule("sudden_model_shift", "Raise when model usage shifts abruptly", "medium", sudden_model_shift_condition, sudden_model_shift_alert),
     ]
 
 
@@ -241,19 +332,34 @@ class LLMUsageReviewer:
                 "decisions": Counter(str(r.get("decision")) for r in rows).most_common(),
                 "reasons": Counter(str(r.get("reason")) for r in rows).most_common(10),
                 "models": Counter(str(r.get("model")) for r in rows if r.get("model")).most_common(10),
+                "intents": Counter(
+                    i
+                    for r in rows
+                    for i in ((r.get("prompt_heuristics") or {}).get("observed_intents") or [])
+                    if isinstance(i, str)
+                ).most_common(10),
             },
         }
 
     @staticmethod
     def default_review_callback(payload: dict[str, Any]) -> dict[str, Any]:
         reasons = dict(payload.get("aggregates", {}).get("reasons", []))
+        intents = dict(payload.get("aggregates", {}).get("intents", []))
         risk = "low"
         rec = "continue_monitoring"
         findings: list[str] = []
+        labels: list[str] = []
         if reasons.get("system_prompt_signature_mismatch", 0):
-            risk = "high"; rec = "investigate_and_consider_revocation"; findings.append("system prompt signature mismatch observed")
+            risk = "high"; rec = "investigate_and_consider_revocation"; findings.append("system prompt signature mismatch observed"); labels.append("prompt-mismatch")
+        if reasons.get("token_exfiltration_attempt", 0):
+            risk = "high"; rec = "investigate_and_consider_revocation"; findings.append("token extraction signals observed"); labels.append("token-exfil")
+        if reasons.get("intent_drift", 0) or intents.get("coding", 0):
+            if risk != "high":
+                risk = "medium"; rec = "review_profile_and_intent_scope"
+            findings.append("intent drift observed"); labels.append("intent-drift")
         if reasons.get("principal_capacity_exceeded", 0) or reasons.get("user_quota_exceeded", 0):
             if risk != "high":
                 risk = "medium"; rec = "review_quota_or_possible_token_leak"
             findings.append("quota or capacity exceeded")
-        return {"risk": risk, "recommended_action": rec, "findings": findings, "reviewer": "deterministic-local-callback"}
+            labels.append("quota")
+        return {"risk": risk, "recommended_action": rec, "findings": findings, "labels": sorted(set(labels)), "reviewer": "deterministic-local-callback"}

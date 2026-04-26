@@ -13,6 +13,7 @@ from .core import ModelKey, ModelKeyGuard, Principal, Request as GuardRequest
 from .graph_state import GraphStateStore
 from .key_manager import KeyLifecycleError, KeyManager, html_escape
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
+from .services import derive_prompt_heuristics
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
 
@@ -324,9 +325,15 @@ def process_chat_completion(
     system_prompt = extract_system_prompt(messages) if isinstance(messages, list) else ""
     system_hash = sha256_text(system_prompt) if system_prompt else None
     profile = policy.get("usage_profiles", {}).get(principal_token.principal_id, {})
-    expected_hashes = set(profile.get("system_prompt_hashes", []))
+    profile_data = profile if isinstance(profile, dict) else {}
+    prompt_heuristics = derive_prompt_heuristics(payload, profile_data)
+    application_id = principal_token.principal_id if principal_token.principal_id.startswith(("app:", "service:")) else None
+    expected_hashes = set(profile_data.get("system_prompt_hashes", []))
     if expected_hashes and system_hash not in expected_hashes:
         event = build_base_event(principal_token, payload, key_id, "BLOCKED", "system_prompt_signature_mismatch", system_hash, source_ip)
+        event["provider"] = provider
+        event["application_id"] = application_id
+        event["prompt_heuristics"] = prompt_heuristics
         append_audit(event)
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(event["request_id"], "ACL_DECISION_DENY", event)
@@ -358,6 +365,8 @@ def process_chat_completion(
             "acl_reason": decision.acl_reason,
             "remaining": decision.remaining,
             "provider": provider,
+            "application_id": application_id,
+            "prompt_heuristics": prompt_heuristics,
         }
     )
     append_audit(event)
@@ -411,8 +420,18 @@ def _admin_html(views: list[Any]) -> str:
 
 
 def create_app(policy_path: str | Path = DEFAULT_POLICY):
-    from fastapi import FastAPI, Header, Request as FastAPIRequest
-    from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+    from fastapi import FastAPI, Request as FastAPIRequest
+    from fastapi.responses import JSONResponse, Response, StreamingResponse
+
+    from .routers import (
+        create_admin_keys_router,
+        create_admin_security_router,
+        create_admin_usage_router,
+        create_provider_azure_router,
+        create_provider_gemini_router,
+        create_provider_ollama_router,
+        create_provider_openai_router,
+    )
 
     # `from __future__ import annotations` stores this as a string; expose it in
     # module globals so FastAPI can resolve `request: FastAPIRequest` correctly.
@@ -453,6 +472,17 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                             seen.add(m)
         return {"object": "list", "data": items}
 
+    provider_adapters: dict[str, ProviderAdapter] = {
+        "openai": OpenAIAdapter(),
+        "azure_openai": AzureOpenAIAdapter(),
+        "ollama": OllamaAdapter(),
+    }
+
+    def _resolve_adapter(provider: str, stream: bool = False) -> ProviderAdapter | None:
+        if provider == "gemini":
+            return GeminiAdapter(stream=stream)
+        return provider_adapters.get(provider)
+
     async def _load_json_body(request: FastAPIRequest) -> tuple[dict[str, Any] | None, bytes]:
         raw = await request.body()
         try:
@@ -463,16 +493,21 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
 
     async def _handle_adapter_route(
         request: FastAPIRequest,
-        adapter: ProviderAdapter,
-        authorization: str | None = None,
         *,
+        provider: str,
+        authorization: str | None = None,
         route_model: str | None = None,
         deployment: str | None = None,
         x_goog_api_key: str | None = None,
+        stream: bool = False,
     ):
         payload, raw = await _load_json_body(request)
         if payload is None:
             return JSONResponse(status_code=400, content={"error": {"message": "invalid_json"}})
+
+        adapter = _resolve_adapter(provider, stream=stream)
+        if adapter is None:
+            return JSONResponse(status_code=400, content={"error": {"message": "unknown_provider"}})
 
         model = adapter.model_name(payload, route_model=route_model, deployment=deployment)
         canonical = adapter.canonical_payload(payload, model, route_model=route_model, deployment=deployment)
@@ -509,132 +544,13 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             content=adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment),
         )
 
-    @app.post("/v1/chat/completions")
-    async def chat_completions(request: FastAPIRequest, authorization: str | None = Header(default=None)):
-        return await _handle_adapter_route(request, OpenAIAdapter(), authorization)
-
-    @app.post("/v1/responses")
-    async def responses(request: FastAPIRequest, authorization: str | None = Header(default=None)):
-        return await _handle_adapter_route(request, OpenAIAdapter(), authorization)
-
-    @app.post("/v1beta/models/{model}:generateContent")
-    async def gemini_generate_content(
-        model: str,
-        request: FastAPIRequest,
-        authorization: str | None = Header(default=None),
-        x_goog_api_key: str | None = Header(default=None, alias="x-goog-api-key"),
-    ):
-        return await _handle_adapter_route(
-            request,
-            GeminiAdapter(stream=False),
-            authorization,
-            route_model=model,
-            x_goog_api_key=x_goog_api_key,
-        )
-
-    @app.post("/v1beta/models/{model}:streamGenerateContent")
-    async def gemini_stream_generate_content(
-        model: str,
-        request: FastAPIRequest,
-        authorization: str | None = Header(default=None),
-        x_goog_api_key: str | None = Header(default=None, alias="x-goog-api-key"),
-    ):
-        return await _handle_adapter_route(
-            request,
-            GeminiAdapter(stream=True),
-            authorization,
-            route_model=model,
-            x_goog_api_key=x_goog_api_key,
-        )
-
-    @app.post("/openai/deployments/{deployment}/chat/completions")
-    async def azure_chat_completions(
-        deployment: str,
-        request: FastAPIRequest,
-        authorization: str | None = Header(default=None),
-    ):
-        return await _handle_adapter_route(
-            request,
-            AzureOpenAIAdapter(),
-            authorization,
-            deployment=deployment,
-        )
-
-    @app.post("/api/chat")
-    async def ollama_chat(request: FastAPIRequest, authorization: str | None = Header(default=None)):
-        return await _handle_adapter_route(request, OllamaAdapter(), authorization)
-
-    @app.get("/admin/keys")
-    def admin_keys():
-        return HTMLResponse(_admin_html(app.state.key_manager.list_key_views() if app.state.key_manager else []))
-
-    @app.get("/admin/keys.json")
-    def admin_keys_json():
-        return {"data": [v.__dict__ for v in (app.state.key_manager.list_key_views() if app.state.key_manager else [])]}
-
-    @app.post("/admin/keys")
-    async def admin_create_key(request: FastAPIRequest):
-        form = await request.form()
-        try:
-            view = app.state.key_manager.create_key(
-                key_id=str(form.get("key_id", "")),
-                provider=str(form.get("provider", "")),
-                models=[m.strip() for m in str(form.get("models", "")).split(",") if m.strip()],
-                display_name=str(form.get("display_name", "")),
-                provider_secret=str(form.get("provider_secret", "")),
-                created_by="admin:web",
-                expires_at_epoch=int(form["expires_at_epoch"]) if form.get("expires_at_epoch") else None,
-            )
-            app.state.guard.register_key(
-                ModelKey(
-                    id=view.key_id,
-                    provider=view.provider,
-                    models=view.models,
-                    secret_ref=view.active_secret_ref,
-                    display_name=view.display_name,
-                )
-            )
-            app.state.guard.grant(key_id=view.key_id, mode="scope", created_by="admin:web", owner_id="admin:web", namespace="tenant:kogwistar")
-            return {"ok": True, "key_id": view.key_id, "secret_ref": view.active_secret_ref, "secret_value": None}
-        except KeyLifecycleError as e:
-            return JSONResponse(status_code=400, content={"error": {"message": str(e)}})
-
-    async def _rotate(key_id: str, provider_secret: str, expires_at_epoch: Any):
-        try:
-            view = app.state.key_manager.rotate_key(
-                key_id=key_id,
-                provider_secret=provider_secret,
-                rotated_by="admin:web",
-                expires_at_epoch=int(expires_at_epoch) if expires_at_epoch else None,
-            )
-            if key_id in app.state.guard.keys:
-                old = app.state.guard.keys[key_id]
-                app.state.guard.register_key(
-                    ModelKey(id=old.id, provider=old.provider, models=old.models, secret_ref=view.active_secret_ref, display_name=old.display_name)
-                )
-            return {"ok": True, "key_id": view.key_id, "secret_ref": view.active_secret_ref, "secret_value": None}
-        except KeyLifecycleError as e:
-            return JSONResponse(status_code=400, content={"error": {"message": str(e)}})
-
-    @app.post("/admin/keys/rotate")
-    async def admin_rotate_key_form(request: FastAPIRequest):
-        form = await request.form()
-        return await _rotate(str(form.get("key_id", "")), str(form.get("provider_secret", "")), form.get("expires_at_epoch"))
-
-    @app.post("/admin/keys/{key_id:path}/rotate")
-    async def admin_rotate_key(key_id: str, request: FastAPIRequest):
-        form = await request.form()
-        return await _rotate(key_id, str(form.get("provider_secret", "")), form.get("expires_at_epoch"))
-
-    @app.post("/admin/keys/{key_id:path}/revoke")
-    async def admin_revoke_key(key_id: str, request: FastAPIRequest):
-        form = await request.form()
-        try:
-            view = app.state.key_manager.revoke_key(key_id=key_id, revoked_by="admin:web", reason=str(form.get("reason", "")))
-            app.state.guard.keys.pop(key_id, None)
-            return {"ok": True, "key_id": view.key_id, "status": view.status}
-        except KeyLifecycleError as e:
-            return JSONResponse(status_code=400, content={"error": {"message": str(e)}})
+    app.include_router(create_provider_openai_router(_handle_adapter_route))
+    app.include_router(create_provider_azure_router(_handle_adapter_route))
+    app.include_router(create_provider_ollama_router(_handle_adapter_route))
+    app.include_router(create_provider_gemini_router(_handle_adapter_route))
+    app.include_router(create_admin_keys_router(_admin_html))
+    app.include_router(create_admin_usage_router())
+    app.include_router(create_admin_security_router())
 
     return app
 
