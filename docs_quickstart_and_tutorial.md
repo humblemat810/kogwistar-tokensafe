@@ -2,6 +2,8 @@
 
 This project is a Kogwistar-style model-key safety gateway. Clients use a safe token or a Keycloak token. The gateway infers the principal/user/application context, checks the graph-native policy and usage projections, decrypts or resolves the real provider key internally, forwards the request, and records access/usage/audit events.
 
+For a slower side-by-side experience (CLI and GUI parity), see `tutorial/slow_quickstart_cli_gui_parity.md`.
+
 ## 0. The 60-second quickstart
 
 Run one command:

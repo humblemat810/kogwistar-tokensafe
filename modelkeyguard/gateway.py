@@ -11,9 +11,9 @@ from typing import Any
 
 from .core import ModelKey, ModelKeyGuard, Principal, Request as GuardRequest
 from .graph_state import GraphStateStore
-from .key_manager import KeyLifecycleError, KeyManager, html_escape
+from .key_manager import KeyLifecycleError, KeyManager
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
-from .services import derive_prompt_heuristics
+from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
 
@@ -395,33 +395,10 @@ def process_chat_completion(
     return status, body, headers
 
 
-def _admin_html(views: list[Any]) -> str:
-    rows = []
-    for v in views:
-        rows.append(
-            f"<tr><td><code>{html_escape(v.key_id)}</code></td><td>{html_escape(v.provider)}</td><td>{html_escape(', '.join(v.models))}</td><td>{html_escape(v.status)}</td><td><code>{html_escape(v.active_secret_ref or '')}</code></td><td>{html_escape(v.expires_at_epoch or '')}</td><td><form method='post' action='/admin/keys/{html_escape(v.key_id)}/revoke'><input name='reason' placeholder='reason'><button>Revoke</button></form></td></tr>"
-        )
-    body = "".join(rows) or "<tr><td colspan='7'>No managed keys</td></tr>"
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'><title>ModelKeyGuard Keys</title><style>"
-        "body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;width:100%}"
-        "td,th{border:1px solid #ddd;padding:.5rem}input{margin:.2rem}code{background:#f5f5f5;padding:.1rem .25rem}"
-        "</style></head><body><h1>ModelKeyGuard Key Management</h1><p>Raw provider keys are accepted only through password fields and are never rendered back.</p>"
-        "<h2>Create sealed key</h2><form method='post' action='/admin/keys'>"
-        "<input name='key_id' placeholder='key:openai:prod' required>"
-        "<input name='provider' placeholder='openai' required>"
-        "<input name='models' placeholder='gpt-4o-mini,gpt-5.3-mini' required>"
-        "<input name='display_name' placeholder='OpenAI production'>"
-        "<input type='password' name='provider_secret' placeholder='provider key' autocomplete='off' required>"
-        "<input name='expires_at_epoch' placeholder='optional epoch expiry'><button>Create sealed key</button></form>"
-        f"<h2>Keys</h2><table><thead><tr><th>Key</th><th>Provider</th><th>Models</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr></thead><tbody>{body}</tbody></table>"
-        "<h2>Rotate key</h2><form method='post' action='/admin/keys/rotate'><input name='key_id' placeholder='key:openai:prod' required><input type='password' name='provider_secret' placeholder='new provider key' autocomplete='off' required><input name='expires_at_epoch' placeholder='optional epoch expiry'><button>Rotate</button></form></body></html>"
-    )
-
-
 def create_app(policy_path: str | Path = DEFAULT_POLICY):
     from fastapi import FastAPI, Request as FastAPIRequest
     from fastapi.responses import JSONResponse, Response, StreamingResponse
+    from fastapi.staticfiles import StaticFiles
 
     from .routers import (
         create_admin_keys_router,
@@ -450,6 +427,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.state.verifier = verifier
     app.state.settings = settings
     app.state.key_manager = key_manager
+    app.mount("/static", StaticFiles(directory=str(get_static_dir())), name="static")
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -548,7 +526,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.include_router(create_provider_azure_router(_handle_adapter_route))
     app.include_router(create_provider_ollama_router(_handle_adapter_route))
     app.include_router(create_provider_gemini_router(_handle_adapter_route))
-    app.include_router(create_admin_keys_router(_admin_html))
+    app.include_router(create_admin_keys_router(render_admin_keys_page))
     app.include_router(create_admin_usage_router())
     app.include_router(create_admin_security_router())
 

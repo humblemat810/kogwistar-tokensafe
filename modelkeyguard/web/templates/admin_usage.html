@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ModelKeyGuard Usage Ops</title>
+  <link rel="stylesheet" href="/static/admin_usage.css">
+</head>
+<body>
+  <h1>Usage Ops Monitor</h1>
+  <div class="card">
+    <label>Subject Type</label>
+    <select id="subjectType">
+      <option value="">all</option>
+      <option value="principal">principal</option>
+      <option value="user">user</option>
+      <option value="key">key</option>
+      <option value="token">token</option>
+    </select>
+    <label>Subject ID</label><input id="subjectId" placeholder="optional subject id">
+    <label>Range</label>
+    <select id="timeRange">
+      <option>1h</option>
+      <option selected>24h</option>
+      <option>7d</option>
+      <option>30d</option>
+    </select>
+    <label>Bucket</label>
+    <select id="bucket">
+      <option>10s</option>
+      <option selected>hour</option>
+      <option>day</option>
+    </select>
+    <button id="refreshBtn">Refresh</button>
+  </div>
+
+  <div class="grid">
+    <div class="card"><h3>Requests / Allow / Deny</h3><canvas id="requestsChart" width="560" height="240"></canvas></div>
+    <div class="card"><h3>Tokens / USD / Anomaly</h3><canvas id="tokensChart" width="560" height="240"></canvas></div>
+    <div class="card"><h3>Top Models</h3><pre id="topModels" class="mono"></pre></div>
+    <div class="card"><h3>Top Deny Reasons</h3><pre id="topReasons" class="mono"></pre></div>
+  </div>
+
+  <div class="card">
+    <h3>Recent Events</h3>
+    <table>
+      <thead><tr><th>ts</th><th>principal</th><th>user</th><th>key</th><th>token</th><th>model</th><th>decision</th><th>reason</th></tr></thead>
+      <tbody id="eventsBody"></tbody>
+    </table>
+  </div>
+
+  <script src="/static/admin_usage.js"></script>
+</body>
+</html>

@@ -8,7 +8,8 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..review_worker import review_once
-from ..services.usage_ops import build_usage_monitor_dataset, load_usage_events, render_usage_monitor_html
+from ..services.ui_pages import render_admin_usage_page
+from ..services.usage_ops import build_usage_monitor_dataset, load_usage_events
 
 
 def create_router() -> APIRouter:
@@ -16,7 +17,7 @@ def create_router() -> APIRouter:
 
     @router.get("/admin/usage")
     def admin_usage_page():
-        return HTMLResponse(render_usage_monitor_html())
+        return HTMLResponse(render_admin_usage_page())
 
     @router.get("/admin/usage.json")
     def admin_usage_data(

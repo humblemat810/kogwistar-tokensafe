@@ -59,7 +59,12 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     app = create_app("config/gateway_policy.json")
     client = TestClient(app)
 
-    assert client.get("/admin/usage").status_code == 200
+    usage_page = client.get("/admin/usage")
+    assert usage_page.status_code == 200
+    assert "/static/admin_usage.css" in usage_page.text
+    assert "/static/admin_usage.js" in usage_page.text
+    assert client.get("/static/admin_usage.css").status_code == 200
+    assert client.get("/static/admin_usage.js").status_code == 200
     data = client.get(
         "/admin/usage.json",
         params={"subject_type": "principal", "subject_id": "agent:doc-ingestor", "time_range": "24h", "bucket": "hour"},
@@ -69,6 +74,22 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     assert data["overview"]["denied"] == 0
     assert isinstance(data["charts"]["time_series"], list)
     assert isinstance(data["drilldown"]["events"], list)
+
+
+def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    page = client.get("/admin/keys")
+    assert page.status_code == 200
+    assert "/static/admin_keys.css" in page.text
+    assert "ModelKeyGuard Key Management" in page.text
+    assert client.get("/static/admin_keys.css").status_code == 200
 
 
 def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeypatch):

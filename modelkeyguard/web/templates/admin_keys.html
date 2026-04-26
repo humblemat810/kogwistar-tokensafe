@@ -1,0 +1,40 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ModelKeyGuard Keys</title>
+  <link rel="stylesheet" href="/static/admin_keys.css">
+</head>
+<body>
+  <h1>ModelKeyGuard Key Management</h1>
+  <p>Raw provider keys are accepted only through password fields and are never rendered back.</p>
+  <h2>Create sealed key</h2>
+  <form method="post" action="/admin/keys">
+    <input name="key_id" placeholder="key:openai:prod" required>
+    <input name="provider" placeholder="openai" required>
+    <input name="models" placeholder="gpt-4o-mini,gpt-5.3-mini" required>
+    <input name="display_name" placeholder="OpenAI production">
+    <input type='password' name='provider_secret' placeholder='provider key' autocomplete='off' required>
+    <input name="expires_at_epoch" placeholder="optional epoch expiry">
+    <button>Create sealed key</button>
+  </form>
+
+  <h2>Keys</h2>
+  <table>
+    <thead>
+      <tr><th>Key</th><th>Provider</th><th>Models</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr>
+    </thead>
+    <tbody>
+      {{rows}}
+    </tbody>
+  </table>
+
+  <h2>Rotate key</h2>
+  <form method="post" action="/admin/keys/rotate">
+    <input name="key_id" placeholder="key:openai:prod" required>
+    <input type='password' name='provider_secret' placeholder='new provider key' autocomplete='off' required>
+    <input name="expires_at_epoch" placeholder="optional epoch expiry">
+    <button>Rotate</button>
+  </form>
+</body>
+</html>

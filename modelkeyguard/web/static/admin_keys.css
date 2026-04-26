@@ -1,0 +1,23 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+td, th {
+  border: 1px solid #ddd;
+  padding: 0.5rem;
+}
+
+input {
+  margin: 0.2rem;
+}
+
+code {
+  background: #f5f5f5;
+  padding: 0.1rem 0.25rem;
+}

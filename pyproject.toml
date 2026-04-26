@@ -29,6 +29,9 @@ modelkeyguard = "modelkeyguard.__main__:main"
 where = ["."]
 include = ["modelkeyguard*"]
 
+[tool.setuptools.package-data]
+modelkeyguard = ["web/templates/*.html", "web/static/*.js", "web/static/*.css"]
+
 [tool.pytest.ini_options]
 markers = [
   "postgres: tests that require a disposable PostgreSQL container",
