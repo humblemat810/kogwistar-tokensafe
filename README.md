@@ -36,6 +36,8 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 5. alert and LLM-review walkthrough,
 6. production deployment notes.
 
+See [`docs_langchain_provider_native_smoke.md`](docs_langchain_provider_native_smoke.md) for separate-environment LangChain smoke tests covering provider-native endpoints (OpenAI, Azure OpenAI, Ollama, Gemini) and `/v1` universal fallback mode, each with streaming and non-streaming examples.
+
 
 ```text
 Client / LangChain

@@ -104,6 +104,20 @@ def test_fastapi_gateway_core_returns_user_quota_429(tmp_path, monkeypatch):
     assert data["error"]["message"] == "user_quota_exceeded"
 
 
+def _register_provider_key(client, key_id: str, provider: str, model: str):
+    r = client.post(
+        "/admin/keys",
+        data={
+            "key_id": key_id,
+            "provider": provider,
+            "models": model,
+            "display_name": f"{provider}-{model}",
+            "provider_secret": f"fake-real-{provider}-key",
+        },
+    )
+    assert r.status_code == 200
+
+
 def test_create_app_exposes_fastapi_routes(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
@@ -119,3 +133,277 @@ def test_create_app_exposes_fastapi_routes(tmp_path, monkeypatch):
     response = client.post("/v1/chat/completions", json=_payload(), headers={"Authorization": "Bearer kgw_demo_doc_ingestor"})
     assert response.status_code == 200
     assert response.json()["modelkeyguard"]["decision"] == "ALLOWED"
+    responses = client.post("/v1/responses", json=_payload(), headers={"Authorization": "Bearer kgw_demo_doc_ingestor"})
+    assert responses.status_code == 200
+    assert responses.json()["modelkeyguard"]["decision"] == "ALLOWED"
+
+
+def test_openai_streaming_chat_completions_supported(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={**_payload(), "stream": True},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+
+
+def test_gemini_native_client_can_call_generate_content_endpoint(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    app = create_app("config/gateway_policy.json")
+    client = TestClient(app)
+    _register_provider_key(client, "key:gemini:test", "gemini", "gemini-2.0-flash")
+
+    response = client.post(
+        "/v1beta/models/gemini-2.0-flash:generateContent",
+        json={
+            "system_instruction": {"parts": [{"text": EXPECTED_SYSTEM}]},
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        },
+        headers={"x-goog-api-key": "kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["candidates"][0]["content"]["role"] == "model"
+
+
+def test_gemini_streaming_generate_content_supported(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:gemini:stream", "gemini", "gemini-2.0-flash")
+
+    response = client.post(
+        "/v1beta/models/gemini-2.0-flash:streamGenerateContent",
+        json={
+            "system_instruction": {"parts": [{"text": EXPECTED_SYSTEM}]},
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        },
+        headers={"x-goog-api-key": "kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert "candidates" in response.text
+
+
+def test_azure_native_chat_completions_supported(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:azure:test", "azure_openai", "azure-mini")
+
+    response = client.post(
+        "/openai/deployments/azure-mini/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-mini")["messages"], "max_tokens": 16},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert response.json()["modelkeyguard"]["decision"] == "ALLOWED"
+
+
+def test_azure_native_streaming_chat_completions_supported(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:azure:stream", "azure_openai", "azure-mini")
+
+    response = client.post(
+        "/openai/deployments/azure-mini/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-mini")["messages"], "max_tokens": 16, "stream": True},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+
+
+def test_azure_provider_mismatch_rejected(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    response = client.post(
+        "/openai/deployments/gpt-4o-mini/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="gpt-4o-mini")["messages"], "max_tokens": 16},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "model_key_provider_mismatch"
+
+
+def test_ollama_provider_mismatch_rejected(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    response = client.post(
+        "/api/chat",
+        json={"model": "gpt-4o-mini", "messages": [{"role": "system", "content": EXPECTED_SYSTEM}, {"role": "user", "content": "hello"}]},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "model_key_provider_mismatch"
+
+
+def test_ollama_native_chat_non_stream_and_stream_supported(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:ollama:test", "ollama", "llama3.1")
+
+    non_stream = client.post(
+        "/api/chat",
+        json={
+            "model": "llama3.1",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+            "stream": False,
+        },
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert non_stream.status_code == 200
+    assert non_stream.json()["done"] is True
+
+    stream = client.post(
+        "/api/chat",
+        json={
+            "model": "llama3.1",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+            "stream": True,
+        },
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert stream.status_code == 200
+    assert "\"done\": false" in stream.text
+
+
+def test_provider_native_routes_require_auth(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    _register_provider_key(client, "key:gemini:auth", "gemini", "gemini-2.0-flash")
+    _register_provider_key(client, "key:azure:auth", "azure_openai", "azure-mini")
+    _register_provider_key(client, "key:ollama:auth", "ollama", "llama3.1")
+
+    gemini = client.post(
+        "/v1beta/models/gemini-2.0-flash:generateContent",
+        json={"contents": [{"role": "user", "parts": [{"text": "hello"}]}]},
+    )
+    azure = client.post(
+        "/openai/deployments/azure-mini/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-mini")["messages"]},
+    )
+    ollama = client.post(
+        "/api/chat",
+        json={"model": "llama3.1", "messages": [{"role": "user", "content": "hello"}]},
+    )
+
+    assert gemini.status_code == 401
+    assert azure.status_code == 401
+    assert ollama.status_code == 401
+
+
+def test_forwarded_secret_replacement_capture_for_all_providers(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    capture_path = tmp_path / "capture.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.setenv("MODELKEYGUARD_MOCK_UPSTREAM_CAPTURE_PATH", str(capture_path))
+    monkeypatch.setenv("OPENAI_API_KEY", "fake-real-openai-key")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:gemini:capture", "gemini", "gemini-2.0-flash")
+    _register_provider_key(client, "key:azure:capture", "azure_openai", "azure-mini")
+    _register_provider_key(client, "key:ollama:capture", "ollama", "llama3.1")
+
+    openai = client.post(
+        "/v1/chat/completions",
+        json=_payload(model="gpt-4o-mini"),
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    gemini = client.post(
+        "/v1beta/models/gemini-2.0-flash:generateContent",
+        json={
+            "system_instruction": {"parts": [{"text": EXPECTED_SYSTEM}]},
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        },
+        headers={"x-goog-api-key": "kgw_demo_doc_ingestor"},
+    )
+    azure = client.post(
+        "/openai/deployments/azure-mini/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-mini")["messages"], "max_tokens": 16},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    ollama = client.post(
+        "/api/chat",
+        json={
+            "model": "llama3.1",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+            "stream": False,
+        },
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+
+    assert openai.status_code == 200
+    assert gemini.status_code == 200
+    assert azure.status_code == 200
+    assert ollama.status_code == 200
+
+    records = [json.loads(line) for line in capture_path.read_text().splitlines() if line.strip()]
+    by_provider = {r["provider"]: r for r in records}
+
+    assert by_provider["openai"]["headers"]["authorization"] == "Bearer fake-real-openai-key"
+    assert by_provider["azure_openai"]["headers"]["api-key"] == "fake-real-azure_openai-key"
+    assert by_provider["gemini"]["headers"]["x-goog-api-key"] == "fake-real-gemini-key"
+    assert by_provider["ollama"]["headers"]["authorization"] == "Bearer fake-real-ollama-key"
+    assert "kgw_demo_doc_ingestor" not in json.dumps(by_provider)
