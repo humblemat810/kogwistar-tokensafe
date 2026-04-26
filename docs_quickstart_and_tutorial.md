@@ -12,7 +12,7 @@ Run one command:
 ./scripts/quickstart.sh
 ```
 
-The script is intentionally verbose enough to be trusted without overwhelming the user. It shows:
+The script prints each step and generated artifact clearly. It shows:
 
 1. where the encrypted graph and audit files will be written,
 2. graph policy initialization,
@@ -51,6 +51,12 @@ export KGW_TOKEN=kgw_demo_doc_ingestor
 ./scripts/test_chat.sh
 ./scripts/inspect_graph.sh
 ```
+
+When inspecting quickstart artifacts:
+
+- `out/quickstart_graph.jsonl` is intentionally readable at record level (`record_type`, `id`, `kind`).
+- Sensitive payload content is not plaintext there; it is stored as sealed `payload_sealed`.
+- For real production, switch to `MODELKEYGUARD_STORE=postgres` and `MODELKEYGUARD_POSTGRES_DSN=...` instead of relying on tutorial JSONL artifacts.
 
 ## 1. Mental model
 

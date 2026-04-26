@@ -34,8 +34,14 @@
   </div>
 
   <div class="grid">
-    <div class="card"><h3>Requests / Allow / Deny</h3><canvas id="requestsChart" width="560" height="240"></canvas></div>
-    <div class="card"><h3>Tokens / USD / Anomaly</h3><canvas id="tokensChart" width="560" height="240"></canvas></div>
+    <div class="card">
+      <h3>Requests / Allow / Deny</h3>
+      <div class="chart-wrap"><canvas id="requestsChart"></canvas></div>
+    </div>
+    <div class="card">
+      <h3>Tokens / USD / Anomaly</h3>
+      <div class="chart-wrap"><canvas id="tokensChart"></canvas></div>
+    </div>
     <div class="card"><h3>Top Models</h3><pre id="topModels" class="mono"></pre></div>
     <div class="card"><h3>Top Deny Reasons</h3><pre id="topReasons" class="mono"></pre></div>
   </div>
@@ -48,6 +54,7 @@
     </table>
   </div>
 
+  <script src="/static/vendor/chart.umd.min.js"></script>
   <script src="/static/admin_usage.js"></script>
 </body>
 </html>

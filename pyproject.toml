@@ -30,7 +30,7 @@ where = ["."]
 include = ["modelkeyguard*"]
 
 [tool.setuptools.package-data]
-modelkeyguard = ["web/templates/*.html", "web/static/*.js", "web/static/*.css"]
+modelkeyguard = ["web/templates/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*.js"]
 
 [tool.pytest.ini_options]
 markers = [

@@ -62,8 +62,10 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     usage_page = client.get("/admin/usage")
     assert usage_page.status_code == 200
     assert "/static/admin_usage.css" in usage_page.text
+    assert "/static/vendor/chart.umd.min.js" in usage_page.text
     assert "/static/admin_usage.js" in usage_page.text
     assert client.get("/static/admin_usage.css").status_code == 200
+    assert client.get("/static/vendor/chart.umd.min.js").status_code == 200
     assert client.get("/static/admin_usage.js").status_code == 200
     data = client.get(
         "/admin/usage.json",

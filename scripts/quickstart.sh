@@ -88,6 +88,7 @@ for token in kgw_demo_principal_busy kgw_demo_low_user kgw_demo_external; do
 done
 
 step 6 "$TOTAL" "Inspect graph state: access conversation, usage ledger, named projections"
+note "quickstart JSONL keeps ids/kinds readable; payload bodies are sealed as payload_sealed"
 run "$PYTHON_BIN" -c "from modelkeyguard.graph_tools import inspect_graph; inspect_graph('$GRAPH_PATH')"
 
 step 7 "$TOTAL" "Run alert and LLM-style usage review over the audit log"
