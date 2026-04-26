@@ -12,6 +12,7 @@ pip-wheel-metadata/
 
 # Virtual environments
 .venv/
+.venv-langchain-smoke/
 venv/
 env/
 ENV/
@@ -29,6 +30,7 @@ htmlcov/
 # Local environment / secrets
 .env
 .env.*
+secrets/
 
 # IDE / OS
 .vscode/
@@ -38,3 +40,4 @@ Thumbs.db
 
 # Project runtime artifacts
 out/
+token-safe-chatgpt.zip

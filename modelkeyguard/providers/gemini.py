@@ -10,6 +10,9 @@ def gemini_to_openai_payload(model: str, payload: dict[str, Any]) -> dict[str, A
     messages: list[dict[str, str]] = []
 
     system_instruction = payload.get("system_instruction")
+    if system_instruction is None:
+        # Some SDKs/libraries serialize this in camelCase.
+        system_instruction = payload.get("systemInstruction")
     if isinstance(system_instruction, dict):
         parts = system_instruction.get("parts", [])
         text = "\n".join(str(p.get("text", "")) for p in parts if isinstance(p, dict) and p.get("text"))
@@ -19,7 +22,13 @@ def gemini_to_openai_payload(model: str, payload: dict[str, Any]) -> dict[str, A
     for item in payload.get("contents", []):
         if not isinstance(item, dict):
             continue
-        role = "assistant" if str(item.get("role")) == "model" else "user"
+        raw_role = str(item.get("role"))
+        if raw_role == "model":
+            role = "assistant"
+        elif raw_role == "system":
+            role = "system"
+        else:
+            role = "user"
         parts = item.get("parts", [])
         text = "\n".join(str(p.get("text", "")) for p in parts if isinstance(p, dict) and p.get("text"))
         messages.append({"role": role, "content": text})

@@ -6,11 +6,10 @@ Run this from a separate environment that has LangChain provider packages instal
 from __future__ import annotations
 
 import argparse
+import inspect
 import os
 import sys
 from typing import Any
-
-from langchain_core.messages import HumanMessage, SystemMessage
 
 DEFAULT_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
 
@@ -87,9 +86,12 @@ def _build_gemini_native():
         "model": model,
         "google_api_key": _safe_token(),
         "temperature": 0,
-        "transport": "rest",
-        "client_options": {"api_endpoint": endpoint},
     }
+    sig = inspect.signature(ChatGoogleGenerativeAI)
+    if "transport" in sig.parameters:
+        kwargs["transport"] = "rest"
+    if "client_options" in sig.parameters:
+        kwargs["client_options"] = {"api_endpoint": endpoint}
     try:
         return ChatGoogleGenerativeAI(**kwargs)
     except TypeError as e:
@@ -130,9 +132,15 @@ def _build_llm(provider: str, mode: str):
     raise RuntimeError(f"unsupported provider={provider}")
 
 
+def _build_messages(system: str, user_text: str):
+    from langchain_core.messages import HumanMessage, SystemMessage
+
+    return [SystemMessage(content=system), HumanMessage(content=user_text)]
+
+
 def run(provider: str, mode: str, stream: bool, user_text: str) -> int:
     system = os.getenv("KGW_SYSTEM_PROMPT", DEFAULT_SYSTEM)
-    messages = [SystemMessage(content=system), HumanMessage(content=user_text)]
+    messages = _build_messages(system, user_text)
     llm = _build_llm(provider, mode)
 
     if stream:
@@ -163,6 +171,15 @@ def main() -> int:
     args = parse_args()
     try:
         return run(args.provider, args.mode, args.stream, args.message)
+    except ModuleNotFoundError as e:
+        print(f"error: missing dependency: {e}", file=sys.stderr)
+        print(
+            "Install smoke dependencies in a separate venv, then retry:\n"
+            "  bash scripts/setup_langchain_smoke_env.sh\n"
+            "  source .venv-langchain-smoke/bin/activate",
+            file=sys.stderr,
+        )
+        return 2
     except Exception as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

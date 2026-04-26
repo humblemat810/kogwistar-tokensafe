@@ -202,6 +202,28 @@ def test_gemini_streaming_generate_content_supported(tmp_path, monkeypatch):
     assert "candidates" in response.text
 
 
+def test_gemini_native_supports_camel_case_system_instruction(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:gemini:camel", "gemini", "gemini-2.0-flash")
+
+    response = client.post(
+        "/v1beta/models/gemini-2.0-flash:generateContent",
+        json={
+            "systemInstruction": {"parts": [{"text": EXPECTED_SYSTEM}]},
+            "contents": [{"role": "user", "parts": [{"text": "hello"}]}],
+        },
+        headers={"x-goog-api-key": "kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert response.json()["candidates"][0]["content"]["role"] == "model"
+
+
 def test_azure_native_chat_completions_supported(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

@@ -26,13 +26,20 @@ No real provider key is needed because the quickstart uses:
 MODELKEYGUARD_DRY_RUN=1
 ```
 
-To run the gateway normally after quickstart:
+To run the gateway again after quickstart (retry-safe, same encrypted graph):
 
 ```bash
-export MODELKEYGUARD_GRAPH_KEY='dev-local-graph-encryption-key-32bytes'
+export MODELKEYGUARD_GRAPH_PATH='out/quickstart_graph.jsonl'
+export MODELKEYGUARD_AUDIT_PATH='out/quickstart_audit.jsonl'
+export MODELKEYGUARD_GRAPH_KEY='dev-quickstart-modelkeyguard-graph-key-32b'
 export MODELKEYGUARD_DRY_RUN=1
-./scripts/init_graph.sh
 ./scripts/start_gateway.sh
+```
+
+If you want a clean restart from scratch, rerun quickstart:
+
+```bash
+./scripts/quickstart.sh
 ```
 
 Then in another terminal:
