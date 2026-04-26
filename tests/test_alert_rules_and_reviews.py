@@ -119,7 +119,7 @@ def test_usage_profile_model_violation_alert_raised(store, policy):
 
 
 def test_usage_profile_model_violation_not_raised_when_no_profile(store, policy):
-    alerts = AlertEngine(store).evaluate([ev(principal_id="agent:unknown", model="gpt-5.3")], policy)
+    alerts = AlertEngine(store).evaluate([ev(principal_id="agent:unknown", application_id=None, model="gpt-5.3")], policy)
     assert not any(a["rule_id"] == "usage_profile_model_violation" for a in alerts)
 
 

@@ -4,7 +4,38 @@ A small standalone application that turns provider model keys into graph-governe
 
 The client never receives the real OpenAI/Azure/Anthropic key. It receives a short-lived Keycloak token or local `kgw_*` token, calls this gateway with an OpenAI-compatible API, and the gateway verifies identity, checks Kogwistar-style ACL, checks named projections, decrypts/looks up the provider key, forwards the request, and appends audit/usage graph events.
 
-## Read in 30 seconds
+## 60-second quickstart
+
+```bash
+./scripts/quickstart.sh
+```
+
+The quickstart prints each step as it runs:
+
+```text
+[1/8] Prepare isolated local quickstart state
+[2/8] Initialize graph-native policy state
+[3/8] Start FastAPI ModelKeyGuard gateway in the background
+[4/8] Run OpenAI-compatible client call using a Kogwistar-safe key
+[5/8] Show quota/error semantics
+[6/8] Inspect graph state
+[7/8] Run alert and LLM-style usage review
+[8/8] Summary and next commands
+```
+
+It runs in dry-run mode by default, so no real OpenAI key is required.
+
+## Full tutorial ladder
+
+See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
+
+1. the one-command quickstart,
+2. OpenAI/LangChain-compatible client usage,
+3. principal-vs-user quota behavior,
+4. graph state inspection,
+5. alert and LLM-review walkthrough,
+6. production deployment notes.
+
 
 ```text
 Client / LangChain
