@@ -8,7 +8,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - ./data/postgres:/var/lib/postgresql/data
+      - ${MODELKEYGUARD_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U modelguard -d modelguard"]
       interval: 5s
@@ -32,7 +32,7 @@ services:
       - "8080:8080"
     volumes:
       - ./keycloak/modelguard-realm.json:/opt/keycloak/data/import/modelguard-realm.json:ro
-      - ./data/keycloak:/opt/keycloak/data/h2
+      - ${MODELKEYGUARD_KEYCLOAK_DATA_DIR:-./data/keycloak}:/opt/keycloak/data/h2
 
   gateway:
     build: .

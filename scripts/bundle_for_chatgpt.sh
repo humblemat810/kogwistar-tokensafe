@@ -22,10 +22,12 @@ mkdir -p "$STAGE_DIR"
 RSYNC_EXCLUDES=(
   --exclude='.git/'
   --exclude='.venv/'
+  --exclude='.venv-*/'
   --exclude='venv/'
   --exclude='env/'
   --exclude='ENV/'
   --exclude='*/.venv/'
+  --exclude='*/.venv-*/'
   --exclude='*/venv/'
   --exclude='*/env/'
   --exclude='*/ENV/'
@@ -37,6 +39,8 @@ RSYNC_EXCLUDES=(
   --exclude='.tox/'
   --exclude='.nox/'
   --exclude='node_modules/'
+  --exclude='data/'
+  --exclude='out/'
   --exclude='.env*'
   --exclude='*.env'
   --exclude='*.env.*'
@@ -52,11 +56,18 @@ fi
 rsync -a "$ROOT"/ "$STAGE_DIR"/ "${RSYNC_EXCLUDES[@]}"
 
 # Keep env examples even though .env* patterns are excluded above.
+# Prune unreadable/runtime dirs to avoid noisy permission errors (for example
+# docker-owned Postgres bind mounts).
 while IFS= read -r -d '' src; do
   rel="${src#$ROOT/}"
   mkdir -p "$STAGE_DIR/$(dirname "$rel")"
   cp "$src" "$STAGE_DIR/$rel"
-done < <(find "$ROOT" -type f \( -name '.env.example' -o -name '*.env.example' \) -print0)
+done < <(
+  find "$ROOT" \
+    \( -path "$ROOT/.git" -o -path "$ROOT/.venv" -o -path "$ROOT/.venv-langchain-smoke" -o -path "$ROOT/data" -o -path "$ROOT/out" -o -path "$ROOT/node_modules" \) -prune \
+    -o -type f \( -name '.env.example' -o -name '*.env.example' \) -print0 \
+    2>/dev/null
+)
 
 (
   cd "$TMP_DIR"

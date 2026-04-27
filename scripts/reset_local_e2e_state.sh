@@ -2,7 +2,11 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-RESET_DATA_DIR="${MODELKEYGUARD_RESET_DATA_DIR:-$ROOT_DIR/data/postgres}"
+TOKENSAFE_HOME="${MODELKEYGUARD_HOME:-${TOKENSAFE_HOME:-$HOME/.tokensafe}}"
+DEFAULT_PG_DATA_DIR="${MODELKEYGUARD_POSTGRES_DATA_DIR:-${TOKENSAFE_HOME%/}/postgres}"
+DEFAULT_KEYCLOAK_DATA_DIR="${MODELKEYGUARD_KEYCLOAK_DATA_DIR:-${TOKENSAFE_HOME%/}/keycloak}"
+RESET_DATA_DIR="${MODELKEYGUARD_RESET_DATA_DIR:-$DEFAULT_PG_DATA_DIR}"
+RESET_KEYCLOAK_DATA_DIR="${MODELKEYGUARD_RESET_KEYCLOAK_DATA_DIR:-$DEFAULT_KEYCLOAK_DATA_DIR}"
 RESET_OUT_DIR="${MODELKEYGUARD_RESET_OUT_DIR:-$ROOT_DIR/out}"
 
 echo "[reset] stopping local gateway processes (if any)"
@@ -21,6 +25,8 @@ docker rm -f modelkeyguard-postgres >/dev/null 2>&1 || true
 
 echo "[reset] removing local postgres data directory used by this repo (if writable): ${RESET_DATA_DIR}"
 rm -rf "${RESET_DATA_DIR}" >/dev/null 2>&1 || true
+echo "[reset] removing local keycloak data directory used by this repo (if writable): ${RESET_KEYCLOAK_DATA_DIR}"
+rm -rf "${RESET_KEYCLOAK_DATA_DIR}" >/dev/null 2>&1 || true
 
 echo "[reset] removing configured local graph/audit artifacts for any backend"
 ${PYTHON:-python3} - <<'PY' || true

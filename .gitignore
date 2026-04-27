@@ -41,3 +41,4 @@ Thumbs.db
 # Project runtime artifacts
 out/
 token-safe-chatgpt.zip
+*-chatgpt.zip

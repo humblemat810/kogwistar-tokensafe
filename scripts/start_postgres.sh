@@ -9,6 +9,10 @@ TXT
   exit 1
 fi
 
+TOKENSAFE_HOME="${MODELKEYGUARD_HOME:-${TOKENSAFE_HOME:-$HOME/.tokensafe}}"
+export MODELKEYGUARD_POSTGRES_DATA_DIR="${MODELKEYGUARD_POSTGRES_DATA_DIR:-${TOKENSAFE_HOME%/}/postgres}"
+mkdir -p "${MODELKEYGUARD_POSTGRES_DATA_DIR}"
+
 if docker compose version >/dev/null 2>&1; then
   compose_cmd=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then
@@ -43,7 +47,7 @@ else
   db="${MODELKEYGUARD_POSTGRES_DB:-modelguard}"
   user="${MODELKEYGUARD_POSTGRES_USER:-modelguard}"
   password="${MODELKEYGUARD_POSTGRES_PASSWORD:-modelguard}"
-  data_dir="${MODELKEYGUARD_POSTGRES_DATA_DIR:-$(pwd)/data/postgres}"
+  data_dir="${MODELKEYGUARD_POSTGRES_DATA_DIR}"
   mkdir -p "${data_dir}"
   if docker ps -a --format '{{.Names}}' | grep -Fxq "${container_name}"; then
     docker start "${container_name}" >/dev/null
@@ -86,4 +90,5 @@ if [[ -n "${container_id}" ]]; then
   done
 fi
 
+printf 'Postgres data dir: %s\n' "${MODELKEYGUARD_POSTGRES_DATA_DIR}"
 printf 'Postgres DSN: postgresql://modelguard:modelguard@localhost:5432/modelguard\n'
