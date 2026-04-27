@@ -159,6 +159,7 @@ curl -sS -X POST http://127.0.0.1:8789/admin/keys \
   --data-urlencode 'provider=azure_openai' \
   --data-urlencode 'models=gpt-5-chat,gpt-5-mini,gpt-5-nano,gpt-5.3-chat,gpt4o,gpt4omini' \
   --data-urlencode 'display_name=Azure Chat Production' \
+  --data-urlencode "upstream_url=${AZURE_OPENAI_UPSTREAM_URL}" \
   --data-urlencode "provider_secret=$(cat .secrets/azure_api_key.txt)" \
   | python -m json.tool
 ```
@@ -173,6 +174,7 @@ curl -sS -X POST http://127.0.0.1:8789/admin/keys \
   --data-urlencode 'provider=azure_openai' \
   --data-urlencode 'models=text-embedding-3-large,text-embedding-ada-002' \
   --data-urlencode 'display_name=Azure Embedding Production' \
+  --data-urlencode "upstream_url=${AZURE_OPENAI_UPSTREAM_URL}" \
   --data-urlencode "provider_secret=$(cat .secrets/azure_api_key.txt)" \
   | python -m json.tool
 ```
@@ -190,7 +192,10 @@ Create same entries with fields:
 - `provider=azure_openai`
 - `models` comma-separated
 - `display_name`
+- `upstream_url` (recommended: your Azure resource base URL; allows per-key multi-resource routing)
 - `provider_secret`
+
+If you use multiple Azure resources, create one key row per resource and set each row’s `upstream_url` to the matching resource base URL.
 
 ### Verify CLI/GUI parity
 

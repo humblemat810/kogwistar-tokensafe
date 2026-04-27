@@ -6,6 +6,7 @@ Run this from a separate environment that has LangChain provider packages instal
 from __future__ import annotations
 
 import argparse
+import json
 import inspect
 import os
 import sys
@@ -154,7 +155,18 @@ def run(provider: str, mode: str, stream: bool, user_text: str) -> int:
 
     print("stream=false")
     result = llm.invoke(messages)
-    print(_message_text(result))
+    text = _message_text(result)
+    print("response_text:")
+    print(text)
+    metadata = getattr(result, "response_metadata", None)
+    if isinstance(metadata, dict) and metadata:
+        usage = metadata.get("token_usage") or metadata.get("usage") or metadata.get("usage_metadata")
+        if usage:
+            print("response_usage:")
+            print(json.dumps(usage, sort_keys=True))
+        finish_reason = metadata.get("finish_reason")
+        if finish_reason:
+            print(f"finish_reason: {finish_reason}")
     return 0
 
 

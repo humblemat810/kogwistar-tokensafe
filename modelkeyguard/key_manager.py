@@ -15,6 +15,7 @@ class KeyView:
     provider: str
     models: tuple[str, ...]
     display_name: str
+    upstream_url: str
     intended_use: str
     status: str
     active_secret_ref: str | None
@@ -47,6 +48,7 @@ class KeyManager:
         provider: str,
         models: list[str],
         display_name: str,
+        upstream_url: str = "",
         intended_use: str = "",
         provider_secret: str,
         created_by: str,
@@ -63,6 +65,7 @@ class KeyManager:
             "provider": provider,
             "models": models,
             "display_name": display_name or key_id,
+            "upstream_url": upstream_url.strip(),
             "intended_use": intended_use.strip(),
             "status": "active",
             "active_secret_ref": secret_ref,
@@ -73,7 +76,14 @@ class KeyManager:
         self.graph_state.append_event(
             "MODEL_KEY_CREATED",
             key_id,
-            {"key_id": key_id, "provider": provider, "models": models, "created_by": created_by, "intended_use": intended_use.strip()},
+            {
+                "key_id": key_id,
+                "provider": provider,
+                "models": models,
+                "created_by": created_by,
+                "intended_use": intended_use.strip(),
+                "upstream_url": upstream_url.strip(),
+            },
         )
         return self.get_key_view(key_id)  # type: ignore[return-value]
 
@@ -170,6 +180,7 @@ class KeyManager:
             provider=str(payload.get("provider", "unknown")),
             models=tuple(payload.get("models", [])),
             display_name=str(payload.get("display_name", key_id)),
+            upstream_url=str(payload.get("upstream_url", "")),
             intended_use=str(payload.get("intended_use", "")),
             status=str(payload.get("status", "active")),
             active_secret_ref=secret_ref,

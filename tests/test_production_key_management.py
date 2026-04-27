@@ -63,6 +63,7 @@ def test_key_create_returns_safe_view(prod_env):
     store = GraphStateStore(path=prod_env / "graph.jsonl", app_key="test-graph-key-32-bytes-minimum-abcdef")
     view = KeyManager(store, store.app_key).create_key(key_id="key:test:view", provider="openai", models=["m"], display_name="View", provider_secret="secret", created_by="tester")
     assert view.active_secret_ref and view.active_secret_ref.startswith("secret:key:test:view")
+    assert view.upstream_url == ""
     assert view.intended_use == ""
     assert not hasattr(view, "provider_secret")
 
@@ -81,6 +82,22 @@ def test_key_create_persists_intended_use_text(prod_env):
     )
     assert view.intended_use == intended
     assert store.nodes["key:test:intended"].payload["intended_use"] == intended
+
+
+def test_key_create_persists_upstream_url(prod_env):
+    store = GraphStateStore(path=prod_env / "graph.jsonl", app_key="test-graph-key-32-bytes-minimum-abcdef")
+    upstream = "https://resource-a.openai.azure.com"
+    view = KeyManager(store, store.app_key).create_key(
+        key_id="key:test:upstream",
+        provider="azure_openai",
+        models=["az-one"],
+        display_name="Upstream",
+        upstream_url=upstream,
+        provider_secret="secret",
+        created_by="tester",
+    )
+    assert view.upstream_url == upstream
+    assert store.nodes["key:test:upstream"].payload["upstream_url"] == upstream
 
 
 def test_key_resolve_decrypts_only_inside_manager(prod_env):
@@ -187,6 +204,7 @@ def test_admin_page_uses_password_inputs(prod_env):
     html = TestClient(app).get("/admin/keys", headers=ADMIN_HEADERS).text
     assert "type='password'" in html
     assert "provider key" in html
+    assert "name=\"upstream_url\"" in html
 
 
 def test_admin_create_key_does_not_return_secret(prod_env):
@@ -208,7 +226,20 @@ def test_admin_keys_json_never_returns_secret(prod_env):
     from fastapi.testclient import TestClient
     c = TestClient(app)
     intended = "Paragraph policy for this key. Only use for retrieval style prompts."
-    c.post("/admin/keys", data={"key_id": "key:test:list", "provider": "openai", "models": "gpt-list", "display_name": "List", "intended_use": intended, "provider_secret": "sk-list-secret"}, headers=ADMIN_HEADERS)
+    upstream = "https://custom-openai.example"
+    c.post(
+        "/admin/keys",
+        data={
+            "key_id": "key:test:list",
+            "provider": "openai",
+            "models": "gpt-list",
+            "display_name": "List",
+            "upstream_url": upstream,
+            "intended_use": intended,
+            "provider_secret": "sk-list-secret",
+        },
+        headers=ADMIN_HEADERS,
+    )
     r = c.get("/admin/keys.json", headers=ADMIN_HEADERS)
     assert r.status_code == 200
     assert "sk-list-secret" not in r.text
@@ -216,6 +247,7 @@ def test_admin_keys_json_never_returns_secret(prod_env):
     body = r.json()
     row = next(item for item in body["data"] if item["key_id"] == "key:test:list")
     assert row["intended_use"] == intended
+    assert row["upstream_url"] == upstream
 
 
 def test_admin_rotate_key_endpoint_changes_ref(prod_env):

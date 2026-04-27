@@ -5,6 +5,7 @@ import json
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,7 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
                 models=tuple(item["models"]),
                 secret_ref=secret_ref,
                 display_name=item.get("display_name", item["id"]),
+                upstream_url=str(item.get("upstream_url", "")),
                 approval_threshold_usd=float(item.get("approval_threshold_usd", 999999.0)),
                 intended_use=str(item.get("intended_use", "")),
             )
@@ -87,6 +89,7 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
                 models=models,
                 secret_ref=str(secret_ref) if secret_ref else None,
                 display_name=str(node.payload.get("display_name") or (existing.display_name if existing else node.id)),
+                upstream_url=str(node.payload.get("upstream_url") or (existing.upstream_url if existing else "")),
                 approval_threshold_usd=float(node.payload.get("approval_threshold_usd", existing.approval_threshold_usd if existing else 999999.0)),
                 intended_use=str(node.payload.get("intended_use") or (existing.intended_use if existing else "")),
             )
@@ -196,6 +199,7 @@ def rehydrate_runtime_key(guard: ModelKeyGuard, key_id: str) -> bool:
             models=models,
             secret_ref=str(secret_ref) if secret_ref else None,
             display_name=str(node.payload.get("display_name", key_id)),
+            upstream_url=str(node.payload.get("upstream_url", "")),
             approval_threshold_usd=float(node.payload.get("approval_threshold_usd", 999999.0)),
             intended_use=str(node.payload.get("intended_use", "")),
         )
@@ -220,6 +224,47 @@ def rehydrate_runtime_key(guard: ModelKeyGuard, key_id: str) -> bool:
             namespace="tenant:kogwistar",
         )
     return True
+
+
+def _key_upstream_override(policy: dict[str, Any], guard: ModelKeyGuard, key_id: str) -> str | None:
+    key = guard.keys.get(key_id)
+    if key and key.upstream_url.strip():
+        return key.upstream_url.strip()
+    graph_state = guard.graph_state
+    if graph_state:
+        node = graph_state.nodes.get(key_id)
+        if node and node.kind == "model_key":
+            upstream = str(node.payload.get("upstream_url", "")).strip()
+            if upstream:
+                return upstream
+    for item in policy.get("model_keys", []):
+        if str(item.get("id")) == key_id:
+            upstream = str(item.get("upstream_url", "")).strip()
+            if upstream:
+                return upstream
+    return None
+
+
+def _merge_upstream_base(upstream_url: str | None, custom_base: str | None) -> str | None:
+    if not custom_base:
+        return upstream_url
+    base = custom_base.strip().rstrip("/")
+    if not base:
+        return upstream_url
+    if not upstream_url:
+        return base
+
+    route_url = urllib.parse.urlsplit(upstream_url)
+    base_url = urllib.parse.urlsplit(base)
+    scheme = base_url.scheme or route_url.scheme
+    netloc = base_url.netloc or route_url.netloc
+    base_path = base_url.path.rstrip("/")
+    route_path = route_url.path or ""
+    if base_path and (route_path == base_path or route_path.startswith(f"{base_path}/")):
+        merged_path = route_path
+    else:
+        merged_path = f"{base_path}{route_path}" if base_path else route_path
+    return urllib.parse.urlunsplit((scheme, netloc, merged_path, route_url.query, ""))
 
 
 def estimate_cost_and_tokens(payload: dict[str, Any], policy: dict[str, Any]) -> tuple[float, int]:
@@ -570,11 +615,12 @@ def process_chat_completion(
         _set_meta(http_status=200)
         return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
 
+    resolved_upstream_url = _merge_upstream_base(upstream_url, _key_upstream_override(policy, guard, key_id))
     status, headers, body = forward_provider(
         secret,
         forward_body or raw_body or json.dumps(payload).encode("utf-8"),
         provider=provider,
-        url=upstream_url,
+        url=resolved_upstream_url,
         content_type=forward_content_type,
     )
     guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)

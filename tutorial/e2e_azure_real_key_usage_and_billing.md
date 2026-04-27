@@ -120,6 +120,7 @@ Sign in with `MODELKEYGUARD_ADMIN_API_SECRET`, then create:
 - `provider`: `azure_openai`
 - `models`: `gpt-5-mini` (or your real deployment name)
 - `display_name`: `Azure Billing Production Key`
+- `upstream_url`: your Azure resource base URL (for multi-resource routing, set per key)
 - `intended_use`: billing + production usage paragraph
 - `provider_secret`: your real Azure key
 

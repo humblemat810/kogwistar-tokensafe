@@ -185,6 +185,7 @@ In **Create sealed key**, submit:
 - `provider`: `azure_openai`
 - `models`: `gpt-5-mini`
 - `display_name`: `Azure demo key`
+- `upstream_url`: Azure resource base URL (example: `https://<resource>.openai.azure.com`)
 - `intended_use`: paragraph text (for example: "Only short enterprise Q&A requests for app:azure-demo.")
 - `provider_secret`: use fake key for dry-run (`fake-real-azure-key`) or real Azure key for real mode
 
@@ -281,6 +282,12 @@ If you ran step 4b, set:
 ```bash
 export KGW_TOKEN="${KGW_SAFE_TOKEN}"
 ```
+
+Expected non-stream output format:
+
+- `stream=false`
+- `response_text:`
+- the returned model text
 
 ## 7) Verify usage + history for this principal
 

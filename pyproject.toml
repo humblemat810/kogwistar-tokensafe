@@ -33,6 +33,9 @@ include = ["modelkeyguard*"]
 modelkeyguard = ["web/templates/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*.js"]
 
 [tool.pytest.ini_options]
+addopts = "--ignore=data/postgres --ignore=postgres"
+testpaths = ["tests"]
+norecursedirs = [".git", ".venv", ".venv-langchain-smoke", "data", "out", "deploy"]
 markers = [
   "postgres: tests that require a disposable PostgreSQL container",
 ]

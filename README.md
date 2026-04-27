@@ -518,6 +518,8 @@ http://127.0.0.1:8789/admin/keys
 
 Raw keys are accepted only through password fields. They are sealed into graph payloads and are never shown back in HTML, JSON, audit logs, or graph plaintext.
 
+`/admin/keys` supports an optional per-key `upstream_url` override. This lets one gateway route different keys of the same provider (for example multiple Azure OpenAI resources) to different upstream base URLs without pinning all traffic to one global env var.
+
 ### Usage Ops and security monitoring
 
 New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and keep one shared governance flow internally.

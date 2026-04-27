@@ -109,7 +109,7 @@ def test_fastapi_gateway_core_returns_user_quota_429(tmp_path, monkeypatch):
     assert data["error"]["message"] == "user_quota_exceeded"
 
 
-def _register_provider_key(client, key_id: str, provider: str, model: str):
+def _register_provider_key(client, key_id: str, provider: str, model: str, *, upstream_url: str = ""):
     r = client.post(
         "/admin/keys",
         data={
@@ -117,6 +117,7 @@ def _register_provider_key(client, key_id: str, provider: str, model: str):
             "provider": provider,
             "models": model,
             "display_name": f"{provider}-{model}",
+            "upstream_url": upstream_url,
             "provider_secret": f"fake-real-{provider}-key",
         },
         headers=_admin_headers(),
@@ -620,3 +621,84 @@ def test_openai_responses_forwards_to_openai_responses_path(tmp_path, monkeypatc
     last = openai_records[-1]
     assert str(last.get("url")).endswith("/v1/responses")
     assert last["headers"]["authorization"] == "Bearer fake-real-openai-key"
+
+
+def test_azure_keys_can_use_different_upstream_bases(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    capture_path = tmp_path / "capture.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.setenv("MODELKEYGUARD_MOCK_UPSTREAM_CAPTURE_PATH", str(capture_path))
+    monkeypatch.setenv("AZURE_OPENAI_UPSTREAM_URL", "https://default-resource.openai.azure.com")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(
+        client,
+        "key:azure:tenant-a",
+        "azure_openai",
+        "azure-a",
+        upstream_url="https://resource-a.openai.azure.com",
+    )
+    _register_provider_key(
+        client,
+        "key:azure:tenant-b",
+        "azure_openai",
+        "azure-b",
+        upstream_url="https://resource-b.openai.azure.com",
+    )
+
+    resp_a = client.post(
+        "/openai/deployments/azure-a/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-a")["messages"], "max_tokens": 16},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    resp_b = client.post(
+        "/openai/deployments/azure-b/chat/completions?api-version=2024-10-21",
+        json={"messages": _payload(model="azure-b")["messages"], "max_tokens": 16},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert resp_a.status_code == 200
+    assert resp_b.status_code == 200
+
+    records = [json.loads(line) for line in capture_path.read_text().splitlines() if line.strip()]
+    azure_records = [r for r in records if r.get("provider") == "azure_openai"]
+    assert len(azure_records) >= 2
+
+    urls = [str(r.get("url")) for r in azure_records[-2:]]
+    assert any(u.startswith("https://resource-a.openai.azure.com/openai/deployments/azure-a/chat/completions") for u in urls)
+    assert any(u.startswith("https://resource-b.openai.azure.com/openai/deployments/azure-b/chat/completions") for u in urls)
+
+
+def test_openai_key_specific_upstream_base_overrides_global(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    capture_path = tmp_path / "capture.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.setenv("MODELKEYGUARD_MOCK_UPSTREAM_CAPTURE_PATH", str(capture_path))
+    monkeypatch.setenv("OPENAI_UPSTREAM_URL", "https://api.openai.com/v1/chat/completions")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(
+        client,
+        "key:openai:custom-upstream",
+        "openai",
+        "gpt-custom-upstream",
+        upstream_url="https://openai-proxy.example",
+    )
+
+    response = client.post(
+        "/v1/chat/completions",
+        json=_payload(model="gpt-custom-upstream"),
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+
+    records = [json.loads(line) for line in capture_path.read_text().splitlines() if line.strip()]
+    openai_records = [r for r in records if r.get("provider") == "openai"]
+    assert openai_records
+    last = openai_records[-1]
+    assert str(last.get("url")).startswith("https://openai-proxy.example/v1/chat/completions")

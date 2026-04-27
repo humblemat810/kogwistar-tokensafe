@@ -32,6 +32,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                 provider=str(form.get("provider", "")),
                 models=[m.strip() for m in str(form.get("models", "")).split(",") if m.strip()],
                 display_name=str(form.get("display_name", "")),
+                upstream_url=str(form.get("upstream_url", "")),
                 intended_use=str(form.get("intended_use", "")),
                 provider_secret=str(form.get("provider_secret", "")),
                 created_by="admin:web",
@@ -44,6 +45,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                     models=view.models,
                     secret_ref=view.active_secret_ref,
                     display_name=view.display_name,
+                    upstream_url=view.upstream_url,
                     intended_use=view.intended_use,
                 )
             )
@@ -84,6 +86,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                         models=old.models,
                         secret_ref=view.active_secret_ref,
                         display_name=old.display_name,
+                        upstream_url=old.upstream_url,
                         intended_use=old.intended_use,
                     )
                 )

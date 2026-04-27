@@ -103,6 +103,7 @@ In **Create sealed key**, submit:
 - `provider`: `openai`
 - `models`: `gpt-4o-mini-demo`
 - `display_name`: `Fake OpenAI Demo`
+- `upstream_url`: optional (leave empty for default OpenAI upstream)
 - `intended_use`: short paragraph (for example: internal summarization only, no coding-agent usage, no secret extraction)
 - `provider_secret`: `fake-real-openai-key`
 
@@ -146,6 +147,7 @@ python scripts/external_langchain_smoke.py --provider openai --mode native --str
 Expected result:
 
 - request succeeds,
+- non-stream output shows `response_text:` followed by model text,
 - response content is dry-run/mock style,
 - no real upstream credential is needed.
 
@@ -258,6 +260,7 @@ Create key with your real deployment mapping:
 - `provider`: `azure_openai`
 - `models`: comma-separated deployment names (example `gpt-5-mini,gpt4o`)
 - `display_name`: descriptive name
+- `upstream_url`: your Azure resource base URL (example `https://<resource>.openai.azure.com`)
 - `intended_use`: paragraph contract
 - `provider_secret`: paste value from `.secrets/provider_api_key.txt`
 

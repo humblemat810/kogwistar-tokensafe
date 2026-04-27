@@ -89,6 +89,7 @@ export KGW_SYSTEM_PROMPT="You are doc-ingestor. Summarize internal Kogwistar doc
 export KGW_OPENAI_MODEL="gpt-4o-mini"
 export KGW_AZURE_DEPLOYMENT="azure-mini"
 export KGW_AZURE_API_VERSION="2024-10-21"
+export KGW_AZURE_UPSTREAM_URL="https://<your-resource>.openai.azure.com"  # optional per-key override
 export KGW_OLLAMA_MODEL="llama3.1"
 export KGW_GEMINI_MODEL="gemini-2.0-flash"
 export KGW_GEMINI_ENDPOINT="$KGW_BASE_URL"
@@ -126,6 +127,7 @@ curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
   --data-urlencode "provider=azure_openai" \
   --data-urlencode "models=$KGW_AZURE_DEPLOYMENT" \
   --data-urlencode "display_name=Azure demo key" \
+  --data-urlencode "upstream_url=${KGW_AZURE_UPSTREAM_URL:-}" \
   --data-urlencode "provider_secret=fake-real-azure-key"
 
 curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
@@ -150,6 +152,7 @@ curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
 OpenAI note:
 - Default quickstart policy already contains OpenAI model keys for `gpt-4o-mini`.
 - Register an OpenAI key only if you switch `KGW_OPENAI_MODEL` to another model not in policy.
+- For multi-resource Azure routing, create one key per resource and set each key row’s `upstream_url`.
 
 ## 4) Native endpoint calls (stream + non-stream)
 
@@ -159,6 +162,12 @@ OpenAI native:
 python scripts/external_langchain_smoke.py --provider openai --mode native
 python scripts/external_langchain_smoke.py --provider openai --mode native --stream
 ```
+
+Non-stream output now prints:
+
+- `stream=false`
+- `response_text:`
+- model response text
 
 OpenAI compatibility note:
 - Native OpenAI clients may use `/v1/chat/completions` or `/v1/responses` depending on SDK/model configuration.

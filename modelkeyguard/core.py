@@ -25,6 +25,7 @@ class ModelKey:
     models: tuple[str, ...]
     secret_ref: str | None
     display_name: str
+    upstream_url: str = ""
     monthly_budget_usd: float = 0.0
     approval_threshold_usd: float = 999999.0
     intended_use: str = ""
