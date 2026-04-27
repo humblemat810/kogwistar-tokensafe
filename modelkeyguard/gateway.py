@@ -37,7 +37,9 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
     graph_state = GraphStateStore.from_policy(policy)
     guard = ModelKeyGuard.create()
     guard.graph_state = graph_state
+    policy_acl_by_key: dict[str, dict[str, Any]] = {}
     for item in policy.get("model_keys", []):
+        policy_acl_by_key[str(item["id"])] = dict(item.get("acl", {}))
         secret_ref = item.get("secret_ref") or item.get("active_secret_ref")
         if not secret_ref and item.get("sealed_secret_payload"):
             secret_ref = f"secret:{item['id']}:policy"
@@ -62,6 +64,53 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
             shared_with_principals=tuple(acl.get("shared_with_principals", [])),
             shared_with_groups=tuple(acl.get("shared_with_groups", [])),
         )
+
+    # Rehydrate runtime-managed keys from graph state so admin-created/rotated keys
+    # remain usable after gateway restarts. Graph is the latest mutable source.
+    for node in graph_state.nodes.values():
+        if node.kind != "model_key":
+            continue
+        if str(node.payload.get("status", "active")) != "active":
+            continue
+        existing = guard.keys.get(node.id)
+        provider = str(node.payload.get("provider") or (existing.provider if existing else "openai"))
+        models = tuple(str(m) for m in (node.payload.get("models") or (existing.models if existing else ())) if str(m))
+        if not models:
+            continue
+        secret_ref = node.payload.get("active_secret_ref") or node.payload.get("secret_ref")
+        if not secret_ref and node.payload.get("sealed_secret_payload"):
+            secret_ref = f"secret:{node.id}:policy"
+        guard.register_key(
+            ModelKey(
+                id=node.id,
+                provider=provider,
+                models=models,
+                secret_ref=str(secret_ref) if secret_ref else None,
+                display_name=str(node.payload.get("display_name") or (existing.display_name if existing else node.id)),
+                approval_threshold_usd=float(node.payload.get("approval_threshold_usd", existing.approval_threshold_usd if existing else 999999.0)),
+                intended_use=str(node.payload.get("intended_use") or (existing.intended_use if existing else "")),
+            )
+        )
+        if node.id in policy_acl_by_key:
+            continue
+        scope_edges = [e for e in graph_state.edges_from(node.id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
+        if scope_edges:
+            for edge in scope_edges:
+                guard.grant(
+                    key_id=node.id,
+                    mode=str(edge.payload.get("acl_mode", "scope")),
+                    created_by="graph:rehydrate",
+                    owner_id=None,
+                    namespace=str(edge.target),
+                )
+        else:
+            guard.grant(
+                key_id=node.id,
+                mode="scope",
+                created_by="graph:rehydrate",
+                owner_id=None,
+                namespace="tenant:kogwistar",
+            )
     return guard, policy
 
 
@@ -119,6 +168,58 @@ def select_key_for_provider(
     if found_model_mismatch_provider:
         return None, "model_key_provider_mismatch"
     return None, "model_not_registered"
+
+
+def rehydrate_runtime_key(guard: ModelKeyGuard, key_id: str) -> bool:
+    if key_id in guard.keys:
+        return True
+    graph_state = guard.graph_state
+    if not graph_state:
+        return False
+    node = graph_state.nodes.get(key_id)
+    if not node or node.kind != "model_key":
+        return False
+    if str(node.payload.get("status", "active")) != "active":
+        return False
+
+    models = tuple(str(m) for m in (node.payload.get("models") or []) if str(m))
+    if not models:
+        return False
+
+    secret_ref = node.payload.get("active_secret_ref") or node.payload.get("secret_ref")
+    if not secret_ref and node.payload.get("sealed_secret_payload"):
+        secret_ref = f"secret:{key_id}:policy"
+    guard.register_key(
+        ModelKey(
+            id=key_id,
+            provider=str(node.payload.get("provider", "openai")),
+            models=models,
+            secret_ref=str(secret_ref) if secret_ref else None,
+            display_name=str(node.payload.get("display_name", key_id)),
+            approval_threshold_usd=float(node.payload.get("approval_threshold_usd", 999999.0)),
+            intended_use=str(node.payload.get("intended_use", "")),
+        )
+    )
+
+    scope_edges = [e for e in graph_state.edges_from(key_id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
+    if scope_edges:
+        for edge in scope_edges:
+            guard.grant(
+                key_id=key_id,
+                mode=str(edge.payload.get("acl_mode", "scope")),
+                created_by="graph:runtime_lookup",
+                owner_id=None,
+                namespace=str(edge.target),
+            )
+    else:
+        guard.grant(
+            key_id=key_id,
+            mode="scope",
+            created_by="graph:runtime_lookup",
+            owner_id=None,
+            namespace="tenant:kogwistar",
+        )
+    return True
 
 
 def estimate_cost_and_tokens(payload: dict[str, Any], policy: dict[str, Any]) -> tuple[float, int]:
@@ -369,6 +470,11 @@ def process_chat_completion(
             )
             return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
 
+    # Runtime fallback: if key is not currently in-memory, try persistent graph
+    # rehydrate at request time before guard.check. This keeps restart/eviction
+    # behavior robust while preserving graph as source of truth.
+    rehydrate_runtime_key(guard, key_id)
+
     messages = payload.get("messages", [])
     system_prompt = extract_system_prompt(messages) if isinstance(messages, list) else ""
     system_hash = sha256_text(system_prompt) if system_prompt else None
@@ -591,6 +697,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         deployment: str | None = None,
         x_goog_api_key: str | None = None,
         stream: bool = False,
+        operation: str | None = None,
     ):
         route_family = {
             "openai": "openai_v1",
@@ -653,8 +760,8 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             )
             return response
 
-        model = adapter.model_name(payload, route_model=route_model, deployment=deployment)
-        canonical = adapter.canonical_payload(payload, model, route_model=route_model, deployment=deployment)
+        model = adapter.model_name(payload, route_model=route_model, deployment=deployment, operation=operation)
+        canonical = adapter.canonical_payload(payload, model, route_model=route_model, deployment=deployment, operation=operation)
         auth_header = adapter.auth_header(authorization, x_goog_api_key=x_goog_api_key)
         history_meta: dict[str, Any] = {
             "provider": adapter.provider,
@@ -673,9 +780,9 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             provider=adapter.provider,
             enforce_provider=adapter.enforce_provider,
             model_override=model or None,
-            upstream_url=adapter.upstream_url(request, model, route_model=route_model, deployment=deployment),
-            forward_body=adapter.forward_body(raw, payload, route_model=route_model, deployment=deployment),
-            forward_content_type=adapter.forward_content_type(payload, route_model=route_model, deployment=deployment),
+            upstream_url=adapter.upstream_url(request, model, route_model=route_model, deployment=deployment, operation=operation),
+            forward_body=adapter.forward_body(raw, payload, route_model=route_model, deployment=deployment, operation=operation),
+            forward_content_type=adapter.forward_content_type(payload, route_model=route_model, deployment=deployment, operation=operation),
             history_meta=history_meta,
         )
 
@@ -688,9 +795,9 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             _capture_history(metadata={**history_meta, "http_status": status}, response_raw=response.body)
             return response
 
-        if adapter.should_stream(payload, route_model=route_model, deployment=deployment):
-            chunks = list(adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment))
-            reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment)
+        if adapter.should_stream(payload, route_model=route_model, deployment=deployment, operation=operation):
+            chunks = list(adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment, operation=operation))
+            reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
             reconstructed_raw = json.dumps(reconstructed, sort_keys=True).encode("utf-8")
             _capture_history(
                 metadata={**history_meta, "http_status": status},
@@ -701,7 +808,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                 iter(chunks),
                 media_type=adapter.stream_media_type,
             )
-        response_payload = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment)
+        response_payload = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
         response = JSONResponse(
             status_code=status,
             content=response_payload,

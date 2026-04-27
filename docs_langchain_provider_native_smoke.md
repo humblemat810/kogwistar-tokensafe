@@ -102,8 +102,12 @@ Provider model/deployment defaults used by the script:
 - Gemini native: `KGW_GEMINI_MODEL=gemini-2.0-flash`, `KGW_GEMINI_ENDPOINT=$KGW_BASE_URL`
 
 Important for Azure native mode:
-- `KGW_AZURE_DEPLOYMENT` is treated as an Azure deployment identifier in the path.
-- If you use a real Azure deployment name, use the same exact value in registration below.
+- `KGW_AZURE_DEPLOYMENT` must match a registered Azure deployment/model string exactly.
+- Gateway Azure-native now supports both:
+  - `/openai/deployments/{deployment}/chat/completions`
+  - `/openai/responses`
+- Some newer LangChain/OpenAI combinations (for example `gpt-5.3-codex` with `2025-04-01-preview`) call `/openai/responses` automatically.
+- In all cases, register the exact deployment/model value in `/admin/keys` `models=...`.
 
 ## 3) Register provider-native demo keys (required once per fresh graph)
 
@@ -155,6 +159,10 @@ OpenAI native:
 python scripts/external_langchain_smoke.py --provider openai --mode native
 python scripts/external_langchain_smoke.py --provider openai --mode native --stream
 ```
+
+OpenAI compatibility note:
+- Native OpenAI clients may use `/v1/chat/completions` or `/v1/responses` depending on SDK/model configuration.
+- Gateway now supports both routes, including `input`-style Responses payloads.
 
 Azure OpenAI native:
 

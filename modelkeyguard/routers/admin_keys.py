@@ -54,6 +54,14 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                 owner_id="admin:web",
                 namespace="tenant:kogwistar",
             )
+            if request.app.state.guard.graph_state:
+                request.app.state.guard.graph_state.put_edge(
+                    f"edge:{view.key_id}:AVAILABLE_IN:tenant:kogwistar",
+                    "AVAILABLE_IN",
+                    view.key_id,
+                    "tenant:kogwistar",
+                    {"acl_mode": "scope", "created_by": "admin:web"},
+                )
             return {"ok": True, "key_id": view.key_id, "secret_ref": view.active_secret_ref, "secret_value": None}
         except KeyLifecycleError as e:
             return JSONResponse(status_code=400, content={"error": {"message": str(e)}})

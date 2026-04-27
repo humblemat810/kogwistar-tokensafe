@@ -32,7 +32,8 @@ Azure deployment names (from your list):
 
 Note:
 
-- Current native smoke in this guide targets chat routes.
+- Azure native compatibility now includes both chat-completions and responses routes.
+- Newer client/model combinations may use `/openai/responses` automatically.
 - Embedding deployments are still registered in key inventory for management readiness.
 
 ## 2. Prepare local environment

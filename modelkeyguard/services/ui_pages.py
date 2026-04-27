@@ -40,13 +40,35 @@ def render_admin_policy_page(
     applications: list[dict[str, str]],
     principals: list[dict[str, str]],
     quotas: list[dict[str, str]],
+    paging: dict[str, dict[str, Any]] | None = None,
+    filters: dict[str, str] | None = None,
     message: str = "",
     error: str = "",
     issued_token: str | None = None,
     issued_token_meta: dict[str, str] | None = None,
 ) -> str:
+    paging = paging or {}
+    filters = filters or {}
+
+    def _render_pager(meta: dict[str, Any], label: str) -> str:
+        total = int(meta.get("total", 0) or 0)
+        page = int(meta.get("page", 1) or 1)
+        total_pages = int(meta.get("total_pages", 1) or 1)
+        shown_start = int(meta.get("shown_start", 0) or 0)
+        shown_end = int(meta.get("shown_end", 0) or 0)
+        prev_url = str(meta.get("prev_url", "") or "")
+        next_url = str(meta.get("next_url", "") or "")
+        prev_link = f"<a href='{html_escape(prev_url)}'>Previous</a>" if prev_url else "<span>Previous</span>"
+        next_link = f"<a href='{html_escape(next_url)}'>Next</a>" if next_url else "<span>Next</span>"
+        return (
+            "<div class='pager'>"
+            f"<span>{html_escape(label)}: {shown_start}-{shown_end} of {total} (page {page}/{total_pages})</span>"
+            f"<span class='pager-links'>{prev_link} {next_link}</span>"
+            "</div>"
+        )
+
     users_rows = "".join(
-        f"<tr><td><code>{html_escape(row['id'])}</code></td><td>{html_escape(row.get('display_name', ''))}</td></tr>"
+        f"<tr><td><a href='{html_escape(row.get('history_url', ''))}'><code>{html_escape(row['id'])}</code></a></td><td>{html_escape(row.get('display_name', ''))}</td></tr>"
         for row in users
     ) or "<tr><td colspan='2'>No users</td></tr>"
     app_rows = "".join(
@@ -54,7 +76,7 @@ def render_admin_policy_page(
         for row in applications
     ) or "<tr><td colspan='2'>No applications</td></tr>"
     principal_rows = "".join(
-        f"<tr><td><code>{html_escape(row['id'])}</code></td><td>{html_escape(row.get('kind', ''))}</td><td>{html_escape(row.get('namespace', ''))}</td><td>{html_escape(row.get('application_id', ''))}</td><td>{html_escape(row.get('groups', ''))}</td></tr>"
+        f"<tr><td><a href='{html_escape(row.get('history_url', ''))}'><code>{html_escape(row['id'])}</code></a></td><td>{html_escape(row.get('kind', ''))}</td><td>{html_escape(row.get('namespace', ''))}</td><td>{html_escape(row.get('application_id', ''))}</td><td>{html_escape(row.get('groups', ''))}</td></tr>"
         for row in principals
     ) or "<tr><td colspan='5'>No principals</td></tr>"
     quota_rows = "".join(
@@ -84,6 +106,20 @@ def render_admin_policy_page(
     return (
         template.replace("{{flash}}", flash)
         .replace("{{token_panel}}", token_panel)
+        .replace("{{page_size}}", html_escape(filters.get("page_size", "20")))
+        .replace("{{users_q}}", html_escape(filters.get("users_q", "")))
+        .replace("{{apps_q}}", html_escape(filters.get("apps_q", "")))
+        .replace("{{principals_q}}", html_escape(filters.get("principals_q", "")))
+        .replace("{{quotas_lane}}", html_escape(filters.get("quotas_lane", "")))
+        .replace("{{quotas_subject_id}}", html_escape(filters.get("quotas_subject_id", "")))
+        .replace("{{quotas_name}}", html_escape(filters.get("quotas_name", "")))
+        .replace("{{quotas_revoked_any_selected}}", "selected" if filters.get("quotas_revoked", "any") == "any" else "")
+        .replace("{{quotas_revoked_true_selected}}", "selected" if filters.get("quotas_revoked") == "true" else "")
+        .replace("{{quotas_revoked_false_selected}}", "selected" if filters.get("quotas_revoked") == "false" else "")
+        .replace("{{users_pager}}", _render_pager(paging.get("users", {}), "Users"))
+        .replace("{{applications_pager}}", _render_pager(paging.get("applications", {}), "Applications"))
+        .replace("{{principals_pager}}", _render_pager(paging.get("principals", {}), "Principals"))
+        .replace("{{quotas_pager}}", _render_pager(paging.get("quotas", {}), "Quota revisions"))
         .replace("{{users_rows}}", users_rows)
         .replace("{{applications_rows}}", app_rows)
         .replace("{{principals_rows}}", principal_rows)

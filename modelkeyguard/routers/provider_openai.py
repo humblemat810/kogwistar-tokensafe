@@ -14,10 +14,20 @@ def create_router(handle_adapter_route: HandleAdapterRoute) -> APIRouter:
 
     @router.post("/v1/chat/completions")
     async def chat_completions(request: Request, authorization: str | None = Header(default=None)):
-        return await handle_adapter_route(request, provider="openai", authorization=authorization)
+        return await handle_adapter_route(
+            request,
+            provider="openai",
+            authorization=authorization,
+            operation="chat_completions",
+        )
 
     @router.post("/v1/responses")
     async def responses(request: Request, authorization: str | None = Header(default=None)):
-        return await handle_adapter_route(request, provider="openai", authorization=authorization)
+        return await handle_adapter_route(
+            request,
+            provider="openai",
+            authorization=authorization,
+            operation="responses",
+        )
 
     return router

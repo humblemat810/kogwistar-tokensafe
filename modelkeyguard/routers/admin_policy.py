@@ -3,8 +3,10 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
+from math import ceil
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -104,6 +106,8 @@ TOKEN_ISSUE_BODY_SCHEMA: dict[str, Any] = {
 
 def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
     router = APIRouter(tags=["admin-policy"])
+    default_page_size = 20
+    max_page_size = 100
 
     def _registration_service(request: Request) -> RegistrationService | None:
         graph_state = request.app.state.guard.graph_state
@@ -145,7 +149,86 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
         content_type = (request.headers.get("content-type") or "").lower()
         return "text/html" in accept or "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type
 
-    def _policy_snapshot(request: Request) -> dict[str, list[dict[str, str]]]:
+    def _query_text(request: Request, name: str) -> str:
+        return str(request.query_params.get(name, "")).strip()
+
+    def _query_int(request: Request, name: str, default: int, *, minimum: int = 1, maximum: int = 1000) -> int:
+        raw = request.query_params.get(name)
+        if raw in (None, ""):
+            return default
+        try:
+            value = int(str(raw))
+        except Exception:
+            return default
+        return max(minimum, min(maximum, value))
+
+    def _policy_page_url(request: Request, *, anchor: str = "", **updates: Any) -> str:
+        params = dict(request.query_params)
+        for key, value in updates.items():
+            if value in (None, ""):
+                params.pop(key, None)
+            else:
+                params[key] = str(value)
+        qs = urlencode(params)
+        path = "/admin/policy"
+        if qs:
+            path = f"{path}?{qs}"
+        if anchor:
+            path = f"{path}#{anchor}"
+        return path
+
+    def _paginate_rows(
+        request: Request,
+        *,
+        rows: list[dict[str, str]],
+        page_param: str,
+        page_size: int,
+        anchor: str,
+    ) -> tuple[list[dict[str, str]], dict[str, Any]]:
+        total = len(rows)
+        total_pages = max(1, ceil(total / page_size)) if total else 1
+        page = _query_int(request, page_param, 1, minimum=1, maximum=total_pages)
+        start = (page - 1) * page_size
+        end = start + page_size
+        sliced = rows[start:end]
+        shown_start = 0 if total == 0 else start + 1
+        shown_end = min(end, total)
+        return sliced, {
+            "page": page,
+            "page_size": page_size,
+            "total": total,
+            "total_pages": total_pages,
+            "shown_start": shown_start,
+            "shown_end": shown_end,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+            "prev_url": _policy_page_url(request, anchor=anchor, **{page_param: page - 1}) if page > 1 else "",
+            "next_url": _policy_page_url(request, anchor=anchor, **{page_param: page + 1}) if page < total_pages else "",
+        }
+
+    def _collect_quota_rows(graph_state: Any) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for node in graph_state.nodes.values():
+            if node.kind != "quota_policy":
+                continue
+            rows.append(
+                {
+                    "id": node.id,
+                    "lane": str(node.payload.get("lane", "")),
+                    "subject_id": str(node.payload.get("subject_id", "")),
+                    "quota_name": str(node.payload.get("quota_name", "")),
+                    "period": str(node.payload.get("period", "")),
+                    "max_usd": node.payload.get("max_usd"),
+                    "max_tokens": node.payload.get("max_tokens"),
+                    "max_requests": node.payload.get("max_requests"),
+                    "revoked": bool(node.payload.get("revoked")),
+                    "revision_ms": int(node.payload.get("revision_ms", 0) or 0),
+                }
+            )
+        rows.sort(key=lambda r: (r.get("revision_ms") or 0, r["id"]))
+        return rows
+
+    def _policy_snapshot(request: Request) -> dict[str, Any]:
         graph_state = request.app.state.guard.graph_state
         users: list[dict[str, str]] = []
         applications: list[dict[str, str]] = []
@@ -171,31 +254,129 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
                         "groups": ",".join(str(g) for g in node.payload.get("groups", [])),
                     }
                 )
-            elif node.kind == "quota_policy":
-                quotas.append(
-                    {
-                        "id": node.id,
-                        "lane": str(node.payload.get("lane", "")),
-                        "subject_id": str(node.payload.get("subject_id", "")),
-                        "quota_name": str(node.payload.get("quota_name", "")),
-                        "period": str(node.payload.get("period", "")),
-                        "max_usd": str(node.payload.get("max_usd", "")),
-                        "max_tokens": str(node.payload.get("max_tokens", "")),
-                        "max_requests": str(node.payload.get("max_requests", "")),
-                        "revoked": str(bool(node.payload.get("revoked"))),
-                        "revision_ms": str(node.payload.get("revision_ms", 0)),
-                    }
-                )
+        for row in _collect_quota_rows(graph_state):
+            quotas.append(
+                {
+                    "id": row["id"],
+                    "lane": str(row.get("lane", "")),
+                    "subject_id": str(row.get("subject_id", "")),
+                    "quota_name": str(row.get("quota_name", "")),
+                    "period": str(row.get("period", "")),
+                    "max_usd": str(row.get("max_usd", "")),
+                    "max_tokens": str(row.get("max_tokens", "")),
+                    "max_requests": str(row.get("max_requests", "")),
+                    "revoked": str(bool(row.get("revoked"))),
+                    "revision_ms": str(row.get("revision_ms", 0)),
+                }
+            )
 
         users.sort(key=lambda r: r["id"])
         applications.sort(key=lambda r: r["id"])
         principals.sort(key=lambda r: r["id"])
         quotas.sort(key=lambda r: (int(r.get("revision_ms") or 0), r["id"]))
+
+        users_q = _query_text(request, "users_q").lower()
+        apps_q = _query_text(request, "apps_q").lower()
+        principals_q = _query_text(request, "principals_q").lower()
+        quotas_lane = _query_text(request, "quotas_lane").lower()
+        quotas_subject_id = _query_text(request, "quotas_subject_id")
+        quotas_name = _query_text(request, "quotas_name").lower()
+        quotas_revoked = _query_text(request, "quotas_revoked").lower() or "any"
+        if quotas_revoked not in {"any", "true", "false"}:
+            quotas_revoked = "any"
+
+        if users_q:
+            users = [row for row in users if users_q in row["id"].lower() or users_q in row.get("display_name", "").lower()]
+        if apps_q:
+            applications = [
+                row for row in applications if apps_q in row["id"].lower() or apps_q in row.get("display_name", "").lower()
+            ]
+        if principals_q:
+            principals = [
+                row
+                for row in principals
+                if principals_q in row["id"].lower()
+                or principals_q in row.get("kind", "").lower()
+                or principals_q in row.get("namespace", "").lower()
+                or principals_q in row.get("application_id", "").lower()
+                or principals_q in row.get("groups", "").lower()
+            ]
+        if quotas_lane:
+            quotas = [row for row in quotas if row.get("lane", "").lower() == quotas_lane]
+        if quotas_subject_id:
+            quotas = [row for row in quotas if row.get("subject_id", "") == quotas_subject_id]
+        if quotas_name:
+            quotas = [row for row in quotas if quotas_name in row.get("quota_name", "").lower()]
+        if quotas_revoked in {"true", "false"}:
+            target = quotas_revoked == "true"
+            quotas = [row for row in quotas if row.get("revoked", "").lower() == str(target).lower()]
+
+        page_size = _query_int(request, "page_size", default_page_size, minimum=1, maximum=max_page_size)
+
+        users, users_paging = _paginate_rows(request, rows=users, page_param="users_page", page_size=page_size, anchor="users")
+        applications, apps_paging = _paginate_rows(
+            request,
+            rows=applications,
+            page_param="apps_page",
+            page_size=page_size,
+            anchor="applications",
+        )
+        principals, principals_paging = _paginate_rows(
+            request,
+            rows=principals,
+            page_param="principals_page",
+            page_size=page_size,
+            anchor="principals",
+        )
+        quotas, quotas_paging = _paginate_rows(
+            request,
+            rows=quotas,
+            page_param="quotas_page",
+            page_size=page_size,
+            anchor="quotas",
+        )
+
+        for row in users:
+            row["history_url"] = _policy_page_url(
+                request,
+                anchor="quotas",
+                quotas_lane="user",
+                quotas_subject_id=row["id"],
+                quotas_page=1,
+            )
+
+        for row in principals:
+            row["history_url"] = _policy_page_url(
+                request,
+                anchor="quotas",
+                quotas_lane="principal",
+                quotas_subject_id=row["id"],
+                quotas_page=1,
+            )
+
+        filters = {
+            "page_size": str(page_size),
+            "users_q": _query_text(request, "users_q"),
+            "apps_q": _query_text(request, "apps_q"),
+            "principals_q": _query_text(request, "principals_q"),
+            "quotas_lane": _query_text(request, "quotas_lane"),
+            "quotas_subject_id": quotas_subject_id,
+            "quotas_name": _query_text(request, "quotas_name"),
+            "quotas_revoked": quotas_revoked,
+        }
+
         return {
             "users": users,
             "applications": applications,
             "principals": principals,
             "quotas": quotas,
+            "paging": {
+                "users": users_paging,
+                "applications": apps_paging,
+                "principals": principals_paging,
+                "quotas": quotas_paging,
+            },
+            "filters": filters,
         }
 
     def _render_page(
@@ -213,6 +394,8 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             applications=snapshot["applications"],
             principals=snapshot["principals"],
             quotas=snapshot["quotas"],
+            paging=snapshot["paging"],
+            filters=snapshot["filters"],
             message=message,
             error=error,
             issued_token=issued_token,
@@ -508,33 +691,52 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
     @router.get("/admin/policy/quotas.json")
-    def admin_list_quotas(request: Request, lane: str | None = None, subject_id: str | None = None):
+    def admin_list_quotas(
+        request: Request,
+        lane: str | None = None,
+        subject_id: str | None = None,
+        quota_name: str | None = None,
+        revoked: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+    ):
         graph_state = request.app.state.guard.graph_state
         if not graph_state:
             return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
-        rows: list[dict[str, Any]] = []
-        for node in graph_state.nodes.values():
-            if node.kind != "quota_policy":
-                continue
-            if lane and node.payload.get("lane") != lane:
-                continue
-            if subject_id and node.payload.get("subject_id") != subject_id:
-                continue
-            rows.append(
-                {
-                    "id": node.id,
-                    "lane": node.payload.get("lane"),
-                    "subject_id": node.payload.get("subject_id"),
-                    "quota_name": node.payload.get("quota_name"),
-                    "period": node.payload.get("period"),
-                    "max_usd": node.payload.get("max_usd"),
-                    "max_tokens": node.payload.get("max_tokens"),
-                    "max_requests": node.payload.get("max_requests"),
-                    "revoked": bool(node.payload.get("revoked")),
-                    "revision_ms": node.payload.get("revision_ms", 0),
-                }
-            )
-        rows.sort(key=lambda r: (r.get("revision_ms") or 0, r["id"]))
-        return {"data": rows}
+        rows = _collect_quota_rows(graph_state)
+
+        lane_filter = str(lane or "").strip().lower()
+        subject_filter = str(subject_id or "").strip()
+        quota_name_filter = str(quota_name or "").strip().lower()
+        revoked_filter = str(revoked or "").strip().lower()
+        if revoked_filter not in {"", "true", "false"}:
+            return JSONResponse(status_code=400, content={"error": {"message": "revoked_must_be_true_false"}})
+        if lane_filter:
+            rows = [row for row in rows if str(row.get("lane", "")).lower() == lane_filter]
+        if subject_filter:
+            rows = [row for row in rows if str(row.get("subject_id", "")) == subject_filter]
+        if quota_name_filter:
+            rows = [row for row in rows if quota_name_filter in str(row.get("quota_name", "")).lower()]
+        if revoked_filter:
+            target = revoked_filter == "true"
+            rows = [row for row in rows if bool(row.get("revoked")) is target]
+
+        safe_page_size = max(1, min(max_page_size, int(page_size)))
+        total = len(rows)
+        total_pages = max(1, ceil(total / safe_page_size)) if total else 1
+        safe_page = max(1, min(int(page), total_pages))
+        start = (safe_page - 1) * safe_page_size
+        end = start + safe_page_size
+        return {
+            "data": rows[start:end],
+            "paging": {
+                "page": safe_page,
+                "page_size": safe_page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "shown_start": 0 if total == 0 else start + 1,
+                "shown_end": min(end, total),
+            },
+        }
 
     return router

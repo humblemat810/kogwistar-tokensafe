@@ -37,6 +37,10 @@ body {
   background: #fff;
 }
 
+.filter-card {
+  margin-bottom: 1rem;
+}
+
 form input {
   display: block;
   width: min(100%, 30rem);
@@ -58,6 +62,42 @@ form label {
 
 form button {
   margin-top: 0.35rem;
+}
+
+form select {
+  display: block;
+  width: min(100%, 30rem);
+  margin: 0.35rem 0;
+  padding: 0.35rem;
+}
+
+.filter-form {
+  display: grid;
+  gap: 0.15rem;
+}
+
+.filter-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.5rem;
+}
+
+.pager {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 0.45rem 0.6rem;
+  margin-bottom: 0.45rem;
+  background: #fafafa;
+}
+
+.pager-links {
+  display: inline-flex;
+  gap: 0.5rem;
 }
 
 .flash {

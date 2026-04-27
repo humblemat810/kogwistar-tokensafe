@@ -27,6 +27,53 @@
   {{flash}}
   {{token_panel}}
 
+  <section class="card filter-card">
+    <h2>Query Policy Revisions</h2>
+    <p>Use filters to query quota revisions and paginate each policy table lazily.</p>
+    <form method="get" action="/admin/policy" class="filter-form">
+      <label for="query_page_size">Page Size (capped)</label>
+      <small class="field-help">Default integrated cap per section.</small>
+      <input id="query_page_size" name="page_size" value="{{page_size}}" placeholder="20">
+
+      <label for="query_users_q">User Search</label>
+      <small class="field-help">Matches user ID and display name.</small>
+      <input id="query_users_q" name="users_q" value="{{users_q}}" placeholder="user:alice">
+
+      <label for="query_apps_q">Application Search</label>
+      <small class="field-help">Matches application ID and display name.</small>
+      <input id="query_apps_q" name="apps_q" value="{{apps_q}}" placeholder="app:crm-assistant">
+
+      <label for="query_principals_q">Principal Search</label>
+      <small class="field-help">Matches principal ID, kind, namespace, groups, app binding.</small>
+      <input id="query_principals_q" name="principals_q" value="{{principals_q}}" placeholder="agent:">
+
+      <label for="query_quotas_lane">Quota Lane</label>
+      <small class="field-help">Filter revisions by lane.</small>
+      <input id="query_quotas_lane" name="quotas_lane" value="{{quotas_lane}}" placeholder="principal|user|key">
+
+      <label for="query_quotas_subject_id">Quota Subject ID</label>
+      <small class="field-help">Exact match for subject policy history (click user/principal rows for shortcut).</small>
+      <input id="query_quotas_subject_id" name="quotas_subject_id" value="{{quotas_subject_id}}" placeholder="agent:azure-manual-demo">
+
+      <label for="query_quotas_name">Quota Name</label>
+      <small class="field-help">Contains match for revision name (example: <code>hour</code>).</small>
+      <input id="query_quotas_name" name="quotas_name" value="{{quotas_name}}" placeholder="hour">
+
+      <label for="query_quotas_revoked">Revoked</label>
+      <small class="field-help">Show active, revoked, or all revisions.</small>
+      <select id="query_quotas_revoked" name="quotas_revoked">
+        <option value="any" {{quotas_revoked_any_selected}}>any</option>
+        <option value="true" {{quotas_revoked_true_selected}}>true</option>
+        <option value="false" {{quotas_revoked_false_selected}}>false</option>
+      </select>
+
+      <div class="filter-actions">
+        <button>Apply filters</button>
+        <a href="/admin/policy">Reset</a>
+      </div>
+    </form>
+  </section>
+
   <div class="grid">
     <section class="card">
       <h2>Register User</h2>
@@ -154,25 +201,29 @@
     </section>
   </div>
 
-  <h2>Users</h2>
+  <h2 id="users">Users</h2>
+  {{users_pager}}
   <table>
     <thead><tr><th>User ID</th><th>Display Name</th></tr></thead>
     <tbody>{{users_rows}}</tbody>
   </table>
 
-  <h2>Applications</h2>
+  <h2 id="applications">Applications</h2>
+  {{applications_pager}}
   <table>
     <thead><tr><th>Application ID</th><th>Display Name</th></tr></thead>
     <tbody>{{applications_rows}}</tbody>
   </table>
 
-  <h2>Principals</h2>
+  <h2 id="principals">Principals</h2>
+  {{principals_pager}}
   <table>
     <thead><tr><th>Principal ID</th><th>Kind</th><th>Namespace</th><th>Application ID</th><th>Groups</th></tr></thead>
     <tbody>{{principals_rows}}</tbody>
   </table>
 
-  <h2>Quota Revisions</h2>
+  <h2 id="quotas">Quota Revisions</h2>
+  {{quotas_pager}}
   <table>
     <thead><tr><th>ID</th><th>Lane</th><th>Subject</th><th>Quota Name</th><th>Period</th><th>Max USD</th><th>Max Tokens</th><th>Max Requests</th><th>Revoked</th></tr></thead>
     <tbody>{{quotas_rows}}</tbody>

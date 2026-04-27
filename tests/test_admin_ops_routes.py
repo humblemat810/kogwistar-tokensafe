@@ -208,6 +208,158 @@ def test_admin_policy_token_api_returns_one_time_token_and_hash_only_audit(tmp_p
     assert body["safe_token"].startswith("kgw_sk_")
     assert body["safe_token_hash"].startswith("sha256:")
 
+
+def test_admin_policy_page_supports_filtered_lazy_pagination_and_drilldown_links(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    for i in range(8):
+        user_id = f"user:policy-page-{i:02d}"
+        principal_id = f"agent:policy-page-{i:02d}"
+        assert client.post("/admin/policy/users", headers=ADMIN_HEADERS, json={"user_id": user_id}).status_code == 200
+        assert (
+            client.post(
+                "/admin/policy/principals",
+                headers=ADMIN_HEADERS,
+                json={"principal_id": principal_id, "kind": "agent", "namespace": "tenant:kogwistar"},
+            ).status_code
+            == 200
+        )
+        assert (
+            client.post(
+                "/admin/policy/quotas/upsert",
+                headers=ADMIN_HEADERS,
+                json={
+                    "lane": "principal",
+                    "subject_id": principal_id,
+                    "quota_name": "history",
+                    "period": "hour",
+                    "max_requests": 10,
+                },
+            ).status_code
+            == 200
+        )
+
+    first = client.get("/admin/policy", headers=ADMIN_HEADERS, params={"users_q": "user:policy-page-", "page_size": 3, "users_page": 1})
+    assert first.status_code == 200
+    assert "user:policy-page-00" in first.text
+    assert "user:policy-page-03" not in first.text
+    assert "Users: 1-3 of 8 (page 1/3)" in first.text
+
+    second = client.get("/admin/policy", headers=ADMIN_HEADERS, params={"users_q": "user:policy-page-", "page_size": 3, "users_page": 2})
+    assert second.status_code == 200
+    assert "user:policy-page-03" in second.text
+    assert "user:policy-page-00" not in second.text
+    assert "Users: 4-6 of 8 (page 2/3)" in second.text
+
+    principal_page = client.get(
+        "/admin/policy",
+        headers=ADMIN_HEADERS,
+        params={"principals_q": "agent:policy-page-00", "page_size": 5},
+    )
+    assert principal_page.status_code == 200
+    assert "quotas_lane=principal&amp;quotas_subject_id=agent%3Apolicy-page-00" in principal_page.text
+
+    quota_history = client.get(
+        "/admin/policy",
+        headers=ADMIN_HEADERS,
+        params={
+            "quotas_lane": "principal",
+            "quotas_subject_id": "agent:policy-page-00",
+            "page_size": 5,
+        },
+    )
+    assert quota_history.status_code == 200
+    assert "agent:policy-page-00" in quota_history.text
+    assert "<td><code>agent:policy-page-01</code></td><td>history</td>" not in quota_history.text
+    assert "Quota revisions: 1-1 of 1 (page 1/1)" in quota_history.text
+
+
+def test_admin_policy_quotas_json_supports_filters_and_paging(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert (
+        client.post(
+            "/admin/policy/principals",
+            headers=ADMIN_HEADERS,
+            json={"principal_id": "agent:quota-list-demo", "kind": "agent", "namespace": "tenant:kogwistar"},
+        ).status_code
+        == 200
+    )
+
+    for idx in range(5):
+        assert (
+            client.post(
+                "/admin/policy/quotas/upsert",
+                headers=ADMIN_HEADERS,
+                json={
+                    "lane": "principal",
+                    "subject_id": "agent:quota-list-demo",
+                    "quota_name": f"q{idx}",
+                    "period": "hour",
+                    "max_requests": idx + 1,
+                },
+            ).status_code
+            == 200
+        )
+    assert (
+        client.post(
+            "/admin/policy/quotas/revoke",
+            headers=ADMIN_HEADERS,
+            json={
+                "lane": "principal",
+                "subject_id": "agent:quota-list-demo",
+                "quota_name": "q0",
+                "reason": "revoke-for-filter-test",
+            },
+        ).status_code
+        == 200
+    )
+
+    page2 = client.get(
+        "/admin/policy/quotas.json",
+        headers=ADMIN_HEADERS,
+        params={"lane": "principal", "subject_id": "agent:quota-list-demo", "page_size": 2, "page": 2},
+    )
+    assert page2.status_code == 200
+    body = page2.json()
+    assert body["paging"]["page"] == 2
+    assert body["paging"]["page_size"] == 2
+    assert body["paging"]["total"] == 6
+    assert len(body["data"]) == 2
+
+    by_name = client.get(
+        "/admin/policy/quotas.json",
+        headers=ADMIN_HEADERS,
+        params={"subject_id": "agent:quota-list-demo", "quota_name": "q3"},
+    )
+    assert by_name.status_code == 200
+    assert len(by_name.json()["data"]) == 1
+    assert by_name.json()["data"][0]["quota_name"] == "q3"
+
+    revoked_only = client.get(
+        "/admin/policy/quotas.json",
+        headers=ADMIN_HEADERS,
+        params={"subject_id": "agent:quota-list-demo", "revoked": "true"},
+    )
+    assert revoked_only.status_code == 200
+    assert all(item["revoked"] for item in revoked_only.json()["data"])
+
+    bad = client.get("/admin/policy/quotas.json", headers=ADMIN_HEADERS, params={"revoked": "maybe"})
+    assert bad.status_code == 400
+    assert bad.json()["error"]["message"] == "revoked_must_be_true_false"
+
 def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

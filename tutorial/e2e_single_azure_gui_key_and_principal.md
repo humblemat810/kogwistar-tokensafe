@@ -250,6 +250,11 @@ export KGW_AZURE_API_VERSION='2024-10-21'
 
 If you ran step 4b, replace `kgw_single_azure_demo` with `${KGW_SAFE_TOKEN}`.
 
+Note:
+
+- Native Azure clients may call either `/openai/deployments/{deployment}/chat/completions` or `/openai/responses` depending on client/version/model.
+- This gateway supports both paths; keep `models=` registration aligned with the exact deployment/model string.
+
 Expected results:
 
 - demo mode (`MODELKEYGUARD_DRY_RUN=1`): HTTP 200 with synthetic gateway completion.
