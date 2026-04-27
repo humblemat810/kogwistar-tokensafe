@@ -1,0 +1,59 @@
+erDiagram
+    graph_records {
+        BIGSERIAL record_seq PK
+        TEXT record_type
+        TEXT id
+        TEXT kind
+        TEXT source
+        TEXT target
+        TEXT subject
+        TIMESTAMPTZ ts
+        JSONB payload_sealed
+    }
+
+    graph_nodes {
+        TEXT id PK
+        TEXT kind
+        JSONB payload_sealed
+        TIMESTAMPTZ updated_at
+    }
+
+    graph_edges {
+        TEXT id PK
+        TEXT kind
+        TEXT source
+        TEXT target
+        JSONB payload_sealed
+        TIMESTAMPTZ updated_at
+    }
+
+    graph_events {
+        TEXT id PK
+        TEXT kind
+        TEXT subject
+        TIMESTAMPTZ ts
+        JSONB payload_sealed
+    }
+
+    named_projections {
+        TEXT namespace PK
+        TEXT key PK
+        JSONB payload_sealed
+        BIGINT last_authoritative_seq
+        BIGINT last_materialized_seq
+        INTEGER projection_schema_version
+        TEXT materialization_status
+        BIGINT updated_at_ms
+    }
+
+    %% Logical (application-level) relationships.
+    %% NOTE: the current schema does not enforce SQL FOREIGN KEY constraints.
+    graph_edges }o--|| graph_nodes : "source -> graph_nodes.id (logical)"
+    graph_edges }o--|| graph_nodes : "target -> graph_nodes.id (logical)"
+    graph_events }o--o| graph_nodes : "subject -> graph_nodes.id (logical)"
+
+    %% Polymorphic append log relation by (record_type, id) convention.
+    graph_records }o--o| graph_nodes : "id where record_type='node' (logical)"
+    graph_records }o--o| graph_edges : "id where record_type='edge' (logical)"
+    graph_records }o--o| graph_events : "id where record_type='event' (logical)"
+    graph_records }o--o| named_projections : "namespace:key where record_type='projection' (logical)"

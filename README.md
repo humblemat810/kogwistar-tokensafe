@@ -43,6 +43,9 @@ See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_az
 
 See [`docs_langchain_provider_native_smoke.md`](docs_langchain_provider_native_smoke.md) for separate-environment LangChain smoke tests covering provider-native endpoints (OpenAI, Azure OpenAI, Ollama, Gemini) and `/v1` universal fallback mode, each with streaming and non-streaming examples, including retry-safe gateway startup with the correct quickstart graph key/path.
 
+See [`docs_schema_semantics.md`](docs_schema_semantics.md) for the current entity relationship and storage/projection schema (including Mermaid diagrams and Kogwistar-compatibility mapping).
+See [`docs_postgres_schema.md`](docs_postgres_schema.md) for the strict Postgres table-level view (PK/index/logical FK mapping + ERD source).
+
 
 ```text
 Client / LangChain

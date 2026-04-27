@@ -1,0 +1,13 @@
+flowchart LR
+    U["end_user node<br/>user:*"] -->|HAS_QUOTA_POLICY| UQ["quota_policy node<br/>lane=user"]
+    A["application node<br/>app:*"] -->|HAS_PRINCIPAL| P["principal node<br/>agent:* / service:* / human:*"]
+    P -->|MEMBER_OF_NAMESPACE| N["namespace node"]
+    P -->|HAS_QUOTA_POLICY| PQ["quota_policy node<br/>lane=principal"]
+
+    T["auth_token node"] -->|AUTHENTICATES_AS| P
+    T -->|ON_BEHALF_OF| U
+    T -->|ISSUED_FOR_APPLICATION| A
+
+    K["model_key node"] -->|AVAILABLE_IN| N
+    K -->|HAS_QUOTA_POLICY| KQ["quota_policy node<br/>lane=key"]
+    P -->|ACL decision path| K
