@@ -11,6 +11,21 @@ All commands are run from repository root:
 cd "$(git rev-parse --show-toplevel)"
 ```
 
+## Docker preflight (required for Case 2)
+
+Before Case 2 starts, confirm Docker is reachable from this shell:
+
+```bash
+docker info >/dev/null && echo "docker ok"
+```
+
+If you get Docker socket permission errors, refresh group membership in this shell and retry:
+
+```bash
+newgrp docker
+docker info >/dev/null && echo "docker ok"
+```
+
 Do not paste real secrets into shell history. Use local secret files.
 
 Important:
@@ -167,14 +182,14 @@ You need:
 If you want a strict from-scratch Postgres state, reset volumes:
 
 ```bash
-docker compose down -v
+docker compose down -v || docker-compose down -v
 ```
 
 Start Postgres:
 
 ```bash
 ./scripts/start_postgres.sh
-docker compose ps postgres
+docker compose ps postgres || docker-compose ps postgres
 ```
 
 ### 3) Python environment for gateway

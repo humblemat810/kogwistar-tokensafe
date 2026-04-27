@@ -45,13 +45,26 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+Docker preflight:
+
+```bash
+docker info >/dev/null && echo "docker ok"
+```
+
+If this shell reports Docker socket permission denied:
+
+```bash
+newgrp docker
+docker info >/dev/null && echo "docker ok"
+```
+
 ## 3. Start PostgreSQL (required)
 
 Start Postgres from the repo compose stack:
 
 ```bash
 ./scripts/start_postgres.sh
-docker compose ps postgres
+docker compose ps postgres || docker-compose ps postgres
 ```
 
 Optional readiness check:

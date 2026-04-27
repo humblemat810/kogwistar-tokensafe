@@ -14,6 +14,23 @@ Run all commands from repository root:
 cd "$(git rev-parse --show-toplevel)"
 ```
 
+## Docker preflight (required for real mode)
+
+Before section 3, confirm this shell can talk to Docker:
+
+```bash
+docker info >/dev/null && echo "docker ok"
+```
+
+If you get `permission denied while trying to connect to the docker API`, refresh group membership in this shell, then retry:
+
+```bash
+newgrp docker
+docker info >/dev/null && echo "docker ok"
+```
+
+Use real values in exports. Do not keep angle-bracket placeholders like `<GRAPH_KEY_32+_CHARS>`.
+
 ## Mode lock (do this first, do not mix paths)
 
 Choose exactly one mode for one full run:
@@ -45,7 +62,14 @@ rm -f out/single_e2e_graph.jsonl out/single_e2e_audit.jsonl out/single_e2e_polic
 If you want Postgres clean too:
 
 ```bash
-docker compose down -v
+docker compose down -v || docker-compose down -v
+```
+
+If your host has no compose command at all, use plain Docker cleanup:
+
+```bash
+docker rm -f modelkeyguard-postgres 2>/dev/null || true
+rm -rf data/postgres
 ```
 
 ## 1) Python environment
@@ -244,7 +268,7 @@ Use this exact reset sequence:
 # stop gateway first
 rm -f out/single_e2e_graph.jsonl out/single_e2e_audit.jsonl out/single_e2e_policy.json
 
-docker compose down -v
+docker compose down -v || docker-compose down -v
 ./scripts/start_postgres.sh
 
 # then rerun from step 1
