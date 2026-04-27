@@ -71,6 +71,7 @@ export MODELKEYGUARD_AUDIT_PATH='out/finaldev_audit.jsonl'
 export MODELKEYGUARD_REVIEW_OUT='out/finaldev_review.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='<32+ char random value>'
 export MODELKEYGUARD_DRY_RUN=0
+export MODELKEYGUARD_ADMIN_API_SECRET='<ADMIN_SHARED_SECRET>'
 ```
 
 Initialize policy graph into Postgres once:
@@ -122,10 +123,17 @@ Recommendation for final-dev/UAT: separate logical keys by function to reduce re
 
 ### CLI pathway
 
+All admin API calls below require:
+
+```bash
+-H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}"
+```
+
 Chat deployment key:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/keys \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   -H 'content-type: application/x-www-form-urlencoded' \
   --data-urlencode 'key_id=key:azure:chat:prod' \
   --data-urlencode 'provider=azure_openai' \
@@ -139,6 +147,7 @@ Embedding inventory key:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/keys \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   -H 'content-type: application/x-www-form-urlencoded' \
   --data-urlencode 'key_id=key:azure:embedding:prod' \
   --data-urlencode 'provider=azure_openai' \
@@ -153,6 +162,7 @@ curl -sS -X POST http://127.0.0.1:8789/admin/keys \
 Open:
 
 - `http://127.0.0.1:8789/admin/keys`
+- sign in via `/admin/session` using `MODELKEYGUARD_ADMIN_API_SECRET`.
 
 Create same entries with fields:
 
@@ -167,7 +177,8 @@ Create same entries with fields:
 CLI:
 
 ```bash
-curl -sS http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/history.json?time_range=24h&page_size=20' | python -m json.tool
 ```
 
 GUI:
@@ -247,6 +258,7 @@ Rotate key:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/keys/rotate \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   -H 'content-type: application/x-www-form-urlencoded' \
   --data-urlencode 'key_id=key:azure:chat:prod' \
   --data-urlencode "provider_secret=$(cat .secrets/azure_api_key.txt)" \
@@ -263,6 +275,7 @@ Revoke key:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/keys/key:azure:chat:prod/revoke \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   -H 'content-type: application/x-www-form-urlencoded' \
   --data-urlencode 'reason=final-dev-test-revoke' \
   | python -m json.tool
@@ -277,13 +290,15 @@ Usage monitor:
 - CLI data API:
 
 ```bash
-curl -sS 'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=hour' | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=hour' | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/history.json?time_range=24h&page_size=20' | python -m json.tool
 ```
 
 Manual review trigger:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/review/run \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   -H 'content-type: application/json' \
   -d '{"sample_size":200,"run_llm_review":false,"lookback_minutes":120,"out_path":"out/finaldev_review.jsonl","checkpoint_path":"out/finaldev_review_checkpoint.json"}' \
   | python -m json.tool

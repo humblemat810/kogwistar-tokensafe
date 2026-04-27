@@ -14,6 +14,7 @@ from modelkeyguard.settings import AppSettings, read_env_or_file
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
+ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret"}
 
 
 @pytest.fixture()
@@ -183,7 +184,7 @@ def test_append_audit_filters_secret_fields(monkeypatch, tmp_path):
 def test_admin_page_uses_password_inputs(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
-    html = TestClient(app).get("/admin/keys").text
+    html = TestClient(app).get("/admin/keys", headers=ADMIN_HEADERS).text
     assert "type='password'" in html
     assert "provider key" in html
 
@@ -191,7 +192,11 @@ def test_admin_page_uses_password_inputs(prod_env):
 def test_admin_create_key_does_not_return_secret(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
-    r = TestClient(app).post("/admin/keys", data={"key_id": "key:test:admin", "provider": "openai", "models": "gpt-managed", "display_name": "Admin", "provider_secret": "sk-admin-secret"})
+    r = TestClient(app).post(
+        "/admin/keys",
+        data={"key_id": "key:test:admin", "provider": "openai", "models": "gpt-managed", "display_name": "Admin", "provider_secret": "sk-admin-secret"},
+        headers=ADMIN_HEADERS,
+    )
     assert r.status_code == 200
     body = r.json()
     assert body["secret_value"] is None
@@ -203,8 +208,8 @@ def test_admin_keys_json_never_returns_secret(prod_env):
     from fastapi.testclient import TestClient
     c = TestClient(app)
     intended = "Paragraph policy for this key. Only use for retrieval style prompts."
-    c.post("/admin/keys", data={"key_id": "key:test:list", "provider": "openai", "models": "gpt-list", "display_name": "List", "intended_use": intended, "provider_secret": "sk-list-secret"})
-    r = c.get("/admin/keys.json")
+    c.post("/admin/keys", data={"key_id": "key:test:list", "provider": "openai", "models": "gpt-list", "display_name": "List", "intended_use": intended, "provider_secret": "sk-list-secret"}, headers=ADMIN_HEADERS)
+    r = c.get("/admin/keys.json", headers=ADMIN_HEADERS)
     assert r.status_code == 200
     assert "sk-list-secret" not in r.text
     assert "active_secret_ref" in r.text
@@ -217,8 +222,8 @@ def test_admin_rotate_key_endpoint_changes_ref(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    a = c.post("/admin/keys", data={"key_id": "key:test:http-rotate", "provider": "openai", "models": "gpt-rot", "display_name": "Rot", "provider_secret": "old"}).json()["secret_ref"]
-    b = c.post("/admin/keys/key:test:http-rotate/rotate", data={"provider_secret": "new"}).json()["secret_ref"]
+    a = c.post("/admin/keys", data={"key_id": "key:test:http-rotate", "provider": "openai", "models": "gpt-rot", "display_name": "Rot", "provider_secret": "old"}, headers=ADMIN_HEADERS).json()["secret_ref"]
+    b = c.post("/admin/keys/key:test:http-rotate/rotate", data={"provider_secret": "new"}, headers=ADMIN_HEADERS).json()["secret_ref"]
     assert a != b
 
 
@@ -226,8 +231,8 @@ def test_admin_revoke_key_endpoint(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:http-revoke", "provider": "openai", "models": "gpt-rev", "display_name": "Rev", "provider_secret": "secret"})
-    r = c.post("/admin/keys/key:test:http-revoke/revoke", data={"reason": "test"})
+    c.post("/admin/keys", data={"key_id": "key:test:http-revoke", "provider": "openai", "models": "gpt-rev", "display_name": "Rev", "provider_secret": "secret"}, headers=ADMIN_HEADERS)
+    r = c.post("/admin/keys/key:test:http-revoke/revoke", data={"reason": "test"}, headers=ADMIN_HEADERS)
     assert r.json()["status"] == "revoked"
 
 
@@ -235,7 +240,7 @@ def test_managed_key_is_listed_as_openai_compatible_model(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:model-list", "provider": "openai", "models": "gpt-managed-list", "display_name": "Managed", "provider_secret": "secret"})
+    c.post("/admin/keys", data={"key_id": "key:test:model-list", "provider": "openai", "models": "gpt-managed-list", "display_name": "Managed", "provider_secret": "secret"}, headers=ADMIN_HEADERS)
     ids = [m["id"] for m in c.get("/v1/models").json()["data"]]
     assert "gpt-managed-list" in ids
 
@@ -244,7 +249,7 @@ def test_managed_key_can_serve_openai_compatible_request(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:serve", "provider": "openai", "models": "gpt-managed-serve", "display_name": "Managed", "provider_secret": "sk-serve"})
+    c.post("/admin/keys", data={"key_id": "key:test:serve", "provider": "openai", "models": "gpt-managed-serve", "display_name": "Managed", "provider_secret": "sk-serve"}, headers=ADMIN_HEADERS)
     r = c.post("/v1/chat/completions", headers={"authorization": "Bearer kgw_demo_doc_ingestor"}, json={"model": "gpt-managed-serve", "messages": [{"role": "system", "content": EXPECTED_SYSTEM}, {"role": "user", "content": "hi"}], "max_tokens": 5})
     assert r.status_code == 200
     assert r.json()["modelkeyguard"]["decision"] == "ALLOWED"
@@ -254,8 +259,8 @@ def test_revoked_managed_key_no_longer_serves(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:serve-rev", "provider": "openai", "models": "gpt-managed-rev", "display_name": "Managed", "provider_secret": "sk-serve"})
-    c.post("/admin/keys/key:test:serve-rev/revoke", data={"reason": "x"})
+    c.post("/admin/keys", data={"key_id": "key:test:serve-rev", "provider": "openai", "models": "gpt-managed-rev", "display_name": "Managed", "provider_secret": "sk-serve"}, headers=ADMIN_HEADERS)
+    c.post("/admin/keys/key:test:serve-rev/revoke", data={"reason": "x"}, headers=ADMIN_HEADERS)
     r = c.post("/v1/chat/completions", headers={"authorization": "Bearer kgw_demo_doc_ingestor"}, json={"model": "gpt-managed-rev", "messages": [{"role": "system", "content": EXPECTED_SYSTEM}], "max_tokens": 5})
     assert r.status_code == 403
 
@@ -263,7 +268,7 @@ def test_revoked_managed_key_no_longer_serves(prod_env):
 def test_invalid_admin_create_returns_400(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
-    r = TestClient(app).post("/admin/keys", data={"key_id": "bad", "provider": "openai", "models": "m", "provider_secret": "x"})
+    r = TestClient(app).post("/admin/keys", data={"key_id": "bad", "provider": "openai", "models": "m", "provider_secret": "x"}, headers=ADMIN_HEADERS)
     assert r.status_code == 400
 
 
@@ -287,7 +292,7 @@ def test_secret_resolution_denied_for_expired_managed_key(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:expired-http", "provider": "openai", "models": "gpt-expired-http", "display_name": "Expired", "provider_secret": "secret", "expires_at_epoch": str(int(time.time()) - 1)})
+    c.post("/admin/keys", data={"key_id": "key:test:expired-http", "provider": "openai", "models": "gpt-expired-http", "display_name": "Expired", "provider_secret": "secret", "expires_at_epoch": str(int(time.time()) - 1)}, headers=ADMIN_HEADERS)
     r = c.post("/v1/chat/completions", headers={"authorization": "Bearer kgw_demo_doc_ingestor"}, json={"model": "gpt-expired-http", "messages": [{"role": "system", "content": EXPECTED_SYSTEM}], "max_tokens": 5})
     assert r.status_code == 403
     assert "expired" in r.text

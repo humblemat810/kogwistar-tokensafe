@@ -14,6 +14,8 @@ from .graph_state import GraphStateStore
 from .key_manager import KeyLifecycleError, KeyManager
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
 from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page
+from .services.admin_auth import admin_html_login_response, is_admin_authenticated
+from .services.history_ops import capture_history_record
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
 
@@ -301,25 +303,69 @@ def process_chat_completion(
     upstream_url: str | None = None,
     forward_body: bytes | None = None,
     forward_content_type: str = "application/json",
+    history_meta: dict[str, Any] | None = None,
 ) -> tuple[int, dict[str, Any] | bytes, dict[str, str]]:
+    meta = history_meta if history_meta is not None else {}
+
+    def _set_meta(**kwargs: Any) -> None:
+        for key, value in kwargs.items():
+            if value is not None:
+                meta[key] = value
+
     try:
         principal_token = verifier.verify_authorization_header(authorization_header)
     except TokenAuthError as e:
+        request_id = f"auth-{time.time_ns()}"
         if guard.graph_state:
-            guard.graph_state.append_access_conversation_event("auth-failed", "AUTH_TOKEN_DENIED", {"reason": str(e)})
+            guard.graph_state.append_access_conversation_event(request_id, "AUTH_TOKEN_DENIED", {"reason": str(e)})
+        _set_meta(
+            request_id=request_id,
+            ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            decision="BLOCKED",
+            reason=str(e),
+            http_status=401,
+            provider=provider,
+        )
         return 401, {"error": {"message": str(e)}}, {"content-type": "application/json"}
+
+    _set_meta(
+        principal_id=principal_token.principal_id,
+        on_behalf_of_user_id=principal_token.on_behalf_of_user_id,
+        token_id=principal_token.token_id,
+        provider=provider,
+    )
 
     model = model_override or payload.get("model")
     if not model:
+        _set_meta(
+            ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            decision="BLOCKED",
+            reason="model_not_registered",
+            http_status=403,
+        )
         return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
 
     if enforce_provider:
         key_id, key_error = select_key_for_provider(policy, str(model), provider, guard)
         if not key_id:
+            _set_meta(
+                model=str(model),
+                ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                decision="BLOCKED",
+                reason=key_error or "model_not_registered",
+                http_status=403,
+            )
             return 403, {"error": {"message": key_error or "model_not_registered"}}, {"content-type": "application/json"}
     else:
         key_id = select_key(policy, str(model), guard)
         if not key_id:
+            _set_meta(
+                model=str(model),
+                ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                decision="BLOCKED",
+                reason="model_not_registered",
+                http_status=403,
+            )
             return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
 
     messages = payload.get("messages", [])
@@ -338,6 +384,18 @@ def process_chat_completion(
         append_audit(event)
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(event["request_id"], "ACL_DECISION_DENY", event)
+        _set_meta(
+            request_id=event["request_id"],
+            ts=event["ts"],
+            principal_id=event["principal_id"],
+            on_behalf_of_user_id=event.get("on_behalf_of_user_id"),
+            token_id=event.get("token_id"),
+            key_id=event.get("key_id"),
+            model=event.get("model"),
+            decision=event.get("decision"),
+            reason=event.get("reason"),
+            http_status=403,
+        )
         return 403, {"error": {"message": "system_prompt_signature_mismatch", "system_prompt_hash": system_hash}}, {"content-type": "application/json"}
 
     cost, estimated_tokens = estimate_cost_and_tokens(payload, policy)
@@ -370,8 +428,20 @@ def process_chat_completion(
             "prompt_heuristics": prompt_heuristics,
         }
     )
+    _set_meta(
+        request_id=event["request_id"],
+        ts=event["ts"],
+        principal_id=event["principal_id"],
+        on_behalf_of_user_id=event.get("on_behalf_of_user_id"),
+        token_id=event.get("token_id"),
+        key_id=event.get("key_id"),
+        model=event.get("model"),
+        decision=event.get("decision"),
+        reason=event.get("reason"),
+    )
     append_audit(event)
     if not decision.allowed:
+        _set_meta(http_status=decision.http_status)
         return decision.http_status, {"error": {"message": decision.reason, "acl_reason": decision.acl_reason, "remaining": decision.remaining}}, {"content-type": "application/json"}
 
     try:
@@ -379,10 +449,18 @@ def process_chat_completion(
     except KeyLifecycleError as e:
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(decision.request_id, "SECRET_RESOLUTION_DENIED", {"reason": str(e), "key_id": decision.key_id})
+        _set_meta(
+            request_id=decision.request_id,
+            key_id=decision.key_id,
+            decision="BLOCKED",
+            reason=str(e),
+            http_status=403,
+        )
         return 403, {"error": {"message": str(e)}}, {"content-type": "application/json"}
 
     if not secret or os.getenv("MODELKEYGUARD_DRY_RUN", "1") == "1":
         guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+        _set_meta(http_status=200)
         return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
 
     status, headers, body = forward_provider(
@@ -393,6 +471,7 @@ def process_chat_completion(
         content_type=forward_content_type,
     )
     guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+    _set_meta(http_status=status, decision="ALLOWED")
     return status, body, headers
 
 
@@ -402,8 +481,10 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     from fastapi.staticfiles import StaticFiles
 
     from .routers import (
+        create_admin_history_router,
         create_admin_keys_router,
         create_admin_security_router,
+        create_admin_session_router,
         create_admin_usage_router,
         create_provider_azure_router,
         create_provider_gemini_router,
@@ -429,6 +510,34 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.state.settings = settings
     app.state.key_manager = key_manager
     app.mount("/static", StaticFiles(directory=str(get_static_dir())), name="static")
+
+    @app.middleware("http")
+    async def admin_route_auth_middleware(request: FastAPIRequest, call_next):
+        path = request.url.path
+        if not path.startswith("/admin/"):
+            return await call_next(request)
+        if path == "/admin/session":
+            return await call_next(request)
+
+        # Host security watcher keeps using its shared secret while all admin
+        # pages/APIs are additionally protected by admin session/header auth.
+        if path == "/admin/security-events":
+            required = os.getenv("SECURITY_EVENT_SHARED_SECRET", "").strip()
+            provided = request.headers.get("x-modelkeyguard-security-secret", "")
+            if required and provided == required:
+                return await call_next(request)
+
+        if is_admin_authenticated(request, settings.admin_api_secret):
+            return await call_next(request)
+
+        wants_html = (
+            request.method.upper() == "GET"
+            and not path.endswith(".json")
+            and "text/html" in (request.headers.get("accept") or "").lower()
+        )
+        if wants_html:
+            return admin_html_login_response(path)
+        return JSONResponse(status_code=401, content={"error": {"message": "admin_auth_required"}})
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
@@ -480,17 +589,76 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         x_goog_api_key: str | None = None,
         stream: bool = False,
     ):
+        route_family = {
+            "openai": "openai_v1",
+            "azure_openai": "azure_native",
+            "ollama": "ollama_native",
+            "gemini": "gemini_native",
+        }.get(provider, provider)
+
+        def _capture_history(
+            *,
+            metadata: dict[str, Any],
+            response_raw: bytes,
+            stream_chunks: list[bytes] | None = None,
+        ) -> None:
+            if not app.state.guard.graph_state:
+                return
+            safe_meta = {k: v for k, v in metadata.items() if "secret" not in str(k).lower() and "authorization" not in str(k).lower()}
+            safe_meta.setdefault("provider", provider)
+            safe_meta.setdefault("route_family", route_family)
+            safe_meta.setdefault("route", request.url.path)
+            safe_meta.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+            capture_history_record(
+                app.state.guard.graph_state,
+                app.state.settings,
+                request_raw=raw,
+                response_raw=response_raw,
+                stream_chunks=stream_chunks,
+                metadata=safe_meta,
+            )
+
         payload, raw = await _load_json_body(request)
         if payload is None:
-            return JSONResponse(status_code=400, content={"error": {"message": "invalid_json"}})
+            body = {"error": {"message": "invalid_json"}}
+            response = JSONResponse(status_code=400, content=body)
+            _capture_history(
+                metadata={
+                    "request_id": f"invalid-json-{time.time_ns()}",
+                    "decision": "BLOCKED",
+                    "reason": "invalid_json",
+                    "http_status": 400,
+                },
+                response_raw=response.body,
+            )
+            return response
 
         adapter = _resolve_adapter(provider, stream=stream)
         if adapter is None:
-            return JSONResponse(status_code=400, content={"error": {"message": "unknown_provider"}})
+            body = {"error": {"message": "unknown_provider"}}
+            response = JSONResponse(status_code=400, content=body)
+            _capture_history(
+                metadata={
+                    "request_id": f"unknown-provider-{time.time_ns()}",
+                    "decision": "BLOCKED",
+                    "reason": "unknown_provider",
+                    "http_status": 400,
+                    "provider": provider,
+                    "route_family": route_family,
+                },
+                response_raw=response.body,
+            )
+            return response
 
         model = adapter.model_name(payload, route_model=route_model, deployment=deployment)
         canonical = adapter.canonical_payload(payload, model, route_model=route_model, deployment=deployment)
         auth_header = adapter.auth_header(authorization, x_goog_api_key=x_goog_api_key)
+        history_meta: dict[str, Any] = {
+            "provider": adapter.provider,
+            "route_family": route_family,
+            "route": request.url.path,
+            "model": model or "",
+        }
         status, data, headers = process_chat_completion(
             canonical,
             auth_header,
@@ -505,30 +673,47 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             upstream_url=adapter.upstream_url(request, model, route_model=route_model, deployment=deployment),
             forward_body=adapter.forward_body(raw, payload, route_model=route_model, deployment=deployment),
             forward_content_type=adapter.forward_content_type(payload, route_model=route_model, deployment=deployment),
+            history_meta=history_meta,
         )
 
         content_type = headers.get("content-type", "application/json")
         if isinstance(data, bytes):
+            _capture_history(metadata={**history_meta, "http_status": status}, response_raw=data)
             return Response(content=data, status_code=status, media_type=content_type)
         if status != 200:
-            return JSONResponse(status_code=status, content=data)
+            response = JSONResponse(status_code=status, content=data)
+            _capture_history(metadata={**history_meta, "http_status": status}, response_raw=response.body)
+            return response
 
         if adapter.should_stream(payload, route_model=route_model, deployment=deployment):
+            chunks = list(adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment))
+            reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment)
+            reconstructed_raw = json.dumps(reconstructed, sort_keys=True).encode("utf-8")
+            _capture_history(
+                metadata={**history_meta, "http_status": status},
+                response_raw=reconstructed_raw,
+                stream_chunks=chunks,
+            )
             return StreamingResponse(
-                iter(adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment)),
+                iter(chunks),
                 media_type=adapter.stream_media_type,
             )
-        return JSONResponse(
+        response_payload = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment)
+        response = JSONResponse(
             status_code=status,
-            content=adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment),
+            content=response_payload,
         )
+        _capture_history(metadata={**history_meta, "http_status": status}, response_raw=response.body)
+        return response
 
+    app.include_router(create_admin_session_router())
     app.include_router(create_provider_openai_router(_handle_adapter_route))
     app.include_router(create_provider_azure_router(_handle_adapter_route))
     app.include_router(create_provider_ollama_router(_handle_adapter_route))
     app.include_router(create_provider_gemini_router(_handle_adapter_route))
     app.include_router(create_admin_keys_router(render_admin_keys_page))
     app.include_router(create_admin_usage_router())
+    app.include_router(create_admin_history_router())
     app.include_router(create_admin_security_router())
 
     return app

@@ -18,6 +18,10 @@ def render_admin_usage_page() -> str:
     return _load_template("admin_usage.html")
 
 
+def render_admin_history_page() -> str:
+    return _load_template("admin_history.html")
+
+
 def render_admin_keys_page(views: list[Any]) -> str:
     rows = []
     for view in views:

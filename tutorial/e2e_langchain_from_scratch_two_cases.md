@@ -42,6 +42,7 @@ export MODELKEYGUARD_GRAPH_PATH='out/case1_graph.jsonl'
 export MODELKEYGUARD_AUDIT_PATH='out/case1_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='case1-dev-graph-key-32-bytes-minimum'
 export MODELKEYGUARD_DRY_RUN=1
+export MODELKEYGUARD_ADMIN_API_SECRET='dev-modelkeyguard-admin-secret'
 ```
 
 Initialize graph:
@@ -67,6 +68,7 @@ curl -sS http://127.0.0.1:8789/healthz | python -m json.tool
 Open:
 
 - `http://127.0.0.1:8789/admin/keys`
+- sign in via `/admin/session` with `MODELKEYGUARD_ADMIN_API_SECRET` when prompted.
 
 In **Create sealed key**, submit:
 
@@ -80,7 +82,8 @@ In **Create sealed key**, submit:
 Verify in API:
 
 ```bash
-curl -sS http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/history.json | python -m json.tool
 ```
 
 ### 5) Separate LangChain client environment
@@ -138,6 +141,7 @@ MODELKEYGUARD_GRAPH_KEY='case1-dev-graph-key-32-bytes-minimum' \
 Usage UI:
 
 - `http://127.0.0.1:8789/admin/usage`
+- `http://127.0.0.1:8789/admin/history`
 
 ---
 
@@ -183,6 +187,7 @@ export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:
 export MODELKEYGUARD_AUDIT_PATH='out/case2_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='case2-prodlike-graph-key-32-bytes-minimum'
 export MODELKEYGUARD_DRY_RUN=0
+export MODELKEYGUARD_ADMIN_API_SECRET='replace-this-admin-secret'
 ```
 
 Initialize graph into Postgres:
@@ -217,6 +222,7 @@ chmod 600 .secrets/provider_api_key.txt
 Open:
 
 - `http://127.0.0.1:8789/admin/keys`
+- sign in via `/admin/session` using `MODELKEYGUARD_ADMIN_API_SECRET`.
 
 Create key with your real deployment mapping:
 
@@ -230,7 +236,7 @@ Create key with your real deployment mapping:
 Verify in API:
 
 ```bash
-curl -sS http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/keys.json | python -m json.tool
 ```
 
 ### 7) Short real request smoke (non-LangChain)
@@ -293,11 +299,13 @@ docker compose exec -T postgres psql -U modelguard -d modelguard -c "select coun
 Usage UI:
 
 - `http://127.0.0.1:8789/admin/usage`
+- `http://127.0.0.1:8789/admin/history`
 
 Usage API:
 
 ```bash
-curl -sS 'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=5m' | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=5m' | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/history.json?time_range=24h&page_size=20' | python -m json.tool
 ```
 
 ---
@@ -308,4 +316,3 @@ curl -sS 'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=5m' | pyt
 - If LangChain smoke says missing modules, activate `.venv-langchain-smoke`.
 - If native Azure route returns `model_not_registered`, your key `models` list does not include the exact deployment name you requested.
 - If admin routes are exposed beyond local dev, add network/proxy auth controls before shared-environment testing.
-

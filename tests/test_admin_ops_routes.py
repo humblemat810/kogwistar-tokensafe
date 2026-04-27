@@ -7,6 +7,8 @@ import pytest
 
 from modelkeyguard.gateway import create_app
 
+ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret"}
+
 
 def _ts(seconds_ago: int = 0) -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(time.time() - seconds_ago))
@@ -59,7 +61,7 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     app = create_app("config/gateway_policy.json")
     client = TestClient(app)
 
-    usage_page = client.get("/admin/usage")
+    usage_page = client.get("/admin/usage", headers=ADMIN_HEADERS)
     assert usage_page.status_code == 200
     assert "Admin Links:" in usage_page.text
     assert 'href="/admin/keys"' in usage_page.text
@@ -73,6 +75,7 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     data = client.get(
         "/admin/usage.json",
         params={"subject_type": "principal", "subject_id": "agent:doc-ingestor", "time_range": "24h", "bucket": "5m"},
+        headers=ADMIN_HEADERS,
     ).json()
     assert data["overview"]["requests"] == 1
     assert data["overview"]["allowed"] == 1
@@ -90,7 +93,7 @@ def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     client = TestClient(create_app("config/gateway_policy.json"))
 
-    page = client.get("/admin/keys")
+    page = client.get("/admin/keys", headers=ADMIN_HEADERS)
     assert page.status_code == 200
     assert "Admin Links:" in page.text
     assert 'href="/admin/usage"' in page.text
@@ -136,6 +139,7 @@ def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeyp
             "out_path": str(out),
             "checkpoint_path": str(checkpoint),
         },
+        headers=ADMIN_HEADERS,
     )
     assert first.status_code == 200
     first_data = first.json()
@@ -153,6 +157,7 @@ def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeyp
             "out_path": str(out),
             "checkpoint_path": str(checkpoint),
         },
+        headers=ADMIN_HEADERS,
     )
     assert second.status_code == 200
     assert second.json()["events_seen"] == 0
@@ -207,5 +212,44 @@ def test_admin_security_events_returns_503_when_secret_not_configured(tmp_path, 
     monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     client = TestClient(create_app("config/gateway_policy.json"))
-    resp = client.post("/admin/security-events", json={"username": "azureuser"})
+    resp = client.post("/admin/security-events", json={"username": "azureuser"}, headers=ADMIN_HEADERS)
     assert resp.status_code == 503
+
+
+def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert client.get("/admin/keys").status_code == 401
+    assert client.get("/admin/usage").status_code == 401
+    assert client.get("/admin/history").status_code == 401
+    assert client.get("/admin/history.json").status_code == 401
+    assert client.get("/admin/history/config").status_code == 401
+    assert client.post("/admin/review/run", json={}).status_code == 401
+
+
+def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_API_SECRET", "test-admin-secret-abc")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    bad = client.post("/admin/session", json={"secret": "wrong"})
+    assert bad.status_code == 401
+
+    ok = client.post("/admin/session", json={"secret": "test-admin-secret-abc"})
+    assert ok.status_code == 200
+    assert client.get("/admin/usage").status_code == 200
+
+    logout = client.delete("/admin/session")
+    assert logout.status_code == 200
+    assert client.get("/admin/usage").status_code == 401

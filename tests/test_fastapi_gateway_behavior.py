@@ -6,6 +6,11 @@ from modelkeyguard.gateway import build_guard, create_app, process_chat_completi
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
+ADMIN_SECRET = "dev-modelkeyguard-admin-secret"
+
+
+def _admin_headers():
+    return {"x-modelkeyguard-admin-secret": ADMIN_SECRET}
 
 
 def _payload(model="gpt-4o-mini", system=EXPECTED_SYSTEM, max_tokens=16):
@@ -114,6 +119,7 @@ def _register_provider_key(client, key_id: str, provider: str, model: str):
             "display_name": f"{provider}-{model}",
             "provider_secret": f"fake-real-{provider}-key",
         },
+        headers=_admin_headers(),
     )
     assert r.status_code == 200
 

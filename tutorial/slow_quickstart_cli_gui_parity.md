@@ -27,6 +27,7 @@ export MODELKEYGUARD_GRAPH_PATH='out/quickstart_graph.jsonl'
 export MODELKEYGUARD_AUDIT_PATH='out/quickstart_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='dev-quickstart-modelkeyguard-graph-key-32b'
 export MODELKEYGUARD_DRY_RUN=1
+export MODELKEYGUARD_ADMIN_API_SECRET='dev-modelkeyguard-admin-secret'
 ```
 
 If this is your first run, initialize graph state:
@@ -84,13 +85,14 @@ Note:
 CLI/API:
 
 ```bash
-curl -sS -X GET http://127.0.0.1:8789/admin/keys.json
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" -X GET http://127.0.0.1:8789/admin/keys.json
 ```
 
 GUI:
 
 - open `http://127.0.0.1:8789/admin/keys`
 - create/rotate/revoke keys using forms
+- first visit prompts admin login (`/admin/session`) using `MODELKEYGUARD_ADMIN_API_SECRET`
 
 Parity:
 
@@ -117,10 +119,12 @@ GUI:
 - open `http://127.0.0.1:8789/admin/usage`
 - view charts and event table
 - filter by subject and time range
+- use `http://127.0.0.1:8789/admin/history` to inspect exact encrypted request/response history with filters.
 
 Data API behind GUI:
 
-- `http://127.0.0.1:8789/admin/usage.json`
+- `curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/usage.json'`
+- `curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" 'http://127.0.0.1:8789/admin/history.json'`
 
 ## 6. Run review/abuse checks
 
@@ -147,6 +151,15 @@ GUI/API:
   "out_path": "out/quickstart_review_results.jsonl",
   "checkpoint_path": "out/review_checkpoint.json"
 }
+```
+
+CLI form:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8789/admin/review/run \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"sample_size":200,"run_llm_review":false,"lookback_minutes":60}'
 ```
 
 ## 7. Security event intake (host login/sudo)

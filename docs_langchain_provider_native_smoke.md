@@ -49,6 +49,7 @@ export KGW_AZURE_API_VERSION="2024-10-21"
 export KGW_OLLAMA_MODEL="llama3.1"
 export KGW_GEMINI_MODEL="gemini-2.0-flash"
 export KGW_GEMINI_ENDPOINT="$KGW_BASE_URL"
+export KGW_ADMIN_SECRET="${MODELKEYGUARD_ADMIN_API_SECRET:-dev-modelkeyguard-admin-secret}"
 ```
 
 Provider model/deployment defaults used by the script:
@@ -67,6 +68,7 @@ Native routes enforce provider matching, so these keys must exist before native 
 
 ```bash
 curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
+  -H "x-modelkeyguard-admin-secret: $KGW_ADMIN_SECRET" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "key_id=key:azure:demo" \
   --data-urlencode "provider=azure_openai" \
@@ -75,6 +77,7 @@ curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
   --data-urlencode "provider_secret=fake-real-azure-key"
 
 curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
+  -H "x-modelkeyguard-admin-secret: $KGW_ADMIN_SECRET" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "key_id=key:ollama:demo" \
   --data-urlencode "provider=ollama" \
@@ -83,6 +86,7 @@ curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
   --data-urlencode "provider_secret=fake-real-ollama-key"
 
 curl -sS -X POST "$KGW_BASE_URL/admin/keys" \
+  -H "x-modelkeyguard-admin-secret: $KGW_ADMIN_SECRET" \
   -H "Content-Type: application/x-www-form-urlencoded" \
   --data-urlencode "key_id=key:gemini:demo" \
   --data-urlencode "provider=gemini" \

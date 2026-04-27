@@ -462,6 +462,8 @@ This bundle now includes a FastAPI gateway with a secure key-management surface:
 - create / rotate / revoke key lifecycle events
 - `/admin/keys` management page that never renders raw provider keys
 - `/admin/keys.json` safe metadata API
+- shared-secret admin auth gate + short-lived admin session cookie for all `/admin/*` routes
+- encrypted request/response history capture with filtered admin retrieval APIs/UI
 - OpenAI-compatible `/v1/chat/completions` endpoint
 - one-minute LangChain/OpenAI-compatible client demo
 - production-oriented Docker Compose with Keycloak + Postgres + gateway
@@ -494,6 +496,17 @@ The gateway receives the Kogwistar token, checks graph ACL/quota, decrypts only 
 
 ### Manage keys securely
 
+All admin routes now require either:
+
+- header: `x-modelkeyguard-admin-secret: <secret>`, or
+- admin session cookie created by `POST /admin/session`.
+
+Example CLI export:
+
+```bash
+export MODELKEYGUARD_ADMIN_API_SECRET='<admin-shared-secret>'
+```
+
 Open:
 
 ```text
@@ -506,10 +519,25 @@ Raw keys are accepted only through password fields. They are sealed into graph p
 
 New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and keep one shared governance flow internally.
 
+- `POST /admin/session` login (set admin session cookie)
+- `DELETE /admin/session` logout (clear admin session cookie)
 - `GET /admin/usage` interactive usage monitor page
 - `GET /admin/usage.json` filtered usage dataset API
+- `GET /admin/history` interactive request/response history page
+- `GET /admin/history.json` filtered/paginated history metadata API
+- `GET /admin/history/{request_id}.json` exact request/response body detail
+- `GET /admin/history/config` history runtime config
+- `POST /admin/history/config` update retention/cap/runtime history config
 - `POST /admin/review/run` manual/scheduled review trigger (`sample_size`, `lookback_minutes`, `checkpoint_path`)
 - `POST /admin/security-events` host security event intake (shared-secret protected)
+
+History config env defaults (overrideable at runtime by admin config API/UI):
+
+- `MODELKEYGUARD_HISTORY_ENABLED=1`
+- `MODELKEYGUARD_HISTORY_RETENTION_DAYS=30`
+- `MODELKEYGUARD_HISTORY_MAX_ACTIVE_RECORDS=10000`
+- `MODELKEYGUARD_HISTORY_MAX_ACTIVE_BYTES=52428800`
+- `MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS=3600`
 
 Example security-event intake settings:
 

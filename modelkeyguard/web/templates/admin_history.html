@@ -1,0 +1,87 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ModelKeyGuard Request History</title>
+  <link rel="stylesheet" href="/static/admin_history.css">
+</head>
+<body>
+  <header class="admin-nav">
+    <strong>Admin Links:</strong>
+    <a href="/admin/keys">Keys</a>
+    <a href="/admin/usage">Usage Monitor</a>
+    <a href="/admin/history">History</a>
+    <a href="/admin/keys.json">Keys JSON</a>
+    <a href="/admin/usage.json">Usage JSON</a>
+    <a href="/admin/history.json">History JSON</a>
+    <a href="/healthz">Health</a>
+    <a href="/v1/models">Models</a>
+    <a href="/docs">API Docs</a>
+    <a href="/openapi.json">OpenAPI</a>
+  </header>
+
+  <h1>Request / Response History</h1>
+
+  <div class="card filters">
+    <label>Range</label>
+    <select id="timeRange">
+      <option>1h</option>
+      <option selected>24h</option>
+      <option>7d</option>
+      <option>30d</option>
+      <option value="all">all</option>
+    </select>
+
+    <label>Subject Type</label>
+    <select id="subjectType">
+      <option value="">all</option>
+      <option value="principal">principal</option>
+      <option value="user">user</option>
+      <option value="key">key</option>
+      <option value="token">token</option>
+    </select>
+
+    <label>Subject ID</label><input id="subjectId" placeholder="optional subject id">
+    <label>Provider</label><input id="provider" placeholder="openai|azure_openai|ollama|gemini">
+    <label>Model</label><input id="model" placeholder="model name">
+    <label>Decision</label><input id="decision" placeholder="ALLOWED/BLOCKED">
+    <label>HTTP</label><input id="httpStatus" placeholder="200">
+    <button id="refreshBtn">Refresh</button>
+  </div>
+
+  <div class="card config">
+    <h3>History Config</h3>
+    <label>Enabled</label><input id="cfgEnabled" type="checkbox">
+    <label>Retention days</label><input id="cfgRetentionDays" type="number" min="1">
+    <label>Max active records</label><input id="cfgMaxActiveRecords" type="number" min="1">
+    <label>Max active bytes</label><input id="cfgMaxActiveBytes" type="number" min="1">
+    <button id="saveCfgBtn">Save Config</button>
+    <span id="cfgStatus"></span>
+  </div>
+
+  <div class="card">
+    <h3>Filtered History</h3>
+    <table>
+      <thead>
+        <tr>
+          <th>ts</th><th>request_id</th><th>provider</th><th>route_family</th><th>principal</th><th>user</th><th>key</th><th>model</th><th>decision</th><th>status</th><th>detail</th>
+        </tr>
+      </thead>
+      <tbody id="historyBody"></tbody>
+    </table>
+  </div>
+
+  <div class="card detail">
+    <h3>History Detail</h3>
+    <p id="detailMeta">Select a row.</p>
+    <h4>Request Body</h4>
+    <pre id="requestBody" class="mono"></pre>
+    <h4>Response Body</h4>
+    <pre id="responseBody" class="mono"></pre>
+    <h4>Stream Chunks</h4>
+    <pre id="streamChunks" class="mono"></pre>
+  </div>
+
+  <script src="/static/admin_history.js"></script>
+</body>
+</html>

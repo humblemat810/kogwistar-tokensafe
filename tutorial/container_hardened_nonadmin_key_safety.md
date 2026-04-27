@@ -20,6 +20,7 @@ Target:
 
 - non-admin callers can use model endpoints only,
 - non-admin callers cannot reach `/admin/*`, `/docs`, `/openapi.json`,
+- admin callers must present `x-modelkeyguard-admin-secret` or a valid admin session cookie on `/admin/*`,
 - provider key plaintext is never returned by gateway APIs/UI.
 
 Boundary:
@@ -108,6 +109,12 @@ Admin key management is intentionally on loopback-only gateway endpoint:
 
 - `http://127.0.0.1:8789/admin/keys`
 
+Admin auth:
+
+```bash
+export MODELKEYGUARD_ADMIN_API_SECRET='<ADMIN_SHARED_SECRET>'
+```
+
 If you are administering remotely, use SSH tunnel:
 
 ```bash
@@ -130,7 +137,7 @@ Create key (UI form):
 Verify from admin-only API:
 
 ```bash
-curl -sS http://127.0.0.1:8789/admin/keys.json | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/keys.json | python -m json.tool
 ```
 
 You should see:
@@ -205,13 +212,13 @@ Expected:
 Quick checks:
 
 ```bash
-curl -sS http://127.0.0.1:8789/admin/keys.json | grep -i provider_secret || echo "ok: no provider_secret field in admin keys json"
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" http://127.0.0.1:8789/admin/keys.json | grep -i provider_secret || echo "ok: no provider_secret field in admin keys json"
 grep -R --line-number "provider_secret" out/ || echo "ok: no provider_secret in out/"
 ```
 
 ## 9) Operational note
 
-Because `/admin/*` is not application-auth-protected by bearer token today, keep admin path private by network design:
+Because `/admin/*` is intentionally separated from model bearer-token auth, keep admin path private by network design:
 
 - loopback-only gateway admin port (`127.0.0.1:8789`),
 - separate public ingress with explicit path deny rules,

@@ -9,6 +9,8 @@ import pytest
 
 from modelkeyguard.core import ModelKey, ModelKeyGuard, Principal, Request
 from modelkeyguard.postgres_state import PostgresGraphStateStore
+from modelkeyguard.services.history_ops import capture_history_record, get_history_detail, list_history
+from modelkeyguard.settings import AppSettings
 
 pytestmark = pytest.mark.postgres
 
@@ -109,3 +111,42 @@ def test_postgres_uses_named_projections_not_bespoke_quota_tables(pg_store):
         assert cur.fetchone()[0] is None
         cur.execute("select to_regclass('public.usage_lanes')")
         assert cur.fetchone()[0] is None
+
+
+def test_postgres_history_capture_and_projection_queries(pg_store):
+    settings = AppSettings.from_env()
+    metadata = {
+        "request_id": "req-postgres-history-1",
+        "ts": "2026-04-27T00:00:00Z",
+        "provider": "openai",
+        "route_family": "openai_v1",
+        "route": "/v1/chat/completions",
+        "principal_id": "agent:doc",
+        "on_behalf_of_user_id": "user:alice",
+        "token_id": "kgw_doc",
+        "key_id": "key:openai:prod",
+        "model": "gpt-4o-mini",
+        "decision": "ALLOWED",
+        "reason": "allow",
+        "http_status": 200,
+    }
+    capture_history_record(
+        pg_store,
+        settings,
+        request_raw=b'{"model":"gpt-4o-mini","messages":[{"role":"user","content":"hi"}]}',
+        response_raw=b'{"ok":true}',
+        stream_chunks=[b"data: chunk-1\n\n", b"data: [DONE]\n\n"],
+        metadata=metadata,
+    )
+
+    page = list_history(pg_store, settings, filters={"time_range": "24h"}, page=1, page_size=10)
+    assert page["total"] >= 1
+    row = next(r for r in page["data"] if r["request_id"] == "req-postgres-history-1")
+    assert row["provider"] == "openai"
+    assert row["stream_chunk_count"] == 2
+
+    detail = get_history_detail(pg_store, settings, "req-postgres-history-1")
+    assert detail is not None
+    assert '"model":"gpt-4o-mini"' in detail["request_body_text"]
+    assert detail["response_body_text"] == '{"ok":true}'
+    assert len(detail["stream_chunks"]) == 2
