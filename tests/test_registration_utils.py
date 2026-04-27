@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import json
+import sys
+from types import SimpleNamespace
 from pathlib import Path
+
+import pytest
 
 from modelkeyguard.gateway import build_guard, process_chat_completion
 from modelkeyguard.graph_state import GraphStateStore
-from modelkeyguard.registration import RegistrationService, register_usage_demo, safe_token_hash
+from modelkeyguard.registration import RegistrationService, main as registration_main, open_registration_store, register_usage_demo, safe_token_hash
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
@@ -124,3 +128,34 @@ def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     projection2 = store.get_quota_policy_projection("user", "user:test")
     assert projection2 is not None
     assert projection2["items"] == []
+
+
+def test_registration_store_invariant_uses_postgres_when_configured(monkeypatch):
+    calls: list[str] = []
+
+    class FakePostgresStore:
+        def __init__(self, *args, **kwargs):
+            calls.append("postgres")
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "postgres")
+    monkeypatch.setitem(sys.modules, "modelkeyguard.postgres_state", SimpleNamespace(PostgresGraphStateStore=FakePostgresStore))
+
+    store = open_registration_store()
+    assert calls == ["postgres"]
+    assert isinstance(store, FakePostgresStore)
+
+
+def test_registration_store_invariant_rejects_unknown_serious_backend(monkeypatch, capsys):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "chroma")
+    code = registration_main(["register-user", "--user-id", "user:test"])
+    captured = capsys.readouterr()
+    assert code == 2
+    assert "unsupported_store_backend:chroma" in captured.out
+
+
+def test_token_verifier_rejects_unknown_serious_backend_without_jsonl_fallback(tmp_path, monkeypatch):
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "chroma")
+    with pytest.raises(ValueError, match="unsupported_store_backend:chroma"):
+        TokenVerifier(policy_path)

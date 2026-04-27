@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import secrets
 import time
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from pathlib import Path
 from typing import Any
 import hashlib
 
-from .graph_state import GraphStateStore
+from .graph_state import GraphStateStore, resolve_store_backend
 
 
 def safe_token_hash(token: str) -> str:
@@ -256,6 +257,25 @@ class RegistrationService:
             raise RegistrationError(f"id_must_start_with_{prefix}")
 
 
+def open_registration_store():
+    """Open the registration store using the configured backend.
+
+    Invariant: never silently fall back to JSONL when a serious backend mode
+    was explicitly requested.
+    """
+    try:
+        store_kind = resolve_store_backend()
+    except ValueError as exc:
+        raise RegistrationError(str(exc)) from exc
+    if store_kind == "jsonl":
+        return GraphStateStore()
+    if store_kind == "postgres":
+        from .postgres_state import PostgresGraphStateStore
+
+        return PostgresGraphStateStore()
+    raise RegistrationError(f"unsupported_store_backend:{store_kind}")
+
+
 def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.jsonl", app_key: str = "dev-registration-demo-key-change-me") -> IssuedToken:
     # Rebuild the demo graph from the default policy and then append registration records.
     path = Path(graph_path)
@@ -344,7 +364,11 @@ def main(argv: list[str] | None = None) -> int:
         print("token_file=out/registration_demo_token.txt")
         return 0
 
-    store = GraphStateStore()
+    try:
+        store = open_registration_store()
+    except RegistrationError as exc:
+        print(str(exc))
+        return 2
     reg = RegistrationService(store)
     if args.cmd == "register-user":
         reg.register_user(args.user_id, args.display_name)

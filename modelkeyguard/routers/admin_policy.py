@@ -8,6 +8,79 @@ from fastapi.responses import JSONResponse
 from ..registration import RegistrationError, RegistrationService
 
 
+def _json_request_body(schema: dict[str, Any], required: bool = True) -> dict[str, Any]:
+    return {
+        "required": required,
+        "content": {
+            "application/json": {
+                "schema": schema,
+            }
+        },
+    }
+
+
+USER_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "user_id": {"type": "string", "example": "user:alice"},
+        "display_name": {"type": "string", "example": "Alice"},
+    },
+    "required": ["user_id"],
+}
+
+APPLICATION_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "application_id": {"type": "string", "example": "app:crm-assistant"},
+        "display_name": {"type": "string", "example": "CRM Assistant"},
+    },
+    "required": ["application_id"],
+}
+
+PRINCIPAL_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "principal_id": {"type": "string", "example": "agent:azure-manual-demo"},
+        "kind": {"type": "string", "example": "agent"},
+        "groups": {
+            "oneOf": [
+                {"type": "string", "example": "app-dev,finance"},
+                {"type": "array", "items": {"type": "string"}, "example": ["app-dev", "finance"]},
+            ]
+        },
+        "namespace": {"type": "string", "example": "tenant:kogwistar"},
+        "application_id": {"type": "string", "example": "app:crm-assistant"},
+        "description": {"type": "string", "example": "Azure app principal"},
+    },
+    "required": ["principal_id"],
+}
+
+QUOTA_UPSERT_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lane": {"type": "string", "enum": ["principal", "user", "key"], "example": "principal"},
+        "subject_id": {"type": "string", "example": "agent:azure-manual-demo"},
+        "quota_name": {"type": "string", "example": "hour"},
+        "period": {"type": "string", "enum": ["10s", "hour", "day", "week", "month"], "example": "hour"},
+        "max_usd": {"type": "number", "example": 20.0},
+        "max_tokens": {"type": "integer", "example": 200000},
+        "max_requests": {"type": "integer", "example": 1000},
+    },
+    "required": ["lane", "subject_id", "quota_name", "period"],
+}
+
+QUOTA_REVOKE_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "lane": {"type": "string", "enum": ["principal", "user", "key"], "example": "principal"},
+        "subject_id": {"type": "string", "example": "agent:azure-manual-demo"},
+        "quota_name": {"type": "string", "example": "hour"},
+        "reason": {"type": "string", "example": "temporary freeze"},
+    },
+    "required": ["lane", "subject_id", "quota_name"],
+}
+
+
 def create_router() -> APIRouter:
     router = APIRouter(tags=["admin-policy"])
 
@@ -30,7 +103,7 @@ def create_router() -> APIRouter:
         except Exception:
             return {}
 
-    @router.post("/admin/policy/users")
+    @router.post("/admin/policy/users", openapi_extra={"requestBody": _json_request_body(USER_BODY_SCHEMA)})
     async def admin_register_user(request: Request):
         reg = _registration_service(request)
         if not reg:
@@ -45,7 +118,7 @@ def create_router() -> APIRouter:
         except RegistrationError as exc:
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
-    @router.post("/admin/policy/applications")
+    @router.post("/admin/policy/applications", openapi_extra={"requestBody": _json_request_body(APPLICATION_BODY_SCHEMA)})
     async def admin_register_application(request: Request):
         reg = _registration_service(request)
         if not reg:
@@ -60,7 +133,7 @@ def create_router() -> APIRouter:
         except RegistrationError as exc:
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
-    @router.post("/admin/policy/principals")
+    @router.post("/admin/policy/principals", openapi_extra={"requestBody": _json_request_body(PRINCIPAL_BODY_SCHEMA)})
     async def admin_register_principal(request: Request):
         reg = _registration_service(request)
         if not reg:
@@ -89,7 +162,7 @@ def create_router() -> APIRouter:
         except RegistrationError as exc:
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
-    @router.post("/admin/policy/quotas/upsert")
+    @router.post("/admin/policy/quotas/upsert", openapi_extra={"requestBody": _json_request_body(QUOTA_UPSERT_BODY_SCHEMA)})
     async def admin_upsert_quota(request: Request):
         reg = _registration_service(request)
         if not reg:
@@ -137,7 +210,7 @@ def create_router() -> APIRouter:
         except (RegistrationError, ValueError) as exc:
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
-    @router.post("/admin/policy/quotas/revoke")
+    @router.post("/admin/policy/quotas/revoke", openapi_extra={"requestBody": _json_request_body(QUOTA_REVOKE_BODY_SCHEMA)})
     async def admin_revoke_quota(request: Request):
         reg = _registration_service(request)
         if not reg:

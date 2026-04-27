@@ -6,23 +6,78 @@ import os
 from pathlib import Path
 from collections import Counter
 
-from .graph_state import GraphStateStore
+from .graph_state import GraphStateStore, resolve_store_backend
+from .policy_loader import load_policy_json
 
 
 def init_graph(policy_path: str = "config/gateway_policy.json", graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
-    policy = json.loads(Path(policy_path).read_text())
+    policy = load_policy_json(policy_path)
     path = Path(graph_path)
-    if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() != "postgres" and path.exists():
+    store_kind = resolve_store_backend()
+    if store_kind != "postgres" and path.exists():
         path.unlink()
-    graph = GraphStateStore.from_policy(policy, path=path)
-    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() == "postgres" else str(path)
+
+    reset_existing = _bool_env(
+        "MODELKEYGUARD_INIT_RESET_EXISTING",
+        default=False,
+    )
+    if store_kind == "postgres" and reset_existing:
+        _reset_postgres_graph_state(os.getenv("MODELKEYGUARD_POSTGRES_DSN"))
+
+    graph = _init_with_self_heal(
+        policy=policy,
+        graph_path=path,
+        store_kind=store_kind,
+        reset_existing=reset_existing,
+    )
+    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if store_kind == "postgres" else str(path)
     print(f"initialized encrypted graph: {target}")
     print(f"nodes={len(graph.nodes)} edges={len(graph.edges)} events={len(graph.events)} projections={len(graph.projections)}")
     return 0
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _init_with_self_heal(*, policy: dict, graph_path: Path, store_kind: str, reset_existing: bool):
+    try:
+        return GraphStateStore.from_policy(policy, path=graph_path)
+    except ValueError as exc:
+        msg = str(exc)
+        if "sealed graph payload authentication failed" not in msg or not reset_existing:
+            raise
+        if store_kind == "postgres":
+            _reset_postgres_graph_state(os.getenv("MODELKEYGUARD_POSTGRES_DSN"))
+        else:
+            graph_path.unlink(missing_ok=True)
+        return GraphStateStore.from_policy(policy, path=graph_path)
+
+
+def _reset_postgres_graph_state(dsn: str | None = None) -> None:
+    dsn_value = dsn or os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
+    try:
+        import psycopg  # type: ignore
+    except Exception:
+        return
+    with psycopg.connect(dsn_value) as conn, conn.cursor() as cur:
+        # Reset authoritative append-only records and current projections so
+        # init_graph is idempotent across key changes in local/dev workflows.
+        for table in ("graph_records", "graph_events", "graph_edges", "graph_nodes", "named_projections"):
+            try:
+                cur.execute(f"truncate table {table} restart identity")
+            except Exception:
+                conn.rollback()
+                continue
+        conn.commit()
+
+
 def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
-    if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() == "postgres":
+    store_kind = resolve_store_backend()
+    if store_kind == "postgres":
         from .postgres_state import PostgresGraphStateStore
         graph = PostgresGraphStateStore()
     else:
@@ -32,7 +87,7 @@ def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
     decisions = Counter(n.payload.get("reason") or n.payload.get("event_type") for n in graph.nodes.values() if n.kind == "access_conversation_event")
     usage_heads = {nid: n.payload for nid, n in graph.nodes.items() if n.kind == "usage_lane_head"}
     print(json.dumps({
-        "store": os.getenv("MODELKEYGUARD_STORE", "jsonl"),
+        "store": store_kind,
         "graph_path": graph_path,
         "nodes": len(graph.nodes),
         "edges": len(graph.edges),

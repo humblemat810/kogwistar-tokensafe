@@ -40,6 +40,12 @@ Note:
 From repo root:
 
 ```bash
+./scripts/reset_local_e2e_state.sh
+```
+
+Then prepare Python:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"

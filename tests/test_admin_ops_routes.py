@@ -236,6 +236,28 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.post("/admin/review/run", json={}).status_code == 401
 
 
+def test_admin_policy_routes_expose_swagger_request_bodies(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    spec = client.get("/openapi.json").json()
+    principal_post = spec["paths"]["/admin/policy/principals"]["post"]
+    principal_body = principal_post["requestBody"]["content"]["application/json"]["schema"]
+    assert principal_body["type"] == "object"
+    assert "principal_id" in principal_body["properties"]
+
+    quota_post = spec["paths"]["/admin/policy/quotas/upsert"]["post"]
+    quota_body = quota_post["requestBody"]["content"]["application/json"]["schema"]
+    assert "lane" in quota_body["properties"]
+    assert "subject_id" in quota_body["properties"]
+    assert "quota_name" in quota_body["properties"]
+
+
 def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

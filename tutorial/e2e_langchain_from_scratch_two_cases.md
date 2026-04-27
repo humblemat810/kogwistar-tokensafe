@@ -42,7 +42,13 @@ Important:
 
 Stop any running gateway in your current shell/session.
 
-Remove previous local quickstart artifacts:
+Run the repo reset helper first (recommended and repeat-safe):
+
+```bash
+./scripts/reset_local_e2e_state.sh
+```
+
+Then remove Case 1 tutorial artifacts:
 
 ```bash
 rm -f out/case1_graph.jsonl out/case1_audit.jsonl out/case1_review.jsonl out/case1_review_checkpoint.json
@@ -182,6 +188,7 @@ You need:
 If you want a strict from-scratch Postgres state, reset volumes:
 
 ```bash
+./scripts/reset_local_e2e_state.sh
 docker compose down -v || docker-compose down -v
 ```
 

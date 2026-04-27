@@ -1,5 +1,6 @@
 # Tutorial Folder
 
+- `../scripts/reset_local_e2e_state.sh`: recommended preflight reset script for repeatable from-scratch runs (stops local gateway/containers, removes local JSONL artifacts, attempts Postgres graph-table truncation when configured, and prints 5432/8789 port holders).
 - `slow_quickstart_cli_gui_parity.md`: step-by-step retry-safe tutorial that maps CLI and GUI flows.
 - `e2e_single_azure_gui_key_and_principal.md`: single deterministic flow for registering an app principal, creating Azure key via admin GUI, and calling Azure endpoint with that principal token.
 - `e2e_azure_real_key_usage_and_billing.md`: real paid Azure flow from policy file + admin GUI key creation to client call and usage/billing verification (including provider token breakdown extraction from history detail).

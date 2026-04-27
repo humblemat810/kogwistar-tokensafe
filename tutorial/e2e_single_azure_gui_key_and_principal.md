@@ -56,6 +56,7 @@ Rules:
 Stop previous local gateway process first.
 
 ```bash
+./scripts/reset_local_e2e_state.sh
 rm -f out/single_e2e_graph.jsonl out/single_e2e_audit.jsonl out/single_e2e_policy.json
 ```
 
@@ -199,6 +200,47 @@ curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   http://127.0.0.1:8789/admin/keys.json | python -m json.tool
 ```
 
+## 4b) Optional: add a brand-new runtime principal and issue a new safe token
+
+If you want to create a new principal after startup (instead of using `kgw_single_azure_demo` from step 2), do this:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8789/admin/policy/principals \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:azure-manual-demo","kind":"agent","groups":"app-dev","namespace":"tenant:kogwistar","description":"manual runtime principal"}' \
+  | python -m json.tool
+
+curl -sS -X POST http://127.0.0.1:8789/admin/policy/quotas/upsert \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"principal","subject_id":"agent:azure-manual-demo","quota_name":"hour","period":"hour","max_requests":1000,"max_tokens":200000,"max_usd":20.0}' \
+  | python -m json.tool
+```
+
+Then issue a safe token from the same backend/key context:
+
+```bash
+# Must match the running gateway backend + key.
+export MODELKEYGUARD_STORE='postgres'
+export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
+export MODELKEYGUARD_GRAPH_KEY='single-e2e-graph-key-32-bytes-minimum'
+
+export KGW_SAFE_TOKEN="$(python -m modelkeyguard registration issue-token \
+  --principal-id agent:azure-manual-demo \
+  --namespace tenant:kogwistar)"
+echo "${KGW_SAFE_TOKEN}"
+```
+
+Because token issuance above is from a separate process, restart gateway once so it reloads graph state:
+
+```bash
+pkill -f "python -m modelkeyguard gateway" || true
+./scripts/start_gateway.sh
+```
+
+Use `KGW_SAFE_TOKEN` in step 5 and `KGW_TOKEN` in step 6.
+
 ## 5) Call Azure native endpoint with the registered principal token
 
 Use the registered local safe token from step 2:
@@ -210,6 +252,8 @@ export KGW_AZURE_DEPLOYMENT='gpt-5-mini'
 export KGW_AZURE_API_VERSION='2024-10-21'
 ./scripts/smoke_azure_real_completion.sh
 ```
+
+If you ran step 4b, replace `kgw_single_azure_demo` with `${KGW_SAFE_TOKEN}`.
 
 Expected results:
 
@@ -230,6 +274,12 @@ export KGW_SYSTEM_PROMPT='You are a policy-compliant enterprise assistant.'
 
 python scripts/external_langchain_smoke.py --provider azure_openai --mode native
 python scripts/external_langchain_smoke.py --provider azure_openai --mode native --stream
+```
+
+If you ran step 4b, set:
+
+```bash
+export KGW_TOKEN="${KGW_SAFE_TOKEN}"
 ```
 
 ## 7) Verify usage + history for this principal
@@ -293,3 +343,8 @@ docker compose down -v || docker-compose down -v
 ```
 
 If you get `sealed graph payload authentication failed`, your `MODELKEYGUARD_GRAPH_KEY` changed between runs.
+
+If you get `principal_not_registered` while issuing a safe token:
+
+1. You likely did not successfully create the principal in `/admin/policy/principals`, or
+2. your `MODELKEYGUARD_STORE` / `MODELKEYGUARD_POSTGRES_DSN` / `MODELKEYGUARD_GRAPH_KEY` in the token-issuing shell do not match the running gateway backend/key context.

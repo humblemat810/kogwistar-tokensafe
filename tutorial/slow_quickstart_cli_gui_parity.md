@@ -20,6 +20,12 @@ pip install -e ".[dev]"
 
 ## 1. Choose a stable local state (important)
 
+Reset local tutorial state first:
+
+```bash
+./scripts/reset_local_e2e_state.sh
+```
+
 Use the same graph/audit/key every time for retry-safe runs:
 
 ```bash

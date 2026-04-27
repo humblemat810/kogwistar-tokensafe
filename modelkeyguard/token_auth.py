@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .graph_state import GraphStateStore
+from .graph_state import GraphStateStore, resolve_store_backend
 from .policy_loader import load_policy_json
 
 
@@ -42,7 +42,16 @@ class TokenVerifier:
     def __init__(self, policy_path: str | Path = "config/gateway_policy.json") -> None:
         self.policy_path = Path(policy_path)
         self.policy = load_policy_json(self.policy_path)
-        self.graph_state = GraphStateStore.from_policy(self.policy) if self.policy else GraphStateStore()
+        if self.policy:
+            self.graph_state = GraphStateStore.from_policy(self.policy)
+        else:
+            store = resolve_store_backend()
+            if store == "postgres":
+                from .postgres_state import PostgresGraphStateStore
+
+                self.graph_state = PostgresGraphStateStore()
+            else:
+                self.graph_state = GraphStateStore()
         self.keycloak_url = os.getenv("KEYCLOAK_URL", "http://localhost:8080")
         self.realm = os.getenv("KEYCLOAK_REALM", "modelguard")
         self.introspection_client_id = os.getenv("KEYCLOAK_INTROSPECTION_CLIENT_ID", "modelguard-gateway")

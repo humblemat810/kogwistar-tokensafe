@@ -13,6 +13,20 @@ Run commands from repo root:
 cd "$(git rev-parse --show-toplevel)"
 ```
 
+## 0) Mandatory clean preflight (default workflow)
+
+Run this first. It closes old gateway processes, tears down local containers/volumes used by this repo, and prints port holders for `5432`/`8789`:
+
+```bash
+./scripts/reset_local_e2e_state.sh
+```
+
+If `5432` is still occupied after that, stop host postgres:
+
+```bash
+sudo systemctl stop postgresql
+```
+
 ## 1) Create a dedicated runtime policy file
 
 Create a minimal policy with one user, one principal, one safe token, and one model price entry:
@@ -76,6 +90,9 @@ export MODELKEYGUARD_ADMIN_API_SECRET='<ADMIN_SECRET>'
 export MODELKEYGUARD_DRY_RUN=0
 export AZURE_OPENAI_UPSTREAM_URL='<AZURE_OPENAI_BASE_URL>'
 ```
+
+Use real values in exports. Do not leave placeholders like `<GRAPH_KEY_32+_CHARS>`.
+Keep one consistent `MODELKEYGUARD_GRAPH_KEY` for this run; changing it later will make existing sealed state unreadable.
 
 Start services:
 
