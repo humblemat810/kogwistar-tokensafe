@@ -91,6 +91,7 @@ def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
     assert page.status_code == 200
     assert "/static/admin_keys.css" in page.text
     assert "ModelKeyGuard Key Management" in page.text
+    assert "name=\"intended_use\"" in page.text
     assert client.get("/static/admin_keys.css").status_code == 200
 
 

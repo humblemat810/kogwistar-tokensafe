@@ -321,11 +321,13 @@ class LLMUsageReviewer:
 
     def _build_review_payload(self, ctx: dict[str, Any], policy: dict[str, Any]) -> dict[str, Any]:
         rows = ctx["events"]
+        key_usage_contracts = self._build_key_usage_contracts(rows, policy)
         return {
             "task": "Decide whether model-key usage matches the pre-assigned usage profile. Return risk, reasons, and recommended action.",
             "subject_type": ctx["subject_type"],
             "subject_id": ctx["subject_id"],
             "usage_profile": policy.get("usage_profiles", {}).get(ctx["subject_id"], {}),
+            "key_usage_contracts": key_usage_contracts,
             "event_count": len(rows),
             "sample": redact_sensitive(rows[:20]),
             "aggregates": {
@@ -340,6 +342,29 @@ class LLMUsageReviewer:
                 ).most_common(10),
             },
         }
+
+    def _build_key_usage_contracts(self, rows: list[dict[str, Any]], policy: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        by_policy = {
+            str(item.get("id", "")): item
+            for item in policy.get("model_keys", [])
+            if isinstance(item, dict) and item.get("id")
+        }
+        key_ids = sorted({str(r.get("key_id")) for r in rows if r.get("key_id")})
+        contracts: dict[str, dict[str, Any]] = {}
+        for key_id in key_ids:
+            graph_payload: dict[str, Any] | None = None
+            node = self.graph_state.nodes.get(key_id) if self.graph_state else None
+            if node and node.kind == "model_key":
+                graph_payload = node.payload
+            policy_payload = by_policy.get(key_id, {})
+            models = graph_payload.get("models") if graph_payload else policy_payload.get("models", [])
+            contracts[key_id] = {
+                "provider": str((graph_payload or policy_payload).get("provider", "")),
+                "display_name": str((graph_payload or policy_payload).get("display_name", key_id)),
+                "models": [str(m) for m in models] if isinstance(models, list) else [],
+                "intended_use": str((graph_payload or policy_payload).get("intended_use", "")),
+            }
+        return contracts
 
     @staticmethod
     def default_review_callback(payload: dict[str, Any]) -> dict[str, Any]:

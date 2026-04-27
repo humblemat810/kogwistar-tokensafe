@@ -11,10 +11,19 @@ table {
 td, th {
   border: 1px solid #ddd;
   padding: 0.5rem;
+  vertical-align: top;
+  word-break: break-word;
 }
 
 input {
   margin: 0.2rem;
+}
+
+textarea {
+  margin: 0.2rem;
+  min-width: 24rem;
+  min-height: 4.5rem;
+  vertical-align: top;
 }
 
 code {

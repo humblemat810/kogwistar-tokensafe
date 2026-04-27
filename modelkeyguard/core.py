@@ -27,6 +27,7 @@ class ModelKey:
     display_name: str
     monthly_budget_usd: float = 0.0
     approval_threshold_usd: float = 999999.0
+    intended_use: str = ""
 
 
 @dataclass(frozen=True)

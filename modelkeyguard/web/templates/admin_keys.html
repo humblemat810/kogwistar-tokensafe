@@ -14,6 +14,7 @@
     <input name="provider" placeholder="openai" required>
     <input name="models" placeholder="gpt-4o-mini,gpt-5.3-mini" required>
     <input name="display_name" placeholder="OpenAI production">
+    <textarea name="intended_use" placeholder="Intended use (paragraph): e.g. This key is only for internal document summarization and retrieval workflows. Do not use for coding assistants, prompt-hacking experiments, or secret extraction tasks."></textarea>
     <input type='password' name='provider_secret' placeholder='provider key' autocomplete='off' required>
     <input name="expires_at_epoch" placeholder="optional epoch expiry">
     <button>Create sealed key</button>
@@ -22,7 +23,7 @@
   <h2>Keys</h2>
   <table>
     <thead>
-      <tr><th>Key</th><th>Provider</th><th>Models</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr>
+      <tr><th>Key</th><th>Provider</th><th>Models</th><th>Display name</th><th>Intended use</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr>
     </thead>
     <tbody>
       {{rows}}

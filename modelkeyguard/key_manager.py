@@ -15,6 +15,7 @@ class KeyView:
     provider: str
     models: tuple[str, ...]
     display_name: str
+    intended_use: str
     status: str
     active_secret_ref: str | None
     expires_at_epoch: int | None
@@ -46,6 +47,7 @@ class KeyManager:
         provider: str,
         models: list[str],
         display_name: str,
+        intended_use: str = "",
         provider_secret: str,
         created_by: str,
         expires_at_epoch: int | None = None,
@@ -61,13 +63,18 @@ class KeyManager:
             "provider": provider,
             "models": models,
             "display_name": display_name or key_id,
+            "intended_use": intended_use.strip(),
             "status": "active",
             "active_secret_ref": secret_ref,
             "created_by": created_by,
             "created_at_epoch": now_epoch(),
         })
         self.graph_state.put_edge(f"edge:{key_id}:HAS_ACTIVE_SECRET:{secret_ref}", "HAS_ACTIVE_SECRET", key_id, secret_ref, {})
-        self.graph_state.append_event("MODEL_KEY_CREATED", key_id, {"key_id": key_id, "provider": provider, "models": models, "created_by": created_by})
+        self.graph_state.append_event(
+            "MODEL_KEY_CREATED",
+            key_id,
+            {"key_id": key_id, "provider": provider, "models": models, "created_by": created_by, "intended_use": intended_use.strip()},
+        )
         return self.get_key_view(key_id)  # type: ignore[return-value]
 
     def rotate_key(self, *, key_id: str, provider_secret: str, rotated_by: str, expires_at_epoch: int | None = None) -> KeyView:
@@ -163,6 +170,7 @@ class KeyManager:
             provider=str(payload.get("provider", "unknown")),
             models=tuple(payload.get("models", [])),
             display_name=str(payload.get("display_name", key_id)),
+            intended_use=str(payload.get("intended_use", "")),
             status=str(payload.get("status", "active")),
             active_secret_ref=secret_ref,
             expires_at_epoch=exp,

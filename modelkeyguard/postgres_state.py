@@ -406,7 +406,7 @@ class PostgresGraphStateStore:
             store.put_edge(f"edge:{client_node}:AUTHENTICATES_AS:{principal_id}", "AUTHENTICATES_AS", client_node, principal_id, {})
         for key in policy.get("model_keys", []):
             key_id = key["id"]
-            store.put_node(key_id, "model_key", {"provider": key["provider"], "models": key["models"], "display_name": key.get("display_name", key_id), "sealed_secret_payload": key.get("sealed_secret_payload"), "secret_ref": key.get("secret_ref")})
+            store.put_node(key_id, "model_key", {"provider": key["provider"], "models": key["models"], "display_name": key.get("display_name", key_id), "intended_use": key.get("intended_use", ""), "sealed_secret_payload": key.get("sealed_secret_payload"), "secret_ref": key.get("secret_ref")})
             for quota_name, quota in key.get("quotas", {}).items():
                 qid = f"quota:key:{key_id}:{quota_name}"
                 store.put_node(qid, "quota_policy", {"lane": "key", "subject_id": key_id, **quota})

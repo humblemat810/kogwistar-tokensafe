@@ -46,6 +46,7 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
                 secret_ref=secret_ref,
                 display_name=item.get("display_name", item["id"]),
                 approval_threshold_usd=float(item.get("approval_threshold_usd", 999999.0)),
+                intended_use=str(item.get("intended_use", "")),
             )
         )
         acl = item.get("acl", {})

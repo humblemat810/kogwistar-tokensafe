@@ -4,7 +4,13 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
-PYTHON_BIN="${PYTHON:-python3}"
+if [[ -n "${PYTHON:-}" ]]; then
+  PYTHON_BIN="$PYTHON"
+elif [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
 HOST="${MODELKEYGUARD_HOST:-127.0.0.1}"
 PORT="${MODELKEYGUARD_PORT:-8789}"
 BASE_URL="http://${HOST}:${PORT}"
@@ -22,6 +28,7 @@ export MODELKEYGUARD_AUDIT_PATH="$AUDIT_PATH"
 export MODELKEYGUARD_GRAPH_KEY="$GRAPH_KEY"
 export MODELKEYGUARD_DRY_RUN="${MODELKEYGUARD_DRY_RUN:-1}"
 export MODELKEYGUARD_AUTH_MODE="${MODELKEYGUARD_AUTH_MODE:-local}"
+export MODELKEYGUARD_POLICY_PATH="config/gateway_policy.json"
 export MODELKEYGUARD_HOST="$HOST"
 export MODELKEYGUARD_PORT="$PORT"
 
@@ -50,6 +57,11 @@ step 2 "$TOTAL" "Initialize graph-native policy state"
 run "$PYTHON_BIN" -c "from modelkeyguard.graph_tools import init_graph; init_graph('config/gateway_policy.json', '$GRAPH_PATH')"
 
 step 3 "$TOTAL" "Start FastAPI ModelKeyGuard gateway in the background"
+if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
+  echo "An existing gateway is already responding on $BASE_URL." >&2
+  echo "Stop it first, then rerun quickstart for deterministic results." >&2
+  exit 1
+fi
 GATEWAY_LOG="$LOG_DIR/gateway.log"
 ("$PYTHON_BIN" -m modelkeyguard gateway --host "$HOST" --port "$PORT" >"$GATEWAY_LOG" 2>&1) &
 GATEWAY_PID=$!
@@ -58,6 +70,11 @@ note "gateway log: $GATEWAY_LOG"
 
 printf '  - waiting for /healthz'
 for _ in $(seq 1 80); do
+  if ! kill -0 "$GATEWAY_PID" >/dev/null 2>&1; then
+    echo "\nGateway process exited before becoming ready. Last log lines:" >&2
+    tail -80 "$GATEWAY_LOG" >&2 || true
+    exit 1
+  fi
   if curl -fsS "$BASE_URL/healthz" >/dev/null 2>&1; then
     printf ' ready\n'
     break
@@ -75,6 +92,7 @@ curl -fsS "$BASE_URL/healthz" | "$PYTHON_BIN" -m json.tool
 step 4 "$TOTAL" "Run OpenAI-compatible client call using a Kogwistar-safe key"
 export OPENAI_BASE_URL="$BASE_URL/v1"
 export OPENAI_API_KEY="kgw_demo_doc_ingestor"
+export OPENAI_MODEL="gpt-4o-mini"
 run "$PYTHON_BIN" scripts/langchain_user_openai_compatible.py
 
 step 5 "$TOTAL" "Show quota/error semantics: principal limit, user limit, permission deny"

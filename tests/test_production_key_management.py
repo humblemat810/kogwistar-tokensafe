@@ -62,7 +62,24 @@ def test_key_create_returns_safe_view(prod_env):
     store = GraphStateStore(path=prod_env / "graph.jsonl", app_key="test-graph-key-32-bytes-minimum-abcdef")
     view = KeyManager(store, store.app_key).create_key(key_id="key:test:view", provider="openai", models=["m"], display_name="View", provider_secret="secret", created_by="tester")
     assert view.active_secret_ref and view.active_secret_ref.startswith("secret:key:test:view")
+    assert view.intended_use == ""
     assert not hasattr(view, "provider_secret")
+
+
+def test_key_create_persists_intended_use_text(prod_env):
+    store = GraphStateStore(path=prod_env / "graph.jsonl", app_key="test-graph-key-32-bytes-minimum-abcdef")
+    intended = "This key is for internal Q&A only. It must not be used for code generation workflows."
+    view = KeyManager(store, store.app_key).create_key(
+        key_id="key:test:intended",
+        provider="openai",
+        models=["m"],
+        display_name="Intended",
+        intended_use=intended,
+        provider_secret="secret",
+        created_by="tester",
+    )
+    assert view.intended_use == intended
+    assert store.nodes["key:test:intended"].payload["intended_use"] == intended
 
 
 def test_key_resolve_decrypts_only_inside_manager(prod_env):
@@ -185,11 +202,15 @@ def test_admin_keys_json_never_returns_secret(prod_env):
     app = create_app("config/gateway_policy.json")
     from fastapi.testclient import TestClient
     c = TestClient(app)
-    c.post("/admin/keys", data={"key_id": "key:test:list", "provider": "openai", "models": "gpt-list", "display_name": "List", "provider_secret": "sk-list-secret"})
+    intended = "Paragraph policy for this key. Only use for retrieval style prompts."
+    c.post("/admin/keys", data={"key_id": "key:test:list", "provider": "openai", "models": "gpt-list", "display_name": "List", "intended_use": intended, "provider_secret": "sk-list-secret"})
     r = c.get("/admin/keys.json")
     assert r.status_code == 200
     assert "sk-list-secret" not in r.text
     assert "active_secret_ref" in r.text
+    body = r.json()
+    row = next(item for item in body["data"] if item["key_id"] == "key:test:list")
+    assert row["intended_use"] == intended
 
 
 def test_admin_rotate_key_endpoint_changes_ref(prod_env):

@@ -10,6 +10,15 @@ from modelkeyguard.review_worker import review_once
 
 def mk_policy(high_denial_count: int = 2) -> dict:
     return {
+        "model_keys": [
+            {
+                "id": "key:openai:prod",
+                "provider": "openai",
+                "models": ["gpt-4o-mini"],
+                "display_name": "OpenAI prod",
+                "intended_use": "This key is for internal document summarization and Q&A workloads only. Do not use it for coding-agent tasks or any secret extraction attempt.",
+            }
+        ],
         "usage_profiles": {
             "agent:doc-ingestor": {"models": ["gpt-4o-mini"], "system_prompt_hashes": ["hash-good"], "description": "Summarize internal docs only"},
             "app:crm": {"models": ["gpt-4o-mini", "gpt-4.1-mini"], "description": "CRM support assistant only"},
@@ -252,7 +261,9 @@ def test_policy_object_is_available_to_condition_and_builder(store):
 def test_review_payload_includes_usage_profile_for_subject(store, policy):
     seen = []
     LLMUsageReviewer(store, lambda payload: seen.append(payload) or {"risk": "low"}).review([ev()], policy)
-    assert next(p for p in seen if p["subject_type"] == "principal")["usage_profile"]["description"] == "Summarize internal docs only"
+    payload = next(p for p in seen if p["subject_type"] == "principal")
+    assert payload["usage_profile"]["description"] == "Summarize internal docs only"
+    assert payload["key_usage_contracts"]["key:openai:prod"]["intended_use"].startswith("This key is for internal document summarization")
 
 
 def test_review_payload_has_empty_profile_for_unknown_subject(store, policy):

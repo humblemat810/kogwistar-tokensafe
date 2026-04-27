@@ -32,6 +32,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                 provider=str(form.get("provider", "")),
                 models=[m.strip() for m in str(form.get("models", "")).split(",") if m.strip()],
                 display_name=str(form.get("display_name", "")),
+                intended_use=str(form.get("intended_use", "")),
                 provider_secret=str(form.get("provider_secret", "")),
                 created_by="admin:web",
                 expires_at_epoch=int(form["expires_at_epoch"]) if form.get("expires_at_epoch") else None,
@@ -43,6 +44,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                     models=view.models,
                     secret_ref=view.active_secret_ref,
                     display_name=view.display_name,
+                    intended_use=view.intended_use,
                 )
             )
             request.app.state.guard.grant(
@@ -74,6 +76,7 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
                         models=old.models,
                         secret_ref=view.active_secret_ref,
                         display_name=old.display_name,
+                        intended_use=old.intended_use,
                     )
                 )
             return {"ok": True, "key_id": view.key_id, "secret_ref": view.active_secret_ref, "secret_value": None}
