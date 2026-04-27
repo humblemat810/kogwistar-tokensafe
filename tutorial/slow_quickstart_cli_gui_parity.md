@@ -30,6 +30,11 @@ export MODELKEYGUARD_DRY_RUN=1
 export MODELKEYGUARD_ADMIN_API_SECRET='dev-modelkeyguard-admin-secret'
 ```
 
+Advanced alternative (real endpoint path):
+
+- Keep all steps the same, but set `MODELKEYGUARD_DRY_RUN=0` and register real provider secret values in `/admin/keys`.
+- Do not mix fake and real keys in the same quickstart run. If switching, stop gateway and restart from section 1.
+
 If this is your first run, initialize graph state:
 
 ```bash

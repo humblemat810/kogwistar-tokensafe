@@ -10,13 +10,34 @@ cd "$(git rev-parse --show-toplevel)"
 
 ## 0) Start gateway with retry-safe quickstart state
 
+### Path selection (mandatory, do not mix)
+
+Choose one path for the whole run:
+
+- `demo`: fake provider secrets + dry-run gateway
+- `real`: real provider secrets + real upstream gateway
+
+```bash
+export KGW_SMOKE_PATH='demo'   # or 'real'
+echo "KGW_SMOKE_PATH=${KGW_SMOKE_PATH}"
+```
+
+Rules:
+
+- Do not run both paths in one shell session.
+- If you switch path, stop gateway and restart from section 0.
+
 If you previously ran `./scripts/quickstart.sh`, reuse the same graph path + key:
 
 ```bash
 export MODELKEYGUARD_GRAPH_PATH='out/quickstart_graph.jsonl'
 export MODELKEYGUARD_AUDIT_PATH='out/quickstart_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='dev-quickstart-modelkeyguard-graph-key-32b'
-export MODELKEYGUARD_DRY_RUN=1
+if [[ "${KGW_SMOKE_PATH}" == "demo" ]]; then
+  export MODELKEYGUARD_DRY_RUN=1
+else
+  export MODELKEYGUARD_DRY_RUN=0
+fi
 ./scripts/start_gateway.sh
 ```
 
@@ -25,6 +46,28 @@ If you want a clean reset, run:
 ```bash
 ./scripts/quickstart.sh
 ```
+
+## 0b) Real-path notes (`KGW_SMOKE_PATH=real`)
+
+Use this path when you want real upstream behavior instead of local dry-run.
+
+Gateway runtime (in gateway shell):
+
+```bash
+export MODELKEYGUARD_DRY_RUN=0
+export MODELKEYGUARD_ADMIN_API_SECRET='replace-this-admin-secret'
+./scripts/start_gateway.sh
+```
+
+Client auth token:
+
+- local/dev: use a local safe token from policy (for example `kgw_demo_doc_ingestor`), or
+- Keycloak/real auth: `KGW_TOKEN="$(./scripts/get_agent_token.sh langchain-agent agent-secret)"`, or your real bearer token.
+
+Provider secret registration:
+
+- In section 3, replace fake provider secrets with real provider keys for the providers you are testing.
+- Keep using `/admin/keys` (GUI/CLI) for secret registration; do not put provider keys into client-side LangChain env.
 
 ## 1) Separate client environment
 
@@ -65,6 +108,11 @@ Important for Azure native mode:
 ## 3) Register provider-native demo keys (required once per fresh graph)
 
 Native routes enforce provider matching, so these keys must exist before native smoke calls.
+
+Path-specific secret input:
+
+- if `KGW_SMOKE_PATH=demo`: use fake secrets shown below.
+- if `KGW_SMOKE_PATH=real`: replace every `fake-real-*` with real provider keys.
 
 ```bash
 curl -sS -X POST "$KGW_BASE_URL/admin/keys" \

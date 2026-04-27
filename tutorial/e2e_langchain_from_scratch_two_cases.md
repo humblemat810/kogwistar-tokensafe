@@ -13,6 +13,12 @@ cd "$(git rev-parse --show-toplevel)"
 
 Do not paste real secrets into shell history. Use local secret files.
 
+Important:
+
+- Run Case 1 and Case 2 in separate sessions.
+- Do not reuse a gateway process started for one case in the other case.
+- If switching cases, stop gateway first, then run each case from its own section 1.
+
 ---
 
 ## Case 1: From Scratch (Fake Key, Local Token, JSONL, Dry-Run)
