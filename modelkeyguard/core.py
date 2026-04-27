@@ -223,12 +223,92 @@ class ModelKeyGuard:
     def _quota_policies(self, lane: str, subject_id: str) -> list[dict[str, Any]]:
         if not self.graph_state:
             return []
-        policies: list[dict[str, Any]] = []
+        get_projection = getattr(self.graph_state, "get_quota_policy_projection", None)
+        rebuild_projection = getattr(self.graph_state, "rebuild_quota_policy_projection", None)
+        replace_projection = getattr(self.graph_state, "replace_quota_policy_projection", None)
+
+        projection: dict[str, Any] | None = None
+        if callable(get_projection):
+            try:
+                loaded = get_projection(lane, subject_id)
+                if isinstance(loaded, dict):
+                    projection = loaded
+            except Exception:
+                projection = None
+        if projection is None and callable(rebuild_projection):
+            try:
+                rebuilt = rebuild_projection(lane, subject_id)
+                if isinstance(rebuilt, dict):
+                    projection = rebuilt
+            except Exception:
+                projection = None
+        if projection is not None:
+            items = projection.get("items")
+            if isinstance(items, list):
+                out: list[dict[str, Any]] = []
+                for item in items:
+                    if isinstance(item, dict) and item.get("lane") == lane and not bool(item.get("revoked")):
+                        out.append(item)
+                return out
+
+        latest_by_name: dict[str, tuple[int, str, dict[str, Any]]] = {}
         for e in self.graph_state.edges_from(subject_id, "HAS_QUOTA_POLICY"):
             n = self.graph_state.nodes.get(e.target)
-            if n and n.kind == "quota_policy" and n.payload.get("lane") == lane:
-                policies.append(n.payload)
-        return policies
+            if not n or n.kind != "quota_policy" or n.payload.get("lane") != lane:
+                continue
+            name = self._quota_policy_name(n.id, n.payload, lane, subject_id)
+            rev = self._quota_policy_revision(n.id, n.payload)
+            cur = latest_by_name.get(name)
+            if cur is None or rev > cur[0] or (rev == cur[0] and n.id > cur[1]):
+                latest_by_name[name] = (rev, n.id, n.payload)
+        out = [payload for _name, (_rev, _id, payload) in sorted(latest_by_name.items()) if not bool(payload.get("revoked"))]
+        if callable(replace_projection):
+            try:
+                replace_projection(
+                    lane,
+                    subject_id,
+                    {
+                        "lane": lane,
+                        "subject_id": subject_id,
+                        "items": [dict(item) for item in out],
+                        "updated_at_ms": int(datetime.now(timezone.utc).timestamp() * 1000),
+                        "projection_schema_version": 1,
+                    },
+                )
+            except Exception:
+                pass
+        return out
+
+    @staticmethod
+    def _quota_policy_name(node_id: str, payload: dict[str, Any], lane: str, subject_id: str) -> str:
+        explicit = payload.get("quota_name")
+        if isinstance(explicit, str) and explicit:
+            return explicit
+        prefix = f"quota:{lane}:{subject_id}:"
+        if node_id.startswith(prefix):
+            tail = node_id[len(prefix):]
+            if ":rev:" in tail:
+                return tail.split(":rev:", 1)[0] or node_id
+            return tail or node_id
+        return node_id
+
+    @staticmethod
+    def _quota_policy_revision(node_id: str, payload: dict[str, Any]) -> int:
+        rev = payload.get("revision_ms")
+        if isinstance(rev, (int, float)):
+            return int(rev)
+        if isinstance(rev, str) and rev.isdigit():
+            return int(rev)
+        if ":rev:" in node_id:
+            tail = node_id.rsplit(":rev:", 1)[-1]
+            if tail.isdigit():
+                return int(tail)
+        reg = payload.get("registered_at_epoch")
+        if isinstance(reg, (int, float)):
+            return int(reg) * 1000
+        if isinstance(reg, str) and reg.isdigit():
+            return int(reg) * 1000
+        return 0
 
     def _check_quota_lane(self, lane: str, subject_id: str, request: Request) -> tuple[bool, str, dict[str, float]]:
         if not self.graph_state:

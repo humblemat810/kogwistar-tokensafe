@@ -107,3 +107,55 @@ def test_blank_policy_file_bootstraps_token_verifier(tmp_path, monkeypatch):
     verifier = TokenVerifier(blank)
     with pytest.raises(TokenAuthError):
         verifier.verify_token("missing-token")
+
+
+def test_quota_check_uses_quota_policy_projection_fast_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    guard, policy = build_guard("config/gateway_policy.json")
+    key_id = select_key(policy, "gpt-4o-mini")
+    assert key_id
+    store = guard.graph_state
+    assert store is not None
+
+    store.replace_quota_policy_projection(
+        "user",
+        "user:alice",
+        {
+            "lane": "user",
+            "subject_id": "user:alice",
+            "items": [
+                {
+                    "lane": "user",
+                    "subject_id": "user:alice",
+                    "quota_name": "projection_tiny",
+                    "period": "hour",
+                    "max_requests": 0,
+                    "revision_ms": 999999999,
+                    "revoked": False,
+                }
+            ],
+            "updated_at_ms": 999999999,
+            "projection_schema_version": 1,
+        },
+    )
+    # Remove graph edge policies for this user to prove runtime uses the
+    # projection fast path and does not require an on-the-fly edge scan.
+    for edge_id, edge in list(store.edges.items()):
+        if edge.kind == "HAS_QUOTA_POLICY" and edge.source == "user:alice":
+            store.edges.pop(edge_id, None)
+
+    d = guard.check(
+        Request(
+            Principal("agent:doc-ingestor", "agent", ("agent-dev",)),
+            key_id,
+            "gpt-4o-mini",
+            "tenant:kogwistar",
+            estimated_cost_usd=0.01,
+            estimated_tokens=100,
+            on_behalf_of_user_id="user:alice",
+            token_id="projection-path",
+        )
+    )
+    assert not d.allowed
+    assert d.http_status == 429
+    assert d.reason == "user_quota_exceeded"

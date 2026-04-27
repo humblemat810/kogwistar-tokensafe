@@ -484,6 +484,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     from .routers import (
         create_admin_history_router,
         create_admin_keys_router,
+        create_admin_policy_router,
         create_admin_security_router,
         create_admin_session_router,
         create_admin_usage_router,
@@ -713,6 +714,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.include_router(create_provider_ollama_router(_handle_adapter_route))
     app.include_router(create_provider_gemini_router(_handle_adapter_route))
     app.include_router(create_admin_keys_router(render_admin_keys_page))
+    app.include_router(create_admin_policy_router())
     app.include_router(create_admin_usage_router())
     app.include_router(create_admin_history_router())
     app.include_router(create_admin_security_router())

@@ -250,6 +250,24 @@ curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
   | python -m json.tool
 ```
 
+## 7b) Optional runtime policy updates (append-only)
+
+You can update user/principal quota policy while gateway is running (admin-auth required). These writes are append-only revisions and the latest active revision is served from rebuildable quota-policy projections:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8789/admin/policy/quotas/upsert \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"principal","subject_id":"app:azure-demo","quota_name":"hour","period":"hour","max_requests":3000}' \
+  | python -m json.tool
+
+curl -sS -X POST http://127.0.0.1:8789/admin/policy/quotas/revoke \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"principal","subject_id":"app:azure-demo","quota_name":"hour","reason":"temporary rollback"}' \
+  | python -m json.tool
+```
+
 ## 8) Switch from fake to real Azure upstream (optional)
 
 If you intentionally switch from demo to real:

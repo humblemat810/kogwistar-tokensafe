@@ -230,6 +230,9 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.get("/admin/history").status_code == 401
     assert client.get("/admin/history.json").status_code == 401
     assert client.get("/admin/history/config").status_code == 401
+    assert client.get("/admin/policy/quotas.json").status_code == 401
+    assert client.post("/admin/policy/quotas/upsert", json={}).status_code == 401
+    assert client.post("/admin/policy/quotas/revoke", json={}).status_code == 401
     assert client.post("/admin/review/run", json={}).status_code == 401
 
 
@@ -253,3 +256,82 @@ def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):
     logout = client.delete("/admin/session")
     assert logout.status_code == 200
     assert client.get("/admin/usage").status_code == 401
+
+
+def test_admin_policy_quota_upsert_and_revoke_are_append_only_and_effective(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    app = create_app("config/gateway_policy.json")
+    client = TestClient(app)
+
+    upsert = client.post(
+        "/admin/policy/quotas/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "lane": "user",
+            "subject_id": "user:alice",
+            "quota_name": "tiny_admin",
+            "period": "hour",
+            "max_requests": 0,
+        },
+    )
+    assert upsert.status_code == 200
+    qid = upsert.json()["quota_policy_id"]
+    assert ":rev:" in qid
+
+    quotas = client.get(
+        "/admin/policy/quotas.json",
+        headers=ADMIN_HEADERS,
+        params={"lane": "user", "subject_id": "user:alice"},
+    ).json()["data"]
+    assert any(q["quota_name"] == "tiny_admin" and not q["revoked"] for q in quotas)
+
+    blocked = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer kgw_demo_doc_ingestor"},
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."},
+                {"role": "user", "content": "quota test"},
+            ],
+            "max_tokens": 8,
+        },
+    )
+    assert blocked.status_code == 429
+    assert blocked.json()["error"]["message"] == "user_quota_exceeded"
+
+    revoked = client.post(
+        "/admin/policy/quotas/revoke",
+        headers=ADMIN_HEADERS,
+        json={
+            "lane": "user",
+            "subject_id": "user:alice",
+            "quota_name": "tiny_admin",
+            "reason": "rollback test",
+        },
+    )
+    assert revoked.status_code == 200
+    assert revoked.json()["revoked"] is True
+
+    projection = app.state.guard.graph_state.get_quota_policy_projection("user", "user:alice")
+    assert projection is not None
+    assert not any(item.get("quota_name") == "tiny_admin" for item in projection.get("items", []))
+
+    allowed = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": "Bearer kgw_demo_doc_ingestor"},
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."},
+                {"role": "user", "content": "quota test"},
+            ],
+            "max_tokens": 8,
+        },
+    )
+    assert allowed.status_code == 200

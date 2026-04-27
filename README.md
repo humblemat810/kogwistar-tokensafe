@@ -419,9 +419,10 @@ ModelKeyGuard uses projection namespaces such as:
 ```text
 modelkeyguard.quota_usage
 modelkeyguard.usage_lane_head
+modelkeyguard.quota_policy
 ```
 
-So quota counters and strict lane tail pointers are rebuildable named projections over the single authoritative graph/event stream.
+So quota counters, strict lane tail pointers, and latest active quota-policy sets are rebuildable named projections over the single authoritative graph/event stream.
 
 ## FastAPI gateway
 
@@ -528,6 +529,12 @@ New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and kee
 - `GET /admin/history/{request_id}.json` exact request/response body detail
 - `GET /admin/history/config` history runtime config
 - `POST /admin/history/config` update retention/cap/runtime history config
+- `POST /admin/policy/users` append-only user registration
+- `POST /admin/policy/applications` append-only application registration
+- `POST /admin/policy/principals` append-only principal registration
+- `POST /admin/policy/quotas/upsert` append-only quota policy revision (latest revision is active)
+- `POST /admin/policy/quotas/revoke` append-only quota revoke revision (`revoked=true`, no hard delete)
+- `GET /admin/policy/quotas.json` quota policy revision list
 - `POST /admin/review/run` manual/scheduled review trigger (`sample_size`, `lookback_minutes`, `checkpoint_path`)
 - `POST /admin/security-events` host security event intake (shared-secret protected)
 

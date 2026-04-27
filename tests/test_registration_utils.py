@@ -106,3 +106,21 @@ def test_registered_user_quota_can_return_user_429(tmp_path, monkeypatch):
 
     assert status == 429
     assert data["error"]["message"] == "user_quota_exceeded"
+
+
+def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
+    store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
+    reg = RegistrationService(store)
+    reg.register_user("user:test", "Test User")
+
+    reg.append_quota_revision("user", "user:test", "hourly", period="hour", max_requests=10)
+    reg.append_quota_revision("user", "user:test", "hourly", period="hour", max_requests=5)
+    projection = store.get_quota_policy_projection("user", "user:test")
+    assert projection is not None
+    assert len(projection["items"]) == 1
+    assert projection["items"][0]["max_requests"] == 5
+
+    reg.revoke_quota("user", "user:test", "hourly", reason="disable")
+    projection2 = store.get_quota_policy_projection("user", "user:test")
+    assert projection2 is not None
+    assert projection2["items"] == []

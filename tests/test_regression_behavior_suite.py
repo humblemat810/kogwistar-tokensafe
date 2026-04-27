@@ -21,6 +21,7 @@ from modelkeyguard.gateway import (
 from modelkeyguard.graph_state import GraphStateStore, period_bucket
 from modelkeyguard.kogwistar_acl_adapter import MiniACLGraph, load_acl_graph
 from modelkeyguard.sealed_payload import open_json, seal_json
+from modelkeyguard.services.usage_ops import build_usage_monitor_dataset
 from modelkeyguard.token_auth import TokenAuthError, TokenVerifier
 
 POLICY = "config/gateway_policy.json"
@@ -669,3 +670,38 @@ def test_082_no_plaintext_policy_values_in_jsonl_graph_file(tmp_path):
     text = path.read_text()
     assert "Alice Example" not in text
     assert "kgw_demo_doc_ingestor" not in text
+
+
+def test_083_usage_monitor_totals_are_event_cost_based_not_retroactive_policy_price():
+    events = [
+        {
+            "ts": "2026-04-27T00:00:10Z",
+            "request_id": "pre-price-change",
+            "decision": "ALLOWED",
+            "principal_id": "app:billing-demo",
+            "on_behalf_of_user_id": "user:billing-demo",
+            "key_id": "key:azure:billing",
+            "token_id": "tok-1",
+            "model": "gpt-5-mini",
+            "estimated_tokens": 1000,
+            "estimated_cost_usd": 0.010,  # old price phase
+        },
+        {
+            "ts": "2026-04-27T00:10:10Z",
+            "request_id": "post-price-change",
+            "decision": "ALLOWED",
+            "principal_id": "app:billing-demo",
+            "on_behalf_of_user_id": "user:billing-demo",
+            "key_id": "key:azure:billing",
+            "token_id": "tok-1",
+            "model": "gpt-5-mini",
+            "estimated_tokens": 1000,
+            "estimated_cost_usd": 0.020,  # new price phase
+        },
+    ]
+    # Current policy reflects only the new price, but historical totals must
+    # still sum event-recorded costs (0.01 + 0.02), not recompute as 0.04.
+    policy = {"model_price_per_1k_tokens_usd": {"gpt-5-mini": 0.020}}
+    dataset = build_usage_monitor_dataset(events, policy, time_range="24h", bucket="hour")
+    assert dataset["overview"]["tokens"] == 2000
+    assert dataset["overview"]["usd"] == 0.03

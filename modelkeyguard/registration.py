@@ -111,7 +111,15 @@ class RegistrationService:
         if max_usd is None and max_tokens is None and max_requests is None:
             raise RegistrationError("at_least_one_quota_limit_required")
         qid = f"quota:{lane}:{subject_id}:{quota_name}"
-        payload: dict[str, Any] = {"lane": lane, "subject_id": subject_id, "period": period, "registered_at_epoch": int(time.time())}
+        payload: dict[str, Any] = {
+            "lane": lane,
+            "subject_id": subject_id,
+            "quota_name": quota_name,
+            "period": period,
+            "registered_at_epoch": int(time.time()),
+            "revision_ms": int(time.time() * 1000),
+            "revoked": False,
+        }
         if max_usd is not None:
             payload["max_usd"] = float(max_usd)
         if max_tokens is not None:
@@ -121,7 +129,73 @@ class RegistrationService:
         self.store.put_node(qid, "quota_policy", payload)
         self.store.put_edge(f"edge:{subject_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", subject_id, qid, {})
         self.store.append_event("QUOTA_POLICY_REGISTERED", qid, payload)
+        self._refresh_quota_projection(lane, subject_id)
         return qid
+
+    def append_quota_revision(
+        self,
+        lane: str,
+        subject_id: str,
+        quota_name: str,
+        *,
+        period: str | None = None,
+        max_usd: float | None = None,
+        max_tokens: int | None = None,
+        max_requests: int | None = None,
+        revoked: bool = False,
+        reason: str = "",
+    ) -> str:
+        if lane not in {"principal", "user", "key"}:
+            raise RegistrationError("quota_lane_must_be_principal_user_or_key")
+        if period is not None and period not in {"10s", "hour", "day", "week", "month"}:
+            raise RegistrationError("unsupported_quota_period")
+        if not revoked and max_usd is None and max_tokens is None and max_requests is None:
+            raise RegistrationError("at_least_one_quota_limit_required")
+
+        now_ms = int(time.time() * 1000)
+        now_s = int(time.time())
+        qid = f"quota:{lane}:{subject_id}:{quota_name}:rev:{now_ms}"
+        while qid in self.store.nodes:
+            now_ms += 1
+            qid = f"quota:{lane}:{subject_id}:{quota_name}:rev:{now_ms}"
+        payload: dict[str, Any] = {
+            "lane": lane,
+            "subject_id": subject_id,
+            "quota_name": quota_name,
+            "registered_at_epoch": now_s,
+            "revision_ms": now_ms,
+            "revoked": bool(revoked),
+        }
+        if period:
+            payload["period"] = period
+        if max_usd is not None:
+            payload["max_usd"] = float(max_usd)
+        if max_tokens is not None:
+            payload["max_tokens"] = int(max_tokens)
+        if max_requests is not None:
+            payload["max_requests"] = int(max_requests)
+        if reason:
+            payload["reason"] = reason
+
+        self.store.put_node(qid, "quota_policy", payload)
+        self.store.put_edge(f"edge:{subject_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", subject_id, qid, {})
+        self.store.append_event("QUOTA_POLICY_REVOKED" if revoked else "QUOTA_POLICY_REGISTERED", qid, payload)
+        self._refresh_quota_projection(lane, subject_id)
+        return qid
+
+    def revoke_quota(self, lane: str, subject_id: str, quota_name: str, *, reason: str = "") -> str:
+        return self.append_quota_revision(
+            lane,
+            subject_id,
+            quota_name,
+            revoked=True,
+            reason=reason,
+        )
+
+    def _refresh_quota_projection(self, lane: str, subject_id: str) -> None:
+        rebuild = getattr(self.store, "rebuild_quota_policy_projection", None)
+        if callable(rebuild):
+            rebuild(lane, subject_id)
 
     def issue_safe_token(
         self,

@@ -11,6 +11,7 @@ from .sealed_payload import open_json, seal_json
 DEFAULT_DSN = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
 QUOTA_PROJECTION_NAMESPACE = "modelkeyguard.quota_usage"
 USAGE_LANE_PROJECTION_NAMESPACE = "modelkeyguard.usage_lane_head"
+QUOTA_POLICY_PROJECTION_NAMESPACE = "modelkeyguard.quota_policy"
 PROJECTION_SCHEMA_VERSION = 1
 
 
@@ -271,6 +272,78 @@ class PostgresGraphStateStore:
     def quota_projection_id(self, lane: str, subject_id: str, period: str, bucket: str) -> str:
         return f"{lane}:{subject_id}:{period}:{bucket}"
 
+    def quota_policy_projection_key(self, lane: str, subject_id: str) -> str:
+        return f"{lane}:{subject_id}"
+
+    @staticmethod
+    def _quota_policy_name(node_id: str, payload: dict[str, Any], lane: str, subject_id: str) -> str:
+        explicit = payload.get("quota_name")
+        if isinstance(explicit, str) and explicit:
+            return explicit
+        prefix = f"quota:{lane}:{subject_id}:"
+        if node_id.startswith(prefix):
+            tail = node_id[len(prefix):]
+            if ":rev:" in tail:
+                return tail.split(":rev:", 1)[0] or node_id
+            return tail or node_id
+        return node_id
+
+    @staticmethod
+    def _quota_policy_revision(node_id: str, payload: dict[str, Any]) -> int:
+        rev = payload.get("revision_ms")
+        if isinstance(rev, (int, float)):
+            return int(rev)
+        if isinstance(rev, str) and rev.isdigit():
+            return int(rev)
+        if ":rev:" in node_id:
+            tail = node_id.rsplit(":rev:", 1)[-1]
+            if tail.isdigit():
+                return int(tail)
+        reg = payload.get("registered_at_epoch")
+        if isinstance(reg, (int, float)):
+            return int(reg) * 1000
+        if isinstance(reg, str) and reg.isdigit():
+            return int(reg) * 1000
+        return 0
+
+    def get_quota_policy_projection(self, lane: str, subject_id: str) -> dict[str, Any] | None:
+        projection = self.get_named_projection(QUOTA_POLICY_PROJECTION_NAMESPACE, self.quota_policy_projection_key(lane, subject_id))
+        if not projection:
+            return None
+        payload = dict(projection.get("payload") or {})
+        payload.setdefault("lane", lane)
+        payload.setdefault("subject_id", subject_id)
+        return payload
+
+    def replace_quota_policy_projection(self, lane: str, subject_id: str, payload: dict[str, Any]) -> None:
+        self.replace_named_projection(
+            QUOTA_POLICY_PROJECTION_NAMESPACE,
+            self.quota_policy_projection_key(lane, subject_id),
+            payload,
+        )
+
+    def rebuild_quota_policy_projection(self, lane: str, subject_id: str) -> dict[str, Any]:
+        latest_by_name: dict[str, tuple[int, str, dict[str, Any]]] = {}
+        for e in self.edges_from(subject_id, "HAS_QUOTA_POLICY"):
+            n = self.nodes.get(e.target)
+            if not n or n.kind != "quota_policy" or n.payload.get("lane") != lane:
+                continue
+            name = self._quota_policy_name(n.id, n.payload, lane, subject_id)
+            rev = self._quota_policy_revision(n.id, n.payload)
+            cur = latest_by_name.get(name)
+            if cur is None or rev > cur[0] or (rev == cur[0] and n.id > cur[1]):
+                latest_by_name[name] = (rev, n.id, n.payload)
+        items = [dict(payload) for _name, (_rev, _id, payload) in sorted(latest_by_name.items()) if not bool(payload.get("revoked"))]
+        projection = {
+            "lane": lane,
+            "subject_id": subject_id,
+            "items": items,
+            "updated_at_ms": int(datetime.now().timestamp() * 1000),
+            "projection_schema_version": PROJECTION_SCHEMA_VERSION,
+        }
+        self.replace_quota_policy_projection(lane, subject_id, projection)
+        return projection
+
     def get_quota_used(self, lane: str, subject_id: str, period: str, when: datetime | None = None) -> dict[str, float]:
         bucket = period_bucket(when or utc_now(), period)
         key = self.quota_projection_id(lane, subject_id, period, bucket)
@@ -381,7 +454,19 @@ class PostgresGraphStateStore:
             store.put_node(user_id, "end_user", user)
             for quota_name, quota in user.get("quotas", {}).items():
                 qid = f"quota:user:{user_id}:{quota_name}"
-                store.put_node(qid, "quota_policy", {"lane": "user", "subject_id": user_id, **quota})
+                store.put_node(
+                    qid,
+                    "quota_policy",
+                    {
+                        "lane": "user",
+                        "subject_id": user_id,
+                        "quota_name": quota_name,
+                        "registered_at_epoch": 0,
+                        "revision_ms": 0,
+                        "revoked": False,
+                        **quota,
+                    },
+                )
                 store.put_edge(f"edge:{user_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", user_id, qid, {})
         for token, entry in policy.get("local_tokens", {}).items():
             principal_id = entry["principal_id"]
@@ -396,7 +481,19 @@ class PostgresGraphStateStore:
             store.put_edge(f"edge:{principal_id}:MEMBER_OF_NAMESPACE:{ns}", "MEMBER_OF_NAMESPACE", principal_id, ns, {})
             for quota_name, quota in entry.get("quotas", policy.get("principal_quotas", {}).get(principal_id, {})).items():
                 qid = f"quota:principal:{principal_id}:{quota_name}"
-                store.put_node(qid, "quota_policy", {"lane": "principal", "subject_id": principal_id, **quota})
+                store.put_node(
+                    qid,
+                    "quota_policy",
+                    {
+                        "lane": "principal",
+                        "subject_id": principal_id,
+                        "quota_name": quota_name,
+                        "registered_at_epoch": 0,
+                        "revision_ms": 0,
+                        "revoked": False,
+                        **quota,
+                    },
+                )
                 store.put_edge(f"edge:{principal_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", principal_id, qid, {})
         for client_id, entry in policy.get("keycloak_clients", {}).items():
             principal_id = entry["principal_id"]
@@ -409,7 +506,19 @@ class PostgresGraphStateStore:
             store.put_node(key_id, "model_key", {"provider": key["provider"], "models": key["models"], "display_name": key.get("display_name", key_id), "intended_use": key.get("intended_use", ""), "sealed_secret_payload": key.get("sealed_secret_payload"), "secret_ref": key.get("secret_ref")})
             for quota_name, quota in key.get("quotas", {}).items():
                 qid = f"quota:key:{key_id}:{quota_name}"
-                store.put_node(qid, "quota_policy", {"lane": "key", "subject_id": key_id, **quota})
+                store.put_node(
+                    qid,
+                    "quota_policy",
+                    {
+                        "lane": "key",
+                        "subject_id": key_id,
+                        "quota_name": quota_name,
+                        "registered_at_epoch": 0,
+                        "revision_ms": 0,
+                        "revoked": False,
+                        **quota,
+                    },
+                )
                 store.put_edge(f"edge:{key_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", key_id, qid, {})
             acl = key.get("acl", {})
             ns = acl.get("namespace", "tenant:kogwistar")
