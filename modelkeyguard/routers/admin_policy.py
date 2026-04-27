@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import json
+import time
+from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..registration import RegistrationError, RegistrationService
 
@@ -80,8 +84,25 @@ QUOTA_REVOKE_BODY_SCHEMA: dict[str, Any] = {
     "required": ["lane", "subject_id", "quota_name"],
 }
 
+TOKEN_ISSUE_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "principal_id": {"type": "string", "example": "agent:azure-manual-demo"},
+        "namespace": {"type": "string", "example": "tenant:kogwistar"},
+        "on_behalf_of_user_id": {"type": "string", "example": "user:alice"},
+        "application_id": {"type": "string", "example": "app:crm-assistant"},
+        "scopes": {
+            "oneOf": [
+                {"type": "string", "example": "model.invoke"},
+                {"type": "array", "items": {"type": "string"}, "example": ["model.invoke"]},
+            ]
+        },
+    },
+    "required": ["principal_id"],
+}
 
-def create_router() -> APIRouter:
+
+def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
     router = APIRouter(tags=["admin-policy"])
 
     def _registration_service(request: Request) -> RegistrationService | None:
@@ -89,6 +110,22 @@ def create_router() -> APIRouter:
         if not graph_state:
             return None
         return RegistrationService(graph_state)
+
+    def _parse_groups(raw_groups: Any) -> list[str]:
+        if isinstance(raw_groups, str):
+            return [g.strip() for g in raw_groups.split(",") if g.strip()]
+        if isinstance(raw_groups, list):
+            return [str(g).strip() for g in raw_groups if str(g).strip()]
+        return []
+
+    def _parse_scopes(raw_scopes: Any) -> list[str]:
+        if isinstance(raw_scopes, str):
+            scopes = [s.strip() for s in raw_scopes.split(",") if s.strip()]
+            return scopes or ["model.invoke"]
+        if isinstance(raw_scopes, list):
+            scopes = [str(s).strip() for s in raw_scopes if str(s).strip()]
+            return scopes or ["model.invoke"]
+        return ["model.invoke"]
 
     async def _payload(request: Request) -> dict[str, Any]:
         try:
@@ -102,6 +139,223 @@ def create_router() -> APIRouter:
             return {k: v for k, v in form.items()}
         except Exception:
             return {}
+
+    def _wants_html(request: Request) -> bool:
+        accept = (request.headers.get("accept") or "").lower()
+        content_type = (request.headers.get("content-type") or "").lower()
+        return "text/html" in accept or "application/x-www-form-urlencoded" in content_type or "multipart/form-data" in content_type
+
+    def _policy_snapshot(request: Request) -> dict[str, list[dict[str, str]]]:
+        graph_state = request.app.state.guard.graph_state
+        users: list[dict[str, str]] = []
+        applications: list[dict[str, str]] = []
+        principals: list[dict[str, str]] = []
+        quotas: list[dict[str, str]] = []
+
+        for node in graph_state.nodes.values():
+            if node.kind == "end_user":
+                users.append({"id": node.id, "display_name": str(node.payload.get("display_name", ""))})
+            elif node.kind == "application":
+                applications.append({"id": node.id, "display_name": str(node.payload.get("display_name", ""))})
+            elif node.kind == "principal":
+                namespace = ""
+                for edge in graph_state.edges_from(node.id, "MEMBER_OF_NAMESPACE"):
+                    namespace = edge.target
+                    break
+                principals.append(
+                    {
+                        "id": node.id,
+                        "kind": str(node.payload.get("kind", "")),
+                        "namespace": namespace,
+                        "application_id": str(node.payload.get("application_id", "")),
+                        "groups": ",".join(str(g) for g in node.payload.get("groups", [])),
+                    }
+                )
+            elif node.kind == "quota_policy":
+                quotas.append(
+                    {
+                        "id": node.id,
+                        "lane": str(node.payload.get("lane", "")),
+                        "subject_id": str(node.payload.get("subject_id", "")),
+                        "quota_name": str(node.payload.get("quota_name", "")),
+                        "period": str(node.payload.get("period", "")),
+                        "max_usd": str(node.payload.get("max_usd", "")),
+                        "max_tokens": str(node.payload.get("max_tokens", "")),
+                        "max_requests": str(node.payload.get("max_requests", "")),
+                        "revoked": str(bool(node.payload.get("revoked"))),
+                        "revision_ms": str(node.payload.get("revision_ms", 0)),
+                    }
+                )
+
+        users.sort(key=lambda r: r["id"])
+        applications.sort(key=lambda r: r["id"])
+        principals.sort(key=lambda r: r["id"])
+        quotas.sort(key=lambda r: (int(r.get("revision_ms") or 0), r["id"]))
+        return {
+            "users": users,
+            "applications": applications,
+            "principals": principals,
+            "quotas": quotas,
+        }
+
+    def _render_page(
+        request: Request,
+        *,
+        message: str = "",
+        error: str = "",
+        issued_token: str | None = None,
+        issued_token_meta: dict[str, str] | None = None,
+        status_code: int = 200,
+    ) -> HTMLResponse:
+        snapshot = _policy_snapshot(request)
+        html = render_admin_policy_html(
+            users=snapshot["users"],
+            applications=snapshot["applications"],
+            principals=snapshot["principals"],
+            quotas=snapshot["quotas"],
+            message=message,
+            error=error,
+            issued_token=issued_token,
+            issued_token_meta=issued_token_meta,
+        )
+        return HTMLResponse(content=html, status_code=status_code)
+
+    def _append_admin_audit(request: Request, payload: dict[str, Any]) -> None:
+        settings = request.app.state.settings
+        path = Path(settings.audit_path)
+        safe = {k: v for k, v in payload.items() if "secret" not in k.lower() and "safe_token" not in k.lower()}
+        safe.setdefault("ts", time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(safe, sort_keys=True) + "\n")
+
+    def _issue_token(reg: RegistrationService, body: dict[str, Any], request: Request) -> tuple[str, dict[str, str]]:
+        principal_id = str(body.get("principal_id", "")).strip()
+        if not principal_id:
+            raise RegistrationError("principal_id_required")
+        namespace = str(body.get("namespace", "tenant:kogwistar")).strip() or "tenant:kogwistar"
+        on_behalf_of_user_id = str(body.get("on_behalf_of_user_id", "")).strip() or None
+        application_id = str(body.get("application_id", "")).strip() or None
+        scopes = _parse_scopes(body.get("scopes"))
+
+        issued = reg.issue_safe_token(
+            principal_id=principal_id,
+            namespace=namespace,
+            on_behalf_of_user_id=on_behalf_of_user_id,
+            application_id=application_id,
+            scopes=scopes,
+        )
+        node = request.app.state.guard.graph_state.nodes.get(issued.token_node_id)
+        safe_hash = str((node.payload if node else {}).get("safe_token_hash", ""))
+        meta = {
+            "token_id": issued.token_node_id,
+            "principal_id": issued.principal_id,
+            "namespace": issued.namespace,
+            "on_behalf_of_user_id": issued.on_behalf_of_user_id or "",
+            "application_id": issued.application_id or "",
+            "scopes": ",".join(scopes),
+            "safe_token_hash": safe_hash,
+        }
+        request.app.state.guard.graph_state.append_event(
+            "ADMIN_SAFE_TOKEN_ISSUED",
+            issued.token_node_id,
+            {
+                "principal_id": issued.principal_id,
+                "namespace": issued.namespace,
+                "on_behalf_of_user_id": issued.on_behalf_of_user_id,
+                "application_id": issued.application_id,
+                "scopes": scopes,
+                "safe_token_hash": safe_hash,
+            },
+        )
+        _append_admin_audit(
+            request,
+            {
+                "event_type": "ADMIN_SAFE_TOKEN_ISSUED",
+                "actor": "admin:web",
+                **meta,
+            },
+        )
+        return issued.token, meta
+
+    @router.get("/admin/policy")
+    def admin_policy_page(request: Request):
+        return _render_page(request)
+
+    @router.post("/admin/policy")
+    async def admin_policy_form(request: Request):
+        reg = _registration_service(request)
+        if not reg:
+            return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
+        body = await _payload(request)
+        action = str(body.get("action", "")).strip()
+        try:
+            if action == "register_user":
+                user_id = str(body.get("user_id", "")).strip()
+                if not user_id:
+                    raise RegistrationError("user_id_required")
+                reg.register_user(user_id, str(body.get("display_name", "")).strip())
+                return _render_page(request, message=f"User registered: {user_id}")
+
+            if action == "register_application":
+                application_id = str(body.get("application_id", "")).strip()
+                if not application_id:
+                    raise RegistrationError("application_id_required")
+                reg.register_application(application_id, str(body.get("display_name", "")).strip())
+                return _render_page(request, message=f"Application registered: {application_id}")
+
+            if action == "register_principal":
+                principal_id = str(body.get("principal_id", "")).strip()
+                if not principal_id:
+                    raise RegistrationError("principal_id_required")
+                reg.register_principal(
+                    principal_id,
+                    kind=str(body.get("kind", "agent")).strip() or "agent",
+                    groups=_parse_groups(body.get("groups", "")),
+                    namespace=str(body.get("namespace", "tenant:kogwistar")).strip() or "tenant:kogwistar",
+                    application_id=str(body.get("application_id", "")).strip() or None,
+                    description=str(body.get("description", "")).strip(),
+                )
+                return _render_page(request, message=f"Principal registered: {principal_id}")
+
+            if action == "quota_upsert":
+                lane = str(body.get("lane", "")).strip()
+                subject_id = str(body.get("subject_id", "")).strip()
+                quota_name = str(body.get("quota_name", "")).strip()
+                period = str(body.get("period", "")).strip()
+                if not lane or not subject_id or not quota_name or not period:
+                    raise RegistrationError("lane_subject_id_quota_name_period_required")
+
+                def _num(name: str, cast):
+                    v = body.get(name)
+                    if v in (None, ""):
+                        return None
+                    return cast(v)
+
+                qid = reg.append_quota_revision(
+                    lane,
+                    subject_id,
+                    quota_name,
+                    period=period,
+                    max_usd=_num("max_usd", float),
+                    max_tokens=_num("max_tokens", int),
+                    max_requests=_num("max_requests", int),
+                    revoked=False,
+                )
+                return _render_page(request, message=f"Quota revision added: {qid}")
+
+            if action == "quota_revoke":
+                lane = str(body.get("lane", "")).strip()
+                subject_id = str(body.get("subject_id", "")).strip()
+                quota_name = str(body.get("quota_name", "")).strip()
+                if not lane or not subject_id or not quota_name:
+                    raise RegistrationError("lane_subject_id_quota_name_required")
+                qid = reg.revoke_quota(lane, subject_id, quota_name, reason=str(body.get("reason", "")).strip())
+                return _render_page(request, message=f"Quota revoked (append-only): {qid}")
+
+            return _render_page(request, error="unsupported_action", status_code=400)
+        except (RegistrationError, ValueError) as exc:
+            return _render_page(request, error=str(exc), status_code=400)
 
     @router.post("/admin/policy/users", openapi_extra={"requestBody": _json_request_body(USER_BODY_SCHEMA)})
     async def admin_register_user(request: Request):
@@ -142,18 +396,11 @@ def create_router() -> APIRouter:
         principal_id = str(body.get("principal_id", "")).strip()
         if not principal_id:
             return JSONResponse(status_code=400, content={"error": {"message": "principal_id_required"}})
-        raw_groups = body.get("groups", [])
-        if isinstance(raw_groups, str):
-            groups = [g.strip() for g in raw_groups.split(",") if g.strip()]
-        elif isinstance(raw_groups, list):
-            groups = [str(g).strip() for g in raw_groups if str(g).strip()]
-        else:
-            groups = []
         try:
             reg.register_principal(
                 principal_id,
                 kind=str(body.get("kind", "agent")).strip() or "agent",
-                groups=groups,
+                groups=_parse_groups(body.get("groups", "")),
                 namespace=str(body.get("namespace", "tenant:kogwistar")).strip() or "tenant:kogwistar",
                 application_id=(str(body.get("application_id", "")).strip() or None),
                 description=str(body.get("description", "")).strip(),
@@ -225,6 +472,39 @@ def create_router() -> APIRouter:
             qid = reg.revoke_quota(lane, subject_id, quota_name, reason=str(body.get("reason", "")).strip())
             return {"ok": True, "quota_policy_id": qid, "revoked": True}
         except RegistrationError as exc:
+            return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
+
+    @router.post("/admin/policy/tokens", openapi_extra={"requestBody": _json_request_body(TOKEN_ISSUE_BODY_SCHEMA)})
+    async def admin_issue_safe_token(request: Request):
+        reg = _registration_service(request)
+        if not reg:
+            return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
+        body = await _payload(request)
+        try:
+            issued_token, meta = _issue_token(reg, body, request)
+            # token verifier shares this graph state reference; token is immediately valid.
+            if _wants_html(request):
+                return _render_page(
+                    request,
+                    message=f"Safe token issued for {meta.get('principal_id', '')}",
+                    issued_token=issued_token,
+                    issued_token_meta=meta,
+                )
+            return {
+                "ok": True,
+                "one_time_reveal": True,
+                "safe_token": issued_token,
+                "token_id": meta.get("token_id"),
+                "principal_id": meta.get("principal_id"),
+                "namespace": meta.get("namespace"),
+                "on_behalf_of_user_id": meta.get("on_behalf_of_user_id"),
+                "application_id": meta.get("application_id"),
+                "scopes": [s for s in str(meta.get("scopes", "")).split(",") if s],
+                "safe_token_hash": meta.get("safe_token_hash"),
+            }
+        except RegistrationError as exc:
+            if _wants_html(request):
+                return _render_page(request, error=str(exc), status_code=400)
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
     @router.get("/admin/policy/quotas.json")

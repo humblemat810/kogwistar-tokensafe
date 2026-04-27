@@ -13,7 +13,7 @@ from .core import ModelKey, ModelKeyGuard, Principal, Request as GuardRequest
 from .graph_state import GraphStateStore
 from .key_manager import KeyLifecycleError, KeyManager
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
-from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page
+from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page, render_admin_policy_page
 from .services.admin_auth import admin_html_login_response, is_admin_authenticated
 from .services.history_ops import capture_history_record
 from .settings import AppSettings, read_env_or_file
@@ -504,6 +504,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         raise RuntimeError("; ".join(errors))
     guard, policy = build_guard(policy_path)
     verifier = TokenVerifier(policy_path)
+    verifier.graph_state = guard.graph_state
     key_manager = KeyManager(guard.graph_state, guard.graph_state.app_key) if guard.graph_state else None
     app = FastAPI(title="Kogwistar ModelKeyGuard", version="0.6.0")
     app.state.guard = guard
@@ -714,7 +715,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.include_router(create_provider_ollama_router(_handle_adapter_route))
     app.include_router(create_provider_gemini_router(_handle_adapter_route))
     app.include_router(create_admin_keys_router(render_admin_keys_page))
-    app.include_router(create_admin_policy_router())
+    app.include_router(create_admin_policy_router(render_admin_policy_page))
     app.include_router(create_admin_usage_router())
     app.include_router(create_admin_history_router())
     app.include_router(create_admin_security_router())

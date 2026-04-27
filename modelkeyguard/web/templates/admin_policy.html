@@ -1,0 +1,181 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>ModelKeyGuard Policy Ops</title>
+  <link rel="stylesheet" href="/static/admin_policy.css">
+</head>
+<body>
+  <header class="admin-nav">
+    <strong>Admin Links:</strong>
+    <a href="/admin/keys">Keys</a>
+    <a href="/admin/policy">Policy Ops</a>
+    <a href="/admin/usage">Usage Monitor</a>
+    <a href="/admin/history">History</a>
+    <a href="/admin/keys.json">Keys JSON</a>
+    <a href="/admin/usage.json">Usage JSON</a>
+    <a href="/admin/history.json">History JSON</a>
+    <a href="/healthz">Health</a>
+    <a href="/v1/models">Models</a>
+    <a href="/docs">API Docs</a>
+    <a href="/openapi.json">OpenAPI</a>
+  </header>
+
+  <h1>Policy Operations</h1>
+  <p>Register users/apps/principals, upsert or revoke quotas, and issue one-time safe tokens.</p>
+
+  {{flash}}
+  {{token_panel}}
+
+  <div class="grid">
+    <section class="card">
+      <h2>Register User</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="register_user">
+        <label for="user_id">User ID</label>
+        <small class="field-help">Required. Must start with <code>user:</code> (example: <code>user:alice</code>).</small>
+        <input id="user_id" name="user_id" placeholder="user:alice" required>
+        <label for="user_display_name">Display Name</label>
+        <small class="field-help">Optional human-friendly name shown in admin tables.</small>
+        <input id="user_display_name" name="display_name" placeholder="Alice">
+        <button>Create user</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Register Application</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="register_application">
+        <label for="application_id">Application ID</label>
+        <small class="field-help">Required. Must start with <code>app:</code> (example: <code>app:crm-assistant</code>).</small>
+        <input id="application_id" name="application_id" placeholder="app:crm-assistant" required>
+        <label for="application_display_name">Display Name</label>
+        <small class="field-help">Optional label for reporting and UI.</small>
+        <input id="application_display_name" name="display_name" placeholder="CRM Assistant">
+        <button>Create app</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Register Principal</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="register_principal">
+        <label for="principal_id">Principal ID</label>
+        <small class="field-help">Required. Prefix must be one of <code>agent:</code>, <code>service:</code>, <code>human:</code>.</small>
+        <input id="principal_id" name="principal_id" placeholder="agent:azure-manual-demo" required>
+        <label for="principal_kind">Kind</label>
+        <small class="field-help">Optional. Typical values: <code>agent</code>, <code>service</code>, <code>human</code>.</small>
+        <input id="principal_kind" name="kind" placeholder="agent">
+        <label for="principal_groups">Groups</label>
+        <small class="field-help">Optional CSV list used for ACL sharing (example: <code>app-dev,finance</code>).</small>
+        <input id="principal_groups" name="groups" placeholder="app-dev,finance">
+        <label for="principal_namespace">Namespace</label>
+        <small class="field-help">Optional. Default is <code>tenant:kogwistar</code>.</small>
+        <input id="principal_namespace" name="namespace" placeholder="tenant:kogwistar">
+        <label for="principal_application_id">Application ID</label>
+        <small class="field-help">Optional link to an application node (example: <code>app:crm-assistant</code>).</small>
+        <input id="principal_application_id" name="application_id" placeholder="app:crm-assistant">
+        <label for="principal_description">Description</label>
+        <small class="field-help">Optional free-text purpose for this principal.</small>
+        <input id="principal_description" name="description" placeholder="manual runtime principal">
+        <button>Create principal</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Quota Upsert (Append-Only Revision)</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="quota_upsert">
+        <label for="quota_upsert_lane">Lane</label>
+        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>.</small>
+        <input id="quota_upsert_lane" name="lane" placeholder="principal|user|key" required>
+        <label for="quota_upsert_subject_id">Subject ID</label>
+        <small class="field-help">Required. The node ID for that lane (example: <code>agent:azure-manual-demo</code>).</small>
+        <input id="quota_upsert_subject_id" name="subject_id" placeholder="agent:azure-manual-demo" required>
+        <label for="quota_upsert_quota_name">Quota Name</label>
+        <small class="field-help">Required name for revision grouping (example: <code>hour</code>, <code>burst</code>).</small>
+        <input id="quota_upsert_quota_name" name="quota_name" placeholder="hour" required>
+        <label for="quota_upsert_period">Period</label>
+        <small class="field-help">Required. One of <code>10s</code>, <code>hour</code>, <code>day</code>, <code>week</code>, <code>month</code>.</small>
+        <input id="quota_upsert_period" name="period" placeholder="10s|hour|day|week|month" required>
+        <label for="quota_upsert_max_usd">Max USD</label>
+        <small class="field-help">Optional budget cap for this period.</small>
+        <input id="quota_upsert_max_usd" name="max_usd" placeholder="20.0">
+        <label for="quota_upsert_max_tokens">Max Tokens</label>
+        <small class="field-help">Optional token cap for this period.</small>
+        <input id="quota_upsert_max_tokens" name="max_tokens" placeholder="200000">
+        <label for="quota_upsert_max_requests">Max Requests</label>
+        <small class="field-help">Optional request count cap for this period.</small>
+        <input id="quota_upsert_max_requests" name="max_requests" placeholder="1000">
+        <button>Upsert quota</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Quota Revoke (Append-Only)</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="quota_revoke">
+        <label for="quota_revoke_lane">Lane</label>
+        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>.</small>
+        <input id="quota_revoke_lane" name="lane" placeholder="principal|user|key" required>
+        <label for="quota_revoke_subject_id">Subject ID</label>
+        <small class="field-help">Required subject ID to revoke quota for.</small>
+        <input id="quota_revoke_subject_id" name="subject_id" placeholder="agent:azure-manual-demo" required>
+        <label for="quota_revoke_quota_name">Quota Name</label>
+        <small class="field-help">Required quota name to revoke (append-only revision).</small>
+        <input id="quota_revoke_quota_name" name="quota_name" placeholder="hour" required>
+        <label for="quota_revoke_reason">Reason</label>
+        <small class="field-help">Optional reason shown in revision payload and audit.</small>
+        <input id="quota_revoke_reason" name="reason" placeholder="temporary freeze">
+        <button>Revoke quota</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Issue Safe Token (One-Time Reveal)</h2>
+      <form method="post" action="/admin/policy/tokens">
+        <label for="token_principal_id">Principal ID</label>
+        <small class="field-help">Required principal that will authenticate with this safe token.</small>
+        <input id="token_principal_id" name="principal_id" placeholder="agent:azure-manual-demo" required>
+        <label for="token_namespace">Namespace</label>
+        <small class="field-help">Optional. Default is <code>tenant:kogwistar</code>.</small>
+        <input id="token_namespace" name="namespace" placeholder="tenant:kogwistar">
+        <label for="token_on_behalf_of_user_id">On Behalf Of User ID</label>
+        <small class="field-help">Optional. Link this token usage to an end user (example: <code>user:alice</code>).</small>
+        <input id="token_on_behalf_of_user_id" name="on_behalf_of_user_id" placeholder="user:alice">
+        <label for="token_application_id">Application ID</label>
+        <small class="field-help">Optional app binding for reporting (example: <code>app:crm-assistant</code>).</small>
+        <input id="token_application_id" name="application_id" placeholder="app:crm-assistant">
+        <label for="token_scopes">Scopes</label>
+        <small class="field-help">Optional CSV scopes. Default: <code>model.invoke</code>.</small>
+        <input id="token_scopes" name="scopes" placeholder="model.invoke">
+        <button>Issue safe token</button>
+      </form>
+    </section>
+  </div>
+
+  <h2>Users</h2>
+  <table>
+    <thead><tr><th>User ID</th><th>Display Name</th></tr></thead>
+    <tbody>{{users_rows}}</tbody>
+  </table>
+
+  <h2>Applications</h2>
+  <table>
+    <thead><tr><th>Application ID</th><th>Display Name</th></tr></thead>
+    <tbody>{{applications_rows}}</tbody>
+  </table>
+
+  <h2>Principals</h2>
+  <table>
+    <thead><tr><th>Principal ID</th><th>Kind</th><th>Namespace</th><th>Application ID</th><th>Groups</th></tr></thead>
+    <tbody>{{principals_rows}}</tbody>
+  </table>
+
+  <h2>Quota Revisions</h2>
+  <table>
+    <thead><tr><th>ID</th><th>Lane</th><th>Subject</th><th>Quota Name</th><th>Period</th><th>Max USD</th><th>Max Tokens</th><th>Max Requests</th><th>Revoked</th></tr></thead>
+    <tbody>{{quotas_rows}}</tbody>
+  </table>
+</body>
+</html>

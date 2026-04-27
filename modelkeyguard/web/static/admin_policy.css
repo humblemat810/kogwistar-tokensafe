@@ -1,0 +1,109 @@
+body {
+  font-family: system-ui, sans-serif;
+  margin: 2rem;
+}
+
+.admin-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 1rem;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  background: #f8f8f8;
+}
+
+.admin-nav a {
+  color: #0f4aa6;
+  text-decoration: none;
+}
+
+.admin-nav a:hover {
+  text-decoration: underline;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 1rem;
+  margin-bottom: 1rem;
+}
+
+.card {
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  padding: 0.8rem;
+  background: #fff;
+}
+
+form input {
+  display: block;
+  width: min(100%, 30rem);
+  margin: 0.35rem 0;
+  padding: 0.35rem;
+}
+
+form label {
+  display: block;
+  margin-top: 0.35rem;
+  font-weight: 600;
+}
+
+.field-help {
+  display: block;
+  color: #4b5563;
+  margin: 0.1rem 0 0.25rem;
+}
+
+form button {
+  margin-top: 0.35rem;
+}
+
+.flash {
+  padding: 0.65rem 0.8rem;
+  border-radius: 8px;
+  margin: 0.8rem 0;
+  border: 1px solid #ddd;
+}
+
+.flash-ok {
+  background: #ecfdf3;
+  border-color: #ace4be;
+}
+
+.flash-error {
+  background: #fff1f2;
+  border-color: #f1b3ba;
+}
+
+.token-panel {
+  border: 1px solid #e0b400;
+  background: #fffbe6;
+  border-radius: 10px;
+  padding: 0.8rem;
+  margin: 0.8rem 0;
+}
+
+.token-panel textarea {
+  width: min(100%, 42rem);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  margin: 0.3rem 0;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1rem;
+}
+
+td, th {
+  border: 1px solid #ddd;
+  padding: 0.45rem;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+code, pre {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}

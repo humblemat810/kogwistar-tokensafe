@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import time
 
 import pytest
@@ -65,6 +66,7 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     assert usage_page.status_code == 200
     assert "Admin Links:" in usage_page.text
     assert 'href="/admin/keys"' in usage_page.text
+    assert 'href="/admin/policy"' in usage_page.text
     assert 'href="/docs"' in usage_page.text
     assert "/static/admin_usage.css" in usage_page.text
     assert "/static/vendor/chart.umd.min.js" in usage_page.text
@@ -96,6 +98,7 @@ def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
     page = client.get("/admin/keys", headers=ADMIN_HEADERS)
     assert page.status_code == 200
     assert "Admin Links:" in page.text
+    assert 'href="/admin/policy"' in page.text
     assert 'href="/admin/usage"' in page.text
     assert 'href="/openapi.json"' in page.text
     assert "/static/admin_keys.css" in page.text
@@ -103,6 +106,107 @@ def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
     assert "name=\"intended_use\"" in page.text
     assert client.get("/static/admin_keys.css").status_code == 200
 
+
+def test_admin_policy_page_forms_and_one_time_token_reveal(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    graph = tmp_path / "graph.jsonl"
+    audit = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(audit))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    page = client.get("/admin/policy", headers=ADMIN_HEADERS)
+    assert page.status_code == 200
+    assert "Policy Operations" in page.text
+    assert "Issue Safe Token" in page.text
+    assert "Principal ID" in page.text
+    assert "Lane" in page.text
+    assert "On Behalf Of User ID" in page.text
+    assert "Required. One of:" in page.text
+    assert "/static/admin_policy.css" in page.text
+    assert client.get("/static/admin_policy.css").status_code == 200
+
+    principal_form = client.post(
+        "/admin/policy",
+        headers=ADMIN_HEADERS,
+        data={
+            "action": "register_principal",
+            "principal_id": "agent:policy-ui-demo",
+            "kind": "agent",
+            "groups": "app-dev",
+            "namespace": "tenant:kogwistar",
+        },
+    )
+    assert principal_form.status_code == 200
+    assert "Principal registered: agent:policy-ui-demo" in principal_form.text
+
+    token_form = client.post(
+        "/admin/policy/tokens",
+        headers=ADMIN_HEADERS | {"accept": "text/html"},
+        data={
+            "principal_id": "agent:policy-ui-demo",
+            "namespace": "tenant:kogwistar",
+            "scopes": "model.invoke",
+        },
+    )
+    assert token_form.status_code == 200
+    assert "One-Time Safe Token" in token_form.text
+    match = re.search(r"kgw_sk_[A-Za-z0-9_\\-]+", token_form.text)
+    assert match, token_form.text
+    issued_token = match.group(0)
+
+    fresh_page = client.get("/admin/policy", headers=ADMIN_HEADERS)
+    assert fresh_page.status_code == 200
+    assert issued_token not in fresh_page.text
+
+    # New token should work immediately without gateway restart.
+    response = client.post(
+        "/v1/chat/completions",
+        headers={"authorization": f"Bearer {issued_token}"},
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [
+                {"role": "system", "content": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."},
+                {"role": "user", "content": "Summarize this note."},
+            ],
+            "max_tokens": 32,
+        },
+    )
+    assert response.status_code == 200
+
+    audit_text = audit.read_text(encoding="utf-8")
+    assert "ADMIN_SAFE_TOKEN_ISSUED" in audit_text
+    assert issued_token not in audit_text
+
+
+def test_admin_policy_token_api_returns_one_time_token_and_hash_only_audit(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    issued = client.post(
+        "/admin/policy/tokens",
+        headers=ADMIN_HEADERS,
+        json={
+            "principal_id": "agent:doc-ingestor",
+            "namespace": "tenant:kogwistar",
+            "on_behalf_of_user_id": "user:alice",
+            "scopes": ["model.invoke"],
+        },
+    )
+    assert issued.status_code == 200
+    body = issued.json()
+    assert body["ok"] is True
+    assert body["one_time_reveal"] is True
+    assert body["safe_token"].startswith("kgw_sk_")
+    assert body["safe_token_hash"].startswith("sha256:")
 
 def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")

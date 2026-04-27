@@ -202,7 +202,12 @@ curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
 
 ## 4b) Optional: add a brand-new runtime principal and issue a new safe token
 
-If you want to create a new principal after startup (instead of using `kgw_single_azure_demo` from step 2), do this:
+If you want to create a new principal after startup (instead of using `kgw_single_azure_demo` from step 2), you now have a dedicated admin UI:
+
+- open `http://127.0.0.1:8789/admin/policy`
+- use forms for principal registration, quota upsert/revoke, and one-time token issuance.
+
+CLI/API equivalent:
 
 ```bash
 curl -sS -X POST http://127.0.0.1:8789/admin/policy/principals \
@@ -218,25 +223,15 @@ curl -sS -X POST http://127.0.0.1:8789/admin/policy/quotas/upsert \
   | python -m json.tool
 ```
 
-Then issue a safe token from the same backend/key context:
+Then issue a safe token:
 
 ```bash
-# Must match the running gateway backend + key.
-export MODELKEYGUARD_STORE='postgres'
-export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
-export MODELKEYGUARD_GRAPH_KEY='single-e2e-graph-key-32-bytes-minimum'
-
-export KGW_SAFE_TOKEN="$(python -m modelkeyguard registration issue-token \
-  --principal-id agent:azure-manual-demo \
-  --namespace tenant:kogwistar)"
+export KGW_SAFE_TOKEN="$(curl -sS -X POST http://127.0.0.1:8789/admin/policy/tokens \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:azure-manual-demo","namespace":"tenant:kogwistar","scopes":["model.invoke"]}' \
+  | python -c 'import sys,json; print(json.load(sys.stdin)["safe_token"])')"
 echo "${KGW_SAFE_TOKEN}"
-```
-
-Because token issuance above is from a separate process, restart gateway once so it reloads graph state:
-
-```bash
-pkill -f "python -m modelkeyguard gateway" || true
-./scripts/start_gateway.sh
 ```
 
 Use `KGW_SAFE_TOKEN` in step 5 and `KGW_TOKEN` in step 6.
@@ -347,4 +342,4 @@ If you get `sealed graph payload authentication failed`, your `MODELKEYGUARD_GRA
 If you get `principal_not_registered` while issuing a safe token:
 
 1. You likely did not successfully create the principal in `/admin/policy/principals`, or
-2. your `MODELKEYGUARD_STORE` / `MODELKEYGUARD_POSTGRES_DSN` / `MODELKEYGUARD_GRAPH_KEY` in the token-issuing shell do not match the running gateway backend/key context.
+2. you are issuing token against a different running gateway instance than the one where the principal was created.
