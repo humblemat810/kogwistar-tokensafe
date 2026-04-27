@@ -177,7 +177,7 @@ def _range_seconds(time_range: str) -> int:
 
 
 def _bucket_seconds(bucket: str) -> int:
-    return {"10s": 10, "hour": 3600, "day": 86400}.get(bucket, 3600)
+    return {"10s": 10, "5m": 300, "hour": 3600, "day": 86400}.get(bucket, 3600)
 
 
 def _bucket_key(ts: datetime, bucket_seconds: int) -> str:

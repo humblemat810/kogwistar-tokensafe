@@ -6,6 +6,17 @@
   <link rel="stylesheet" href="/static/admin_keys.css">
 </head>
 <body>
+  <header class="admin-nav">
+    <strong>Admin Links:</strong>
+    <a href="/admin/keys">Keys</a>
+    <a href="/admin/usage">Usage Monitor</a>
+    <a href="/admin/keys.json">Keys JSON</a>
+    <a href="/admin/usage.json">Usage JSON</a>
+    <a href="/healthz">Health</a>
+    <a href="/v1/models">Models</a>
+    <a href="/docs">API Docs</a>
+    <a href="/openapi.json">OpenAPI</a>
+  </header>
   <h1>ModelKeyGuard Key Management</h1>
   <p>Raw provider keys are accepted only through password fields and are never rendered back.</p>
   <h2>Create sealed key</h2>

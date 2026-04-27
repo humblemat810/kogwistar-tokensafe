@@ -6,6 +6,17 @@
   <link rel="stylesheet" href="/static/admin_usage.css">
 </head>
 <body>
+  <header class="admin-nav">
+    <strong>Admin Links:</strong>
+    <a href="/admin/keys">Keys</a>
+    <a href="/admin/usage">Usage Monitor</a>
+    <a href="/admin/keys.json">Keys JSON</a>
+    <a href="/admin/usage.json">Usage JSON</a>
+    <a href="/healthz">Health</a>
+    <a href="/v1/models">Models</a>
+    <a href="/docs">API Docs</a>
+    <a href="/openapi.json">OpenAPI</a>
+  </header>
   <h1>Usage Ops Monitor</h1>
   <div class="card">
     <label>Subject Type</label>
@@ -27,6 +38,7 @@
     <label>Bucket</label>
     <select id="bucket">
       <option>10s</option>
+      <option>5m</option>
       <option selected>hour</option>
       <option>day</option>
     </select>

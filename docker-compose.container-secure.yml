@@ -1,0 +1,28 @@
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  keycloak:
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  gateway:
+    ports:
+      - "127.0.0.1:8789:8789"
+    environment:
+      MODELKEYGUARD_ENV: production
+      MODELKEYGUARD_AUTH_MODE: keycloak
+      MODELKEYGUARD_DRY_RUN: "0"
+      MODELKEYGUARD_STORE: postgres
+      MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard
+
+  ingress_public:
+    image: nginx:1.27-alpine
+    depends_on:
+      gateway:
+        condition: service_started
+    ports:
+      - "8788:8788"
+    volumes:
+      - ./deploy/nginx/modelkeyguard_public_only.conf:/etc/nginx/nginx.conf:ro

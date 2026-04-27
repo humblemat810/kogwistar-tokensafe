@@ -61,6 +61,9 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
 
     usage_page = client.get("/admin/usage")
     assert usage_page.status_code == 200
+    assert "Admin Links:" in usage_page.text
+    assert 'href="/admin/keys"' in usage_page.text
+    assert 'href="/docs"' in usage_page.text
     assert "/static/admin_usage.css" in usage_page.text
     assert "/static/vendor/chart.umd.min.js" in usage_page.text
     assert "/static/admin_usage.js" in usage_page.text
@@ -69,7 +72,7 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     assert client.get("/static/admin_usage.js").status_code == 200
     data = client.get(
         "/admin/usage.json",
-        params={"subject_type": "principal", "subject_id": "agent:doc-ingestor", "time_range": "24h", "bucket": "hour"},
+        params={"subject_type": "principal", "subject_id": "agent:doc-ingestor", "time_range": "24h", "bucket": "5m"},
     ).json()
     assert data["overview"]["requests"] == 1
     assert data["overview"]["allowed"] == 1
@@ -89,6 +92,9 @@ def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):
 
     page = client.get("/admin/keys")
     assert page.status_code == 200
+    assert "Admin Links:" in page.text
+    assert 'href="/admin/usage"' in page.text
+    assert 'href="/openapi.json"' in page.text
     assert "/static/admin_keys.css" in page.text
     assert "ModelKeyGuard Key Management" in page.text
     assert "name=\"intended_use\"" in page.text
