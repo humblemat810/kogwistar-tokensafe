@@ -4,6 +4,7 @@ export MODELKEYGUARD_GRAPH_KEY=${MODELKEYGUARD_GRAPH_KEY:-dev-modelkeyguard-chan
 export MODELKEYGUARD_DRY_RUN=${MODELKEYGUARD_DRY_RUN:-1}
 export MODELKEYGUARD_HOST=${MODELKEYGUARD_HOST:-127.0.0.1}
 export MODELKEYGUARD_PORT=${MODELKEYGUARD_PORT:-8789}
+export MODELKEYGUARD_POLICY_PATH=${MODELKEYGUARD_POLICY_PATH:-config/gateway_policy.json}
 
 if ${PYTHON:-python3} - "${MODELKEYGUARD_HOST}" "${MODELKEYGUARD_PORT}" <<'PY'
 import json
@@ -26,4 +27,4 @@ then
   exit 0
 fi
 
-python -m modelkeyguard gateway --host "$MODELKEYGUARD_HOST" --port "$MODELKEYGUARD_PORT"
+python -m modelkeyguard gateway --host "$MODELKEYGUARD_HOST" --port "$MODELKEYGUARD_PORT" --policy "$MODELKEYGUARD_POLICY_PATH"

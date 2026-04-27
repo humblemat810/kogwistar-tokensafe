@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .graph_state import GraphStateStore
+from .policy_loader import load_policy_json
 
 
 @dataclass(frozen=True)
@@ -40,7 +41,7 @@ class TokenVerifier:
 
     def __init__(self, policy_path: str | Path = "config/gateway_policy.json") -> None:
         self.policy_path = Path(policy_path)
-        self.policy = json.loads(self.policy_path.read_text()) if self.policy_path.exists() else {}
+        self.policy = load_policy_json(self.policy_path)
         self.graph_state = GraphStateStore.from_policy(self.policy) if self.policy else GraphStateStore()
         self.keycloak_url = os.getenv("KEYCLOAK_URL", "http://localhost:8080")
         self.realm = os.getenv("KEYCLOAK_REALM", "modelguard")

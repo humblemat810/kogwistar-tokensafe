@@ -1,8 +1,10 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from modelkeyguard.gateway import build_guard, select_key, sha256_text
-from modelkeyguard.token_auth import TokenVerifier
+from modelkeyguard.token_auth import TokenVerifier, TokenAuthError
 from modelkeyguard.core import Principal, Request
 from modelkeyguard.graph_state import GraphStateStore
 
@@ -86,3 +88,22 @@ def test_graph_payload_is_sealed_at_rest(tmp_path):
     store = GraphStateStore(path, app_key="test-key")
     store.put_node("secret:test", "encrypted_secret_payload", {"provider_key": "sk-should-not-appear"})
     assert store.secret_payload_plaintext_is_not_stored("sk-should-not-appear")
+
+
+def test_missing_policy_file_bootstraps_empty_guard(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    guard, policy = build_guard(tmp_path / "does-not-exist.json")
+    assert policy == {}
+    assert guard.graph_state is not None
+    # Base policy seed nodes still exist for graph invariants.
+    assert "policy:version:0001" in guard.graph_state.nodes
+    assert "issuer:keycloak:modelguard" in guard.graph_state.nodes
+
+
+def test_blank_policy_file_bootstraps_token_verifier(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    blank = tmp_path / "blank_policy.json"
+    blank.write_text("", encoding="utf-8")
+    verifier = TokenVerifier(blank)
+    with pytest.raises(TokenAuthError):
+        verifier.verify_token("missing-token")

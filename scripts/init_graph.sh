@@ -4,4 +4,6 @@ cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:-.}"
 export PYTHONDONTWRITEBYTECODE=1
 export MODELKEYGUARD_GRAPH_KEY="${MODELKEYGUARD_GRAPH_KEY:-dev-only-change-this-32-bytes-minimum}"
-${PYTHON:-python3} -c "from modelkeyguard.graph_tools import init_graph; init_graph()"
+export MODELKEYGUARD_POLICY_PATH="${MODELKEYGUARD_POLICY_PATH:-config/gateway_policy.json}"
+export MODELKEYGUARD_GRAPH_PATH="${MODELKEYGUARD_GRAPH_PATH:-out/modelkeyguard_graph.jsonl}"
+${PYTHON:-python3} -c "import os; from modelkeyguard.graph_tools import init_graph; init_graph(os.environ['MODELKEYGUARD_POLICY_PATH'], os.environ['MODELKEYGUARD_GRAPH_PATH'])"

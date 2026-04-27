@@ -18,6 +18,7 @@ from .services.admin_auth import admin_html_login_response, is_admin_authenticat
 from .services.history_ops import capture_history_record
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
+from .policy_loader import load_policy_json
 
 DEFAULT_POLICY = Path(os.getenv("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json"))
 AUDIT_PATH = Path(os.getenv("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl"))
@@ -32,7 +33,7 @@ def extract_system_prompt(messages: list[dict[str, Any]]) -> str:
 
 
 def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard, dict[str, Any]]:
-    policy = json.loads(Path(policy_path).read_text())
+    policy = load_policy_json(policy_path)
     graph_state = GraphStateStore.from_policy(policy)
     guard = ModelKeyGuard.create()
     guard.graph_state = graph_state
