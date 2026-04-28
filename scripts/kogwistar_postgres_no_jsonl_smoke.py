@@ -82,6 +82,52 @@ def main() -> int:
         reloaded = KogwistarPostgresGraphStateStore(dsn=dsn, app_key=os.environ["MODELKEYGUARD_GRAPH_KEY"])
         if not reloaded.list_named_projections(QUOTA_POLICY_PROJECTION_NAMESPACE):
             raise RuntimeError("kogwistar_postgres smoke did not materialize quota policy projections")
+
+        node_revision_count = len(reloaded._list_nodes("node_revision"))
+        edge_revision_count = len(reloaded._list_nodes("edge_revision"))
+
+        if not reloaded.append_node_if_updated("smoke:node", "smoke_node", {"value": 1}):
+            raise RuntimeError("first append_node_if_updated should append")
+        after_node_create = len(reloaded._list_nodes("node_revision"))
+        if after_node_create != node_revision_count + 1:
+            raise RuntimeError("node create did not append exactly one revision")
+        if reloaded.append_node_if_updated("smoke:node", "smoke_node", {"value": 1}):
+            raise RuntimeError("identical append_node_if_updated should be a no-op")
+        if len(reloaded._list_nodes("node_revision")) != after_node_create:
+            raise RuntimeError("identical node write appended a revision")
+        if not reloaded.append_node_if_updated("smoke:node", "smoke_node", {"value": 2}):
+            raise RuntimeError("changed append_node_if_updated should append")
+        node_revisions = reloaded._list_nodes("node_revision")
+        if len(node_revisions) != after_node_create + 2:
+            raise RuntimeError("changed node write should append revision plus tombstone redirect")
+        node_revision_payloads = [reloaded._decode_payload_from_meta(r.metadata) for r in node_revisions]
+        if not any(p.get("tombstone") and p.get("redirects_to_revision_id") for p in node_revision_payloads):
+            raise RuntimeError("changed node write did not append tombstone redirect")
+
+        if not reloaded.append_edge_if_updated("smoke:edge", "SMOKE_REL", "smoke:node", "policy:version:0001", {"value": 1}):
+            raise RuntimeError("first append_edge_if_updated should append")
+        after_edge_create = len(reloaded._list_nodes("edge_revision"))
+        if after_edge_create != edge_revision_count + 1:
+            raise RuntimeError("edge create did not append exactly one revision")
+        if reloaded.append_edge_if_updated("smoke:edge", "SMOKE_REL", "smoke:node", "policy:version:0001", {"value": 1}):
+            raise RuntimeError("identical append_edge_if_updated should be a no-op")
+        if len(reloaded._list_nodes("edge_revision")) != after_edge_create:
+            raise RuntimeError("identical edge write appended a revision")
+        if not reloaded.append_edge_if_updated("smoke:edge", "SMOKE_REL", "smoke:node", "policy:version:0001", {"value": 2}):
+            raise RuntimeError("changed append_edge_if_updated should append")
+        edge_revisions = reloaded._list_nodes("edge_revision")
+        if len(edge_revisions) != after_edge_create + 2:
+            raise RuntimeError("changed edge write should append revision plus tombstone redirect")
+        edge_revision_payloads = [reloaded._decode_payload_from_meta(r.metadata) for r in edge_revisions]
+        if not any(p.get("tombstone") and p.get("redirects_to_revision_id") for p in edge_revision_payloads):
+            raise RuntimeError("changed edge write did not append tombstone redirect")
+
+        reloaded.load()
+        if reloaded.nodes["smoke:node"].payload != {"value": 2}:
+            raise RuntimeError("current node projection did not materialize changed payload")
+        if reloaded.edges["smoke:edge"].payload != {"value": 2}:
+            raise RuntimeError("current edge projection did not materialize changed payload")
+
         if graph_path.exists():
             raise RuntimeError(f"serious backend created MODELKEYGUARD_GRAPH_PATH JSONL: {graph_path}")
 

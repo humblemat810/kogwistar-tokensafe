@@ -28,6 +28,8 @@ MODELKEYGUARD_DOC_ID = "modelkeyguard.graph"
 RECORD_NODE = "node"
 RECORD_EDGE = "edge"
 RECORD_EVENT = "event"
+RECORD_NODE_REVISION = "node_revision"
+RECORD_EDGE_REVISION = "edge_revision"
 
 ALL_PROJECTION_NAMESPACES = (
     GENERIC_PROJECTION_NAMESPACE,
@@ -67,6 +69,31 @@ def _space_for_node_kind(kind: str) -> str:
     if kind.startswith("history:") or kind.startswith("event:"):
         return "event"
     return "policy"
+
+
+def _kogwistar_stable_json(value: Any) -> str:
+    try:
+        from kogwistar.runtime.serialize import stable_json_dumps
+
+        return stable_json_dumps(value)
+    except Exception:
+        return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+
+
+def _canonical_hash(value: Any) -> str:
+    return "sha256:" + hashlib.sha256(_kogwistar_stable_json(value).encode("utf-8")).hexdigest()
+
+
+def canonical_node_hash(kind: str, payload: dict[str, Any]) -> str:
+    return _canonical_hash({"kind": kind, "payload": payload})
+
+
+def canonical_edge_hash(kind: str, source: str, target: str, payload: dict[str, Any]) -> str:
+    return _canonical_hash({"kind": kind, "source": source, "target": target, "payload": payload})
+
+
+def _safe_record_id_part(value: str) -> str:
+    return value.replace(":", "_").replace("/", "_")
 
 
 @dataclass(frozen=True)
@@ -139,9 +166,12 @@ class KogwistarPostgresGraphStateStore:
         return json.dumps(sealed, sort_keys=True)
 
     def _event_seq(self) -> int:
+        return self._counter("event_seq")
+
+    def _counter(self, key: str) -> int:
         rows = self._rt.meta.list_named_projections("modelkeyguard.counters")
         for row in rows:
-            if str(row.get("key") or "") != "event_seq":
+            if str(row.get("key") or "") != key:
                 continue
             payload = row.get("payload")
             if isinstance(payload, dict):
@@ -149,15 +179,23 @@ class KogwistarPostgresGraphStateStore:
         return 0
 
     def _set_event_seq(self, value: int) -> None:
+        self._set_counter("event_seq", value)
+
+    def _set_counter(self, key: str, value: int) -> None:
         self._rt.meta.replace_named_projection(
             "modelkeyguard.counters",
-            "event_seq",
+            key,
             {"value": int(value), "updated_at_ms": int(datetime.now().timestamp() * 1000)},
             last_authoritative_seq=int(value),
             last_materialized_seq=int(value),
             projection_schema_version=PROJECTION_SCHEMA_VERSION,
             materialization_status="ready",
         )
+
+    def _next_revision_seq(self) -> int:
+        seq = self._counter("graph_revision_seq") + 1
+        self._set_counter("graph_revision_seq", seq)
+        return seq
 
     def _add_or_update_node_record(
         self,
@@ -169,6 +207,7 @@ class KogwistarPostgresGraphStateStore:
         ts: str = "",
         subject: str = "",
         extra_meta: dict[str, Any] | None = None,
+        embedding_space: str | None = None,
     ) -> None:
         try:
             from kogwistar.engine_core.models import PureChromaNode
@@ -183,7 +222,7 @@ class KogwistarPostgresGraphStateStore:
         }
         if extra_meta:
             meta.update(extra_meta)
-        space = "event" if record_type == RECORD_EVENT else _space_for_node_kind(kind)
+        space = embedding_space or ("event" if record_type == RECORD_EVENT else _space_for_node_kind(kind))
         node = PureChromaNode(
             id=record_id,
             label=kind,
@@ -195,7 +234,16 @@ class KogwistarPostgresGraphStateStore:
         )
         self._rt.engine.add_pure_node(node)
 
-    def _add_or_update_edge_record(self, edge_id: str, kind: str, source: str, target: str, payload: dict[str, Any]) -> None:
+    def _add_or_update_edge_record(
+        self,
+        edge_id: str,
+        kind: str,
+        source: str,
+        target: str,
+        payload: dict[str, Any],
+        *,
+        extra_meta: dict[str, Any] | None = None,
+    ) -> None:
         try:
             from kogwistar.engine_core.models import PureChromaEdge
         except Exception as exc:
@@ -207,6 +255,8 @@ class KogwistarPostgresGraphStateStore:
             "mk_target": target,
             "mk_payload_sealed_json": self._encode_payload_meta(payload),
         }
+        if extra_meta:
+            meta.update(extra_meta)
         edge = PureChromaEdge(
             id=edge_id,
             label=kind,
@@ -222,6 +272,35 @@ class KogwistarPostgresGraphStateStore:
             embedding=_stable_embedding(f"{edge_id}:{kind}:{source}:{target}", dim=self.embed_dim, space="policy"),
         )
         self._rt.engine.add_pure_edge(edge)
+
+    def _append_graph_revision(
+        self,
+        *,
+        record_type: str,
+        revision_id: str,
+        revision_kind: str,
+        subject_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self._add_or_update_node_record(
+            revision_id,
+            revision_kind,
+            payload,
+            record_type=record_type,
+            ts=iso_now(),
+            subject=subject_id,
+            extra_meta={
+                "mk_revision_kind": revision_kind,
+                "mk_current": False,
+                "mk_tombstone": bool(payload.get("tombstone")),
+                "mk_entity_id": subject_id,
+            },
+            embedding_space="event",
+        )
+
+    def _revision_id(self, prefix: str, entity_id: str, seq: int, content_hash: str) -> str:
+        digest = content_hash.split(":", 1)[-1][:16]
+        return f"revision:{prefix}:{_safe_record_id_part(entity_id)}:{seq:08d}:{digest}"
 
     def _list_nodes(self, record_type: str) -> list[Any]:
         rows = self._rt.engine.backend.node_get(
@@ -381,13 +460,152 @@ class KogwistarPostgresGraphStateStore:
     # ------------------------------------------------------------------
     # Graph state API used by ModelKeyGuard.
     # ------------------------------------------------------------------
-    def put_node(self, node_id: str, kind: str, payload: dict[str, Any]) -> None:
+    def append_node_if_updated(self, node_id: str, kind: str, payload: dict[str, Any]) -> bool:
+        content_hash = canonical_node_hash(kind, payload)
+        existing = self.nodes.get(node_id)
+        existing_hash = None
+        existing_revision_id = None
+        if existing is not None:
+            existing_hash = canonical_node_hash(existing.kind, existing.payload)
+            existing_revision_id = self._current_node_revision_id(node_id)
+        if existing is not None and existing.kind == kind and existing_hash == content_hash:
+            return False
+
+        seq = self._next_revision_seq()
+        revision_id = self._revision_id("node", node_id, seq, content_hash)
+        revision_kind = "NODE_ASSERTED" if existing is None else "NODE_REVISED"
+        revision_payload = {
+            "entity_id": node_id,
+            "kind": kind,
+            "payload": payload,
+            "content_hash": content_hash,
+            "supersedes_revision_id": existing_revision_id,
+            "revision_seq": seq,
+        }
+        self._append_graph_revision(
+            record_type=RECORD_NODE_REVISION,
+            revision_id=revision_id,
+            revision_kind=revision_kind,
+            subject_id=node_id,
+            payload=revision_payload,
+        )
+        if existing_revision_id:
+            tombstone_id = self._revision_id("node_tombstone", node_id, self._next_revision_seq(), content_hash)
+            self._append_graph_revision(
+                record_type=RECORD_NODE_REVISION,
+                revision_id=tombstone_id,
+                revision_kind="NODE_REVISION_TOMBSTONED",
+                subject_id=node_id,
+                payload={
+                    "entity_id": node_id,
+                    "tombstone": True,
+                    "tombstoned_revision_id": existing_revision_id,
+                    "redirects_to_revision_id": revision_id,
+                },
+            )
+
         self.nodes[node_id] = GraphNode(node_id, kind, payload)
-        self._add_or_update_node_record(node_id, kind, payload, record_type=RECORD_NODE)
+        self._add_or_update_node_record(
+            node_id,
+            kind,
+            payload,
+            record_type=RECORD_NODE,
+            extra_meta={
+                "mk_payload_hash": content_hash,
+                "mk_current_revision_id": revision_id,
+                "mk_current": True,
+            },
+        )
+        return True
+
+    def append_edge_if_updated(self, edge_id: str, kind: str, source: str, target: str, payload: dict[str, Any]) -> bool:
+        content_hash = canonical_edge_hash(kind, source, target, payload)
+        existing = self.edges.get(edge_id)
+        existing_hash = None
+        existing_revision_id = None
+        if existing is not None:
+            existing_hash = canonical_edge_hash(existing.kind, existing.source, existing.target, existing.payload)
+            existing_revision_id = self._current_edge_revision_id(edge_id)
+        if (
+            existing is not None
+            and existing.kind == kind
+            and existing.source == source
+            and existing.target == target
+            and existing_hash == content_hash
+        ):
+            return False
+
+        seq = self._next_revision_seq()
+        revision_id = self._revision_id("edge", edge_id, seq, content_hash)
+        revision_kind = "EDGE_ASSERTED" if existing is None else "EDGE_REVISED"
+        revision_payload = {
+            "entity_id": edge_id,
+            "kind": kind,
+            "source": source,
+            "target": target,
+            "payload": payload,
+            "content_hash": content_hash,
+            "supersedes_revision_id": existing_revision_id,
+            "revision_seq": seq,
+        }
+        self._append_graph_revision(
+            record_type=RECORD_EDGE_REVISION,
+            revision_id=revision_id,
+            revision_kind=revision_kind,
+            subject_id=edge_id,
+            payload=revision_payload,
+        )
+        if existing_revision_id:
+            tombstone_id = self._revision_id("edge_tombstone", edge_id, self._next_revision_seq(), content_hash)
+            self._append_graph_revision(
+                record_type=RECORD_EDGE_REVISION,
+                revision_id=tombstone_id,
+                revision_kind="EDGE_REVISION_TOMBSTONED",
+                subject_id=edge_id,
+                payload={
+                    "entity_id": edge_id,
+                    "tombstone": True,
+                    "tombstoned_revision_id": existing_revision_id,
+                    "redirects_to_revision_id": revision_id,
+                },
+            )
+
+        self.edges[edge_id] = GraphEdge(edge_id, kind, source, target, payload)
+        self._add_or_update_edge_record(
+            edge_id,
+            kind,
+            source,
+            target,
+            payload,
+            extra_meta={
+                "mk_payload_hash": content_hash,
+                "mk_current_revision_id": revision_id,
+                "mk_current": True,
+            },
+        )
+        return True
+
+    def _current_node_revision_id(self, node_id: str) -> str | None:
+        for node in self._list_nodes(RECORD_NODE):
+            if str(getattr(node, "id")) == node_id:
+                meta = self._meta_to_dict(getattr(node, "metadata", None))
+                value = meta.get("mk_current_revision_id")
+                return str(value) if value else None
+        return None
+
+    def _current_edge_revision_id(self, edge_id: str) -> str | None:
+        for edge in self._list_edges():
+            if str(getattr(edge, "id")) == edge_id:
+                meta = self._meta_to_dict(getattr(edge, "metadata", None))
+                value = meta.get("mk_current_revision_id")
+                return str(value) if value else None
+        return None
+
+    def put_node(self, node_id: str, kind: str, payload: dict[str, Any]) -> None:
+        self.append_node_if_updated(node_id, kind, payload)
 
     def put_edge(self, edge_id: str, kind: str, source: str, target: str, payload: dict[str, Any]) -> None:
-        self.edges[edge_id] = GraphEdge(edge_id, kind, source, target, payload)
-        self._add_or_update_edge_record(edge_id, kind, source, target, payload)
+        self.append_edge_if_updated(edge_id, kind, source, target, payload)
 
     def append_event(self, event_type: str, subject_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         seq = self._event_seq() + 1

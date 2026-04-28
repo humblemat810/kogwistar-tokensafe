@@ -8,7 +8,13 @@ import pytest
 
 from modelkeyguard import kogwistar_postgres_state
 from modelkeyguard.kogwistar_import_guard import enforce_installed_kogwistar_only
-from modelkeyguard.kogwistar_postgres_state import KogwistarPostgresGraphStateStore, _stable_embedding, resolve_kogwistar_embed_dim
+from modelkeyguard.kogwistar_postgres_state import (
+    KogwistarPostgresGraphStateStore,
+    _stable_embedding,
+    canonical_edge_hash,
+    canonical_node_hash,
+    resolve_kogwistar_embed_dim,
+)
 
 
 def test_kogwistar_embed_dim_default(monkeypatch):
@@ -28,6 +34,24 @@ def test_kogwistar_embedding_is_deterministic_and_space_separated():
     b1 = _stable_embedding("hello", dim=2, space="event")
     assert a1 == a2
     assert a1 != b1
+
+
+def test_canonical_node_hash_is_stable_and_kind_sensitive():
+    a = canonical_node_hash("quota_policy", {"b": 2, "a": 1})
+    b = canonical_node_hash("quota_policy", {"a": 1, "b": 2})
+    c = canonical_node_hash("principal", {"a": 1, "b": 2})
+    assert a == b
+    assert a.startswith("sha256:")
+    assert a != c
+
+
+def test_canonical_edge_hash_is_stable_and_endpoint_sensitive():
+    a = canonical_edge_hash("REL", "source", "target", {"b": 2, "a": 1})
+    b = canonical_edge_hash("REL", "source", "target", {"a": 1, "b": 2})
+    c = canonical_edge_hash("REL", "target", "source", {"a": 1, "b": 2})
+    assert a == b
+    assert a.startswith("sha256:")
+    assert a != c
 
 
 def test_kogwistar_postgres_missing_optional_import_fails_loudly(monkeypatch):

@@ -97,11 +97,11 @@ def _reset_postgres_graph_state(dsn: str | None = None) -> None:
             "run_registry",
         ):
             try:
-                cur.execute(f"truncate table {table} restart identity")
+                cur.execute(f"truncate table {table} restart identity cascade")
+                conn.commit()
             except Exception:
                 conn.rollback()
                 continue
-        conn.commit()
 
 
 def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:

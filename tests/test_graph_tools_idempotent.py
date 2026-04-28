@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -74,6 +76,53 @@ def test_init_graph_rejects_unknown_serious_backend_instead_of_jsonl_fallback(tm
     monkeypatch.setenv("MODELKEYGUARD_STORE", "chroma")
     with pytest.raises(ValueError, match="unsupported_store_backend:chroma"):
         graph_tools.init_graph(str(policy_path), str(graph_path))
+
+
+def test_postgres_reset_commits_each_successful_truncate_before_optional_table_failures(monkeypatch):
+    """Regression: a later missing optional table must not roll back earlier truncates."""
+    calls: list[str] = []
+
+    class FakeCursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql: str):
+            calls.append(sql)
+            if "graph_events" in sql:
+                raise RuntimeError("simulated missing/locked optional table")
+
+    class FakeConnection:
+        def __init__(self):
+            self.commits = 0
+            self.rollbacks = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def cursor(self):
+            return FakeCursor()
+
+        def commit(self):
+            self.commits += 1
+
+        def rollback(self):
+            self.rollbacks += 1
+
+    fake_conn = FakeConnection()
+    fake_psycopg = SimpleNamespace(connect=lambda _dsn: fake_conn)
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+
+    graph_tools._reset_postgres_graph_state("postgresql://example")
+
+    assert any("truncate table graph_records restart identity cascade" in c for c in calls)
+    assert fake_conn.commits >= 2
+    assert fake_conn.rollbacks >= 1
 
 
 @dataclass(frozen=True)
