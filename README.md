@@ -7,10 +7,16 @@ The client never receives the real OpenAI/Azure/Anthropic key. It receives a sho
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
 
 ## 60-second quickstart
-
+### step 0 (for restart only, skip if fresh run)
+turn off existing running resources occupying required resources
+```bash
+./scripts/reset_local_e2e_state.sh
+```
+### step 1
 ```bash
 ./scripts/quickstart.sh
 ```
+
 
 The quickstart prints each step as it runs:
 
@@ -26,6 +32,32 @@ The quickstart prints each step as it runs:
 ```
 
 It runs in dry-run mode by default, so no real OpenAI key is required.
+
+
+## Run in 1 minute
+
+```bash
+export MODELKEYGUARD_GRAPH_KEY='dev-local-graph-encryption-key'
+./scripts/init_graph.sh
+./scripts/start_gateway.sh
+```
+
+In another terminal:
+Let client use the same key and call cli to inspect graph.
+```bash
+export MODELKEYGUARD_GRAPH_KEY='dev-local-graph-encryption-key'
+export KGW_TOKEN=kgw_demo_doc_ingestor
+./scripts/test_chat.sh
+./scripts/inspect_graph.sh
+```
+
+Dry-run mode is on by default, so no real OpenAI key is needed. To forward for real:
+
+```bash
+export MODELKEYGUARD_DRY_RUN=0
+export OPENAI_API_KEY='sk-...'
+./scripts/start_gateway.sh
+```
 
 ## Full tutorial ladder
 
@@ -65,34 +97,11 @@ ModelKeyGuard Gateway
         ↓
 Provider API key resolved inside gateway only
 ```
-
-## Run in 1 minute
-
-```bash
-export MODELKEYGUARD_GRAPH_KEY='dev-local-graph-encryption-key'
-./scripts/init_graph.sh
-./scripts/start_gateway.sh
-```
-
-In another terminal:
-
-```bash
-export KGW_TOKEN=kgw_demo_doc_ingestor
-./scripts/test_chat.sh
-./scripts/inspect_graph.sh
-```
-
-Dry-run mode is on by default, so no real OpenAI key is needed. To forward for real:
-
-```bash
-export MODELKEYGUARD_DRY_RUN=0
-export OPENAI_API_KEY='sk-...'
-./scripts/start_gateway.sh
-```
-
+# Core concepts
 ## What is graph-native here?
 
-The app separates four graph concerns:
+The app has one authoritative graph with three logical lanes. Hot serving state
+is kept separately as rebuildable named projections.
 
 ```text
 Policy graph
@@ -107,8 +116,10 @@ Usage ledger graph
   successful quota-consuming calls only. Per-user lanes are strict sequential linked
   lists: usage_head:user:alice -> usage:00000001 -> usage:00000002.
 
-Quota projection
-  rebuildable serving cache keyed by lane/subject/period/bucket.
+Named projections
+  rebuildable named-projection serving cache keyed by lane/subject/period/bucket.
+  Quota counters are materialized from successful usage events; they are not
+  graph nodes/edges.
   Example: principal agent:doc-ingestor, period hour, bucket 2026-04-25T05:00Z.
 ```
 
@@ -269,7 +280,7 @@ hourly:
 
 ## Tests
 
-The bundle now includes a regression and behavior suite with **94 pytest test cases**. The tests pin down:
+The bundle now includes a regression and behavior suite with **300+ pytest test cases**. The current suite collects 319 tests. The tests pin down:
 
 ```text
 sealed graph payload authentication and no-plaintext-at-rest guarantees
@@ -283,6 +294,7 @@ principal/user/key quota split and 403/429 reason taxonomy
 token verification and on-behalf-of-user mappings
 gateway helper behavior: key selection, cost estimate, prompt hashes, env secret refs
 Postgres generic named-projection storage and Testcontainers integration
+installed-Kogwistar Postgres backend semantics, no-JSONL graph artifacts, and backend facade behavior
 ```
 
 Run the fast JSONL behavior suite:
@@ -335,7 +347,8 @@ named_projections    generic named projections for O(1) serving counters by lane
 named_projections    generic Kogwistar-style projections, including quota counters and usage-lane tail pointers
 ```
 
-The model is still graph-native:
+The model is still graph-native: authority is in graph facts/events, while
+serving counters and current lookup views are named projections.
 
 ```text
 Policy graph
@@ -351,18 +364,22 @@ Usage ledger graph
   MODEL_USAGE_RESULT
   usage_head:user:alice -> usage:...:00000001 -> usage:...:00000002
 
-Quota projections
-  principal/user/key counters for 10s/hour/day/week/month windows
+Named projections
+  principal/user/key quota counters for 10s/hour/day/week/month windows
+  usage-lane tail pointers and latest quota-policy views
 ```
 
 Denied auth and permission events are stored in the access conversation graph. They do **not** update named projections. Successful allowed calls append usage ledger nodes and update principal/user/key named projections.
 
 ### Delegated Kogwistar Postgres mode
 
-For installed-Kogwistar delegated persistence (pgvector backend + Kogwistar meta-store projections), use this retry-safe developer setup:
+For installed-Kogwistar delegated persistence (pgvector backend + Kogwistar meta-store projections), use this retry-safe developer setup.
+
+Use this block for a clean local rerun:
 
 ```bash
 pip install -e ".[postgres]"
+./scripts/reset_local_e2e_state.sh
 ./scripts/start_postgres.sh
 export MODELKEYGUARD_STORE=kogwistar_postgres
 export MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:modelguard@localhost:5432/modelguard
@@ -371,16 +388,66 @@ export MODELKEYGUARD_INIT_RESET_EXISTING=1
 export MODELKEYGUARD_KOGWISTAR_EMBED_DIM=2
 export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
 export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
-./scripts/init_graph.sh
+```
+
+Optional destructive preflight smoke:
+
+```bash
 python scripts/kogwistar_postgres_no_jsonl_smoke.py
+```
+
+Then initialize with your configured graph key and start the gateway:
+
+```bash
+./scripts/init_graph.sh
 ./scripts/start_gateway.sh
 ```
+
+After the gateway prints `ModelKeyGuard FastAPI gateway listening on
+http://127.0.0.1:8789`, stay in this same local setup and test it with the
+same demo gateway token below. Do **not** switch to the Compose section unless
+you are intentionally changing deployment shape.
+
+In another terminal, try a dry-run OpenAI-compatible call through the
+Kogwistar-backed gateway:
+
+```bash
+source .venv/bin/activate
+export OPENAI_BASE_URL='http://127.0.0.1:8789/v1'
+export OPENAI_API_KEY='kgw_demo_doc_ingestor'
+export OPENAI_MODEL='gpt-4o-mini'
+python scripts/langchain_user_openai_compatible.py
+```
+
+Optional admin checks:
+
+```bash
+curl -sS http://127.0.0.1:8789/healthz | python -m json.tool
+curl -sS -H "x-modelkeyguard-admin-secret: dev-modelkeyguard-admin-secret" \
+  'http://127.0.0.1:8789/admin/usage.json?time_range=24h&bucket=hour' \
+  | python -m json.tool
+```
+
+Next-step links:
+
+- Continue the same local Kogwistar Postgres walkthrough:
+  [`tutorial/kogwistar_managed_postgres_setup.md#5-run-the-gateway`](tutorial/kogwistar_managed_postgres_setup.md#5-run-the-gateway)
+- Turn on retry-friendly cached real upstream calls, using the same gateway
+  token and backend environment:
+  [`tutorial/kogwistar_managed_postgres_setup.md#optional-cache-real-upstream-calls-while-testing`](tutorial/kogwistar_managed_postgres_setup.md#optional-cache-real-upstream-calls-while-testing)
+- Pick a different tutorial path from the index:
+  [`tutorial/README.md`](tutorial/README.md)
 
 Notes:
 
 - In delegated mode, runtime imports must resolve from installed `kogwistar` package (not repo-local clones).
 - Serious backend modes (`postgres`, `kogwistar_postgres`) do not rely on JSONL graph files for graph state.
-- The smoke script initializes a fresh temporary working directory and fails if any `*.jsonl` graph artifact is created there.
+- The smoke script is a local preflight that resets the configured Postgres DSN with its own smoke key, then verifies no `*.jsonl` graph artifact is created. Run `./scripts/init_graph.sh` after the smoke before starting the gateway.
+- The client token in this section is `kgw_demo_doc_ingestor`. It is a gateway/demo token, not the provider API key. The real provider key, if enabled, stays server-side.
+- For the full copy-paste walkthrough, including real-provider and joblib-cache notes, see [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md).
+
+The next section is an alternate deployment shape for Linux Compose. It is not
+the next step after the local Kogwistar Postgres developer setup above.
 
 ## Linux production-ish Compose
 

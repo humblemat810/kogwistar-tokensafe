@@ -66,13 +66,21 @@ def _reset_postgres_graph_state(dsn: str | None = None) -> None:
     with psycopg.connect(dsn_value) as conn, conn.cursor() as cur:
         # Reset authoritative append-only records and current projections so
         # init_graph is idempotent across key changes in local/dev workflows.
+        # Local Postgres and installed Kogwistar both use a table named
+        # named_projections, but their column layouts differ. Drop it during a
+        # local reset so the selected backend can recreate the right schema.
+        try:
+            cur.execute("drop table if exists named_projections cascade")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+
         for table in (
             # local postgres backend tables
             "graph_records",
             "graph_events",
             "graph_edges",
             "graph_nodes",
-            "named_projections",
             # kogwistar pgvector backend tables
             "gke_nodes",
             "gke_edges",

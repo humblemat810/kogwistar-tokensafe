@@ -130,7 +130,7 @@ Try the normal foreground server next:
   export MODELKEYGUARD_GRAPH_KEY=$GRAPH_KEY
   ./scripts/start_gateway.sh
 
-Then call it like OpenAI:
+Then call it like OpenAI (Mocked return payload, no real set up needed):
   export OPENAI_BASE_URL=$BASE_URL/v1
   export OPENAI_API_KEY=kgw_demo_doc_ingestor
   python scripts/langchain_user_openai_compatible.py

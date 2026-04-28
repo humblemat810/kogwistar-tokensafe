@@ -47,10 +47,10 @@ exit 0
 """,
     )
     _write_exe(
-        fake_bin / "rg",
+        fake_bin / "grep",
         f"""#!/usr/bin/env bash
 set -euo pipefail
-echo "rg $@" >> "{call_log}"
+echo "grep $@" >> "{call_log}"
 exit 1
 """,
     )
@@ -133,3 +133,4 @@ exit 1
     assert "docker compose version" in log_text
     assert "docker compose down -v" in log_text
     assert "docker rm -f modelkeyguard-postgres" in log_text
+    assert "ss -ltnp" in log_text

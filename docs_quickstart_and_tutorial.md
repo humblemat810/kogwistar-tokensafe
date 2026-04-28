@@ -241,10 +241,14 @@ export MODELKEYGUARD_GRAPH_KEY_FILE=./secrets/modelkeyguard_graph_key
 export MODELKEYGUARD_INIT_RESET_EXISTING=1
 export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
 export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
-./scripts/init_graph.sh
 python scripts/kogwistar_postgres_no_jsonl_smoke.py
+./scripts/init_graph.sh
 export MODELKEYGUARD_DRY_RUN=1
 ./scripts/start_gateway.sh
 ```
+
+The smoke is a local preflight that resets the configured Postgres DSN with its
+own smoke key. Run `./scripts/init_graph.sh` after it before starting the
+gateway.
 
 Use `_FILE` variables for secrets in Compose and Linux deployments. Do not put real provider keys directly into `.env` in production.

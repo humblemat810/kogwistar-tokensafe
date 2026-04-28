@@ -44,8 +44,8 @@ export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 ## 4. Initialize and verify
 
 ```bash
-./scripts/init_graph.sh
 python scripts/kogwistar_postgres_no_jsonl_smoke.py
+./scripts/init_graph.sh
 test ! -e "$MODELKEYGUARD_GRAPH_PATH"
 ```
 
@@ -57,7 +57,7 @@ initialized encrypted graph: postgresql://modelguard:modelguard@localhost:5432/m
 "ok": true
 ```
 
-The smoke script creates its own fresh temporary working directory and fails if any `*.jsonl` file appears there.
+The smoke script resets the configured local Postgres DSN with its own smoke key, creates its own fresh temporary working directory, and fails if any `*.jsonl` file appears there. Run `./scripts/init_graph.sh` after the smoke before starting the gateway so the database is sealed with your configured `MODELKEYGUARD_GRAPH_KEY`.
 It also fails if current node/edge serving state leaks into Kogwistar graph rows instead of named projections.
 
 ## 5. Run the gateway

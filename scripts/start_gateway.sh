@@ -1,12 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
-export MODELKEYGUARD_GRAPH_KEY=${MODELKEYGUARD_GRAPH_KEY:-dev-modelkeyguard-change-me-32bytes!!}
+if [[ -n "${PYTHON:-}" ]]; then
+  PYTHON_BIN="$PYTHON"
+elif [[ -x ".venv/bin/python" ]]; then
+  PYTHON_BIN=".venv/bin/python"
+else
+  PYTHON_BIN="python3"
+fi
+
+export MODELKEYGUARD_GRAPH_KEY="${MODELKEYGUARD_GRAPH_KEY:-dev-only-change-this-32-bytes-minimum}"
 export MODELKEYGUARD_DRY_RUN=${MODELKEYGUARD_DRY_RUN:-1}
 export MODELKEYGUARD_HOST=${MODELKEYGUARD_HOST:-127.0.0.1}
 export MODELKEYGUARD_PORT=${MODELKEYGUARD_PORT:-8789}
 export MODELKEYGUARD_POLICY_PATH=${MODELKEYGUARD_POLICY_PATH:-config/gateway_policy.json}
 
-if ${PYTHON:-python3} - "${MODELKEYGUARD_HOST}" "${MODELKEYGUARD_PORT}" <<'PY'
+if "$PYTHON_BIN" - "${MODELKEYGUARD_HOST}" "${MODELKEYGUARD_PORT}" <<'PY'
 import json
 import sys
 import urllib.error
@@ -27,4 +35,4 @@ then
   exit 0
 fi
 
-python -m modelkeyguard gateway --host "$MODELKEYGUARD_HOST" --port "$MODELKEYGUARD_PORT" --policy "$MODELKEYGUARD_POLICY_PATH"
+"$PYTHON_BIN" -m modelkeyguard gateway --host "$MODELKEYGUARD_HOST" --port "$MODELKEYGUARD_PORT" --policy "$MODELKEYGUARD_POLICY_PATH"

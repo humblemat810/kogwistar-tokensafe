@@ -26,10 +26,23 @@ docker rm -f modelkeyguard-postgres >/dev/null 2>&1 || true
 
 echo "[reset] removing local postgres data directory used by this repo (if writable): ${RESET_DATA_DIR}"
 rm -rf "${RESET_DATA_DIR}" >/dev/null 2>&1 || true
+if [[ -e "${RESET_DATA_DIR}" ]]; then
+  echo "[reset] warning: could not remove ${RESET_DATA_DIR}; stop containers and check ownership/permissions" >&2
+  echo "[reset] warning: for a truly fresh local Postgres directory, run:" >&2
+  echo "  sudo rm -rf '${RESET_DATA_DIR}'" >&2
+fi
 echo "[reset] removing local keycloak data directory used by this repo (if writable): ${RESET_KEYCLOAK_DATA_DIR}"
 rm -rf "${RESET_KEYCLOAK_DATA_DIR}" >/dev/null 2>&1 || true
+if [[ -e "${RESET_KEYCLOAK_DATA_DIR}" ]]; then
+  echo "[reset] warning: could not remove ${RESET_KEYCLOAK_DATA_DIR}; stop containers and check ownership/permissions" >&2
+  echo "[reset] warning: for a truly fresh local Keycloak directory, run:" >&2
+  echo "  sudo rm -rf '${RESET_KEYCLOAK_DATA_DIR}'" >&2
+fi
 echo "[reset] removing local LLM call cache directory (if present): ${RESET_LLM_CALL_CACHE_DIR}"
 rm -rf "${RESET_LLM_CALL_CACHE_DIR}" >/dev/null 2>&1 || true
+if [[ -e "${RESET_LLM_CALL_CACHE_DIR}" ]]; then
+  echo "[reset] warning: could not remove ${RESET_LLM_CALL_CACHE_DIR}; check ownership/permissions" >&2
+fi
 
 echo "[reset] removing configured local graph/audit artifacts for any backend"
 ${PYTHON:-python3} - <<'PY' || true
@@ -99,7 +112,11 @@ if [[ -d "${RESET_OUT_DIR}" ]]; then
 fi
 
 echo "[reset] current listeners on 5432/8789 (if any):"
-ss -ltnp | rg ':5432|:8789' || echo "  none"
+if command -v rg >/dev/null 2>&1; then
+  ss -ltnp | rg ':5432|:8789' || echo "  none"
+else
+  ss -ltnp | grep -E ':5432|:8789' || echo "  none"
+fi
 
 echo "[reset] done"
 echo "If 5432 is still occupied by a host postgres service, stop it manually:"

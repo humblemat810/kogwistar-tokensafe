@@ -120,6 +120,7 @@ def test_postgres_reset_commits_each_successful_truncate_before_optional_table_f
 
     graph_tools._reset_postgres_graph_state("postgresql://example")
 
+    assert any("drop table if exists named_projections cascade" in c for c in calls)
     assert any("truncate table graph_records restart identity cascade" in c for c in calls)
     assert fake_conn.commits >= 2
     assert fake_conn.rollbacks >= 1
