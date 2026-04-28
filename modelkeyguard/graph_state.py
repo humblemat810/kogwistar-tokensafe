@@ -260,6 +260,7 @@ class GraphStateStore:
         store = resolve_store_backend()
         if cls is GraphStateStore and store == "postgres":
             from .postgres_state import PostgresGraphStateStore
+
             return PostgresGraphStateStore.from_policy(policy, app_key=app_key)  # type: ignore[return-value]
         if cls is GraphStateStore and store == "kogwistar_postgres":
             from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore

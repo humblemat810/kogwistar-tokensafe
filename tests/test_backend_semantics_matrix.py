@@ -3,8 +3,10 @@ from __future__ import annotations
 import importlib.util
 
 import pytest
+from sqlalchemy.exc import NotSupportedError
 
 from modelkeyguard.graph_state import GraphStateStore
+from modelkeyguard.graph_backend import GraphStateBackend, resolve_graph_state_backend
 from modelkeyguard.postgres_state import PostgresGraphStateStore
 
 
@@ -54,6 +56,23 @@ def test_jsonl_and_postgres_share_current_graph_write_contract(tmp_path, postgre
         assert store.edges["matrix:edge"].payload == {"value": 2}
         assert store.edges["matrix:edge"].source == "matrix:node"
         assert store.edges["matrix:edge"].target == "matrix:target"
+
+
+def test_backend_facade_resolves_protocol_implementations(tmp_path, postgres_store):
+    jsonl = GraphStateStore(tmp_path / "matrix2.jsonl", app_key="backend-matrix-key-32-bytes-minimum")
+    resolved_jsonl = resolve_graph_state_backend("jsonl", path=str(tmp_path / "matrix3.jsonl"), app_key="backend-matrix-key-32-bytes-minimum")
+    resolved_postgres = resolve_graph_state_backend("postgres", app_key="backend-matrix-key-32-bytes-minimum", dsn=postgres_store.dsn)
+
+    assert isinstance(jsonl, GraphStateBackend)
+    assert isinstance(resolved_jsonl, GraphStateBackend)
+    assert isinstance(resolved_postgres, GraphStateBackend)
+
+    try:
+        resolved_kogwistar = resolve_graph_state_backend("kogwistar_postgres", app_key="backend-matrix-key-32-bytes-minimum", dsn=postgres_store.dsn)
+    except (RuntimeError, NotSupportedError) as exc:
+        pytest.skip(f"kogwistar_postgres unavailable in this test environment: {exc}")
+
+    assert isinstance(resolved_kogwistar, GraphStateBackend)
 
 
 def test_kogwistar_postgres_backend_is_pinned_by_live_smoke():
