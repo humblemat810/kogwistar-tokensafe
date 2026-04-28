@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: modelguard
       POSTGRES_USER: modelguard
@@ -44,8 +44,10 @@ services:
     env_file: .env.example
     environment:
       MODELKEYGUARD_ENV: local
-      MODELKEYGUARD_STORE: postgres
+      MODELKEYGUARD_STORE: kogwistar_postgres
       MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard
+      MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY: "1"
+      MODELKEYGUARD_USE_INSTALLED_KOGWISTAR: "1"
       MODELKEYGUARD_HOST: 0.0.0.0
       MODELKEYGUARD_PORT: 8789
       MODELKEYGUARD_DRY_RUN: "1"

@@ -14,8 +14,10 @@ services:
       MODELKEYGUARD_ENV: production
       MODELKEYGUARD_AUTH_MODE: keycloak
       MODELKEYGUARD_DRY_RUN: "0"
-      MODELKEYGUARD_STORE: postgres
+      MODELKEYGUARD_STORE: kogwistar_postgres
       MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard
+      MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY: "1"
+      MODELKEYGUARD_USE_INSTALLED_KOGWISTAR: "1"
 
   ingress_public:
     image: nginx:1.27-alpine

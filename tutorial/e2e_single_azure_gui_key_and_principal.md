@@ -132,12 +132,14 @@ PY
 Set runtime vars:
 
 ```bash
-export MODELKEYGUARD_STORE='postgres'
+export MODELKEYGUARD_STORE='kogwistar_postgres'
 export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
 export MODELKEYGUARD_POLICY_PATH='out/single_e2e_policy.json'
 export MODELKEYGUARD_GRAPH_PATH='out/single_e2e_graph.jsonl'
 export MODELKEYGUARD_AUDIT_PATH='out/single_e2e_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='single-e2e-graph-key-32-bytes-minimum'
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 
 # Admin auth for /admin/*
 export MODELKEYGUARD_ADMIN_API_SECRET='single-e2e-admin-secret'
@@ -155,6 +157,7 @@ Initialize graph:
 
 ```bash
 ./scripts/init_graph.sh
+find "$PWD" -maxdepth 2 -name 'single_e2e_graph.jsonl' -print -quit | grep -q . && exit 1 || true
 ```
 
 Start gateway:

@@ -707,9 +707,10 @@ def test_082_no_plaintext_policy_values_in_jsonl_graph_file(tmp_path):
 
 
 def test_083_usage_monitor_totals_are_event_cost_based_not_retroactive_policy_price():
+    now = datetime.now(timezone.utc)
     events = [
         {
-            "ts": "2026-04-27T00:00:10Z",
+            "ts": now.replace(minute=0, second=10, microsecond=0).isoformat(),
             "request_id": "pre-price-change",
             "decision": "ALLOWED",
             "principal_id": "app:billing-demo",
@@ -721,7 +722,7 @@ def test_083_usage_monitor_totals_are_event_cost_based_not_retroactive_policy_pr
             "estimated_cost_usd": 0.010,  # old price phase
         },
         {
-            "ts": "2026-04-27T00:10:10Z",
+            "ts": now.replace(minute=10, second=10, microsecond=0).isoformat(),
             "request_id": "post-price-change",
             "decision": "ALLOWED",
             "principal_id": "app:billing-demo",

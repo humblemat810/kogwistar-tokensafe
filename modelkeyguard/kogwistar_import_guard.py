@@ -27,7 +27,9 @@ def enforce_installed_kogwistar_only() -> None:
 
     origin = Path(spec.origin).resolve()
     repo_root = Path(__file__).resolve().parents[1]
-    if str(origin).startswith(str(repo_root)):
+    installed_package_path = "site-packages" in origin.parts or "dist-packages" in origin.parts
+    reference_clone_path = "kogwistar_reference_only" in origin.parts
+    if reference_clone_path or (str(origin).startswith(str(repo_root)) and not installed_package_path):
         raise RuntimeError(
             "kogwistar import resolved to repository-local path. "
             "Use pip-installed kogwistar only; local clone is reference-only."

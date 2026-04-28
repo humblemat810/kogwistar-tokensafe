@@ -2,6 +2,7 @@
 
 - `../scripts/reset_local_e2e_state.sh`: recommended preflight reset script for repeatable from-scratch runs (stops local gateway/containers, removes local JSONL artifacts, attempts Postgres graph-table truncation when configured, and prints 5432/8789 port holders).
 - `slow_quickstart_cli_gui_parity.md`: step-by-step retry-safe tutorial that maps CLI and GUI flows.
+- `kogwistar_managed_postgres_setup.md`: copy-paste setup for installed-Kogwistar managed Postgres, including retry-idempotent local init and no-JSONL graph artifact verification.
 - `e2e_single_azure_gui_key_and_principal.md`: single deterministic flow for registering an app principal, creating Azure key via admin GUI, and calling Azure endpoint with that principal token.
 - `e2e_azure_real_key_usage_and_billing.md`: real paid Azure flow from policy file + admin GUI key creation to client call and usage/billing verification (including provider token breakdown extraction from history detail).
 - `final_dev_guard_azure_real_setup.md`: final-dev guard setup for real Azure token use with PostgreSQL-backed state, CLI/GUI admin parity, and real smoke tests.

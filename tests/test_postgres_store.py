@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -117,7 +118,7 @@ def test_postgres_history_capture_and_projection_queries(pg_store):
     settings = AppSettings.from_env()
     metadata = {
         "request_id": "req-postgres-history-1",
-        "ts": "2026-04-27T00:00:00Z",
+        "ts": datetime.now(timezone.utc).isoformat(),
         "provider": "openai",
         "route_family": "openai_v1",
         "route": "/v1/chat/completions",

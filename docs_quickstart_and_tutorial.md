@@ -56,7 +56,7 @@ When inspecting quickstart artifacts:
 
 - `out/quickstart_graph.jsonl` is intentionally readable at record level (`record_type`, `id`, `kind`).
 - Sensitive payload content is not plaintext there; it is stored as sealed `payload_sealed`.
-- For real production, switch to `MODELKEYGUARD_STORE=postgres` and `MODELKEYGUARD_POSTGRES_DSN=...` instead of relying on tutorial JSONL artifacts.
+- For real production, switch to `MODELKEYGUARD_STORE=kogwistar_postgres` and `MODELKEYGUARD_POSTGRES_DSN=...` instead of relying on tutorial JSONL graph artifacts.
 
 ## 1. Mental model
 
@@ -231,12 +231,18 @@ For production-like local deployment:
 ./scripts/start_stack.sh
 ```
 
-Then start the gateway with Postgres:
+Then start the gateway with installed-Kogwistar managed Postgres:
 
 ```bash
-export MODELKEYGUARD_STORE=postgres
+pip install -e ".[postgres]"
+export MODELKEYGUARD_STORE=kogwistar_postgres
 export MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:modelguard@localhost:5432/modelguard
 export MODELKEYGUARD_GRAPH_KEY_FILE=./secrets/modelkeyguard_graph_key
+export MODELKEYGUARD_INIT_RESET_EXISTING=1
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
+./scripts/init_graph.sh
+python scripts/kogwistar_postgres_no_jsonl_smoke.py
 export MODELKEYGUARD_DRY_RUN=1
 ./scripts/start_gateway.sh
 ```

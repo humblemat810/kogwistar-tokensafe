@@ -71,7 +71,12 @@ Delegated mode persists graph entities through installed Kogwistar engine primit
 (`GraphKnowledgeEngine` + pgvector backend), and uses Kogwistar meta-store named
 projection primitives (`EnginePostgresMetaStore`) for projection reads/writes.
 
-In delegated mode, ModelKeyGuard does not write to local `graph_*` tables.
+In delegated mode, ModelKeyGuard does not write to local `graph_*` tables or
+create `MODELKEYGUARD_GRAPH_PATH` JSONL graph artifacts. The smoke check is:
+
+```bash
+python scripts/kogwistar_postgres_no_jsonl_smoke.py
+```
 
 For PK/index details and logical FK mapping, see:
 

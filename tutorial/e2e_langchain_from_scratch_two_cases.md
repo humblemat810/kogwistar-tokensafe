@@ -206,24 +206,27 @@ docker compose ps postgres || docker-compose ps postgres
 ```bash
 python -m venv .venv
 source .venv/bin/activate
-pip install -e ".[dev]"
+pip install -e ".[dev,postgres]"
 ```
 
-### 4) Configure PostgreSQL + real upstream mode
+### 4) Configure installed-Kogwistar managed PostgreSQL + real upstream mode
 
 ```bash
-export MODELKEYGUARD_STORE='postgres'
+export MODELKEYGUARD_STORE='kogwistar_postgres'
 export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
 export MODELKEYGUARD_AUDIT_PATH='out/case2_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='case2-prodlike-graph-key-32-bytes-minimum'
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 export MODELKEYGUARD_DRY_RUN=0
 export MODELKEYGUARD_ADMIN_API_SECRET='replace-this-admin-secret'
 ```
 
-Initialize graph into Postgres:
+Initialize graph into Kogwistar Postgres:
 
 ```bash
 ./scripts/init_graph.sh
+find "$PWD" -maxdepth 2 -name 'case2_graph.jsonl' -print -quit | grep -q . && exit 1 || true
 ```
 
 Start gateway:

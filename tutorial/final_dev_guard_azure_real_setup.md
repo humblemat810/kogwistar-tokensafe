@@ -82,29 +82,32 @@ docker compose exec -T postgres pg_isready -U modelguard -d modelguard
 
 ## 4. Configure gateway to use PostgreSQL
 
-Set runtime state (Postgres-backed, real upstream mode):
+Set runtime state (installed-Kogwistar managed Postgres, real upstream mode):
 
 ```bash
-export MODELKEYGUARD_STORE='postgres'
+export MODELKEYGUARD_STORE='kogwistar_postgres'
 export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
 export MODELKEYGUARD_AUDIT_PATH='out/finaldev_audit.jsonl'
 export MODELKEYGUARD_REVIEW_OUT='out/finaldev_review.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='<32+ char random value>'
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 export MODELKEYGUARD_DRY_RUN=0
 export MODELKEYGUARD_ADMIN_API_SECRET='<ADMIN_SHARED_SECRET>'
 ```
 
-Initialize policy graph into Postgres once:
+Initialize policy graph into Kogwistar Postgres once:
 
 ```bash
 ./scripts/init_graph.sh
 ```
 
-Verify graph rows exist in Postgres:
+Verify graph rows exist in Kogwistar Postgres and no graph JSONL artifact was created:
 
 ```bash
-docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as graph_nodes from graph_nodes;"
-docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as graph_edges from graph_edges;"
+docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as kogwistar_nodes from gke_nodes;"
+docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as kogwistar_edges from gke_edges;"
+find "$PWD" -maxdepth 2 -name 'finaldev_graph.jsonl' -print -quit | grep -q . && exit 1 || true
 ```
 
 ## 5. Prepare secrets safely (no plaintext in history)

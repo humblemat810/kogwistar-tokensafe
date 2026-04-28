@@ -5,6 +5,7 @@ import json
 import os
 from dataclasses import dataclass
 from datetime import datetime
+from types import SimpleNamespace
 from typing import Any, Iterable
 
 from .graph_state import GraphEdge, GraphNode, DEFAULT_APP_KEY, iso_now, period_bucket, utc_now
@@ -152,6 +153,8 @@ class KogwistarPostgresGraphStateStore:
             "modelkeyguard.counters",
             "event_seq",
             {"value": int(value), "updated_at_ms": int(datetime.now().timestamp() * 1000)},
+            last_authoritative_seq=int(value),
+            last_materialized_seq=int(value),
             projection_schema_version=PROJECTION_SCHEMA_VERSION,
             materialization_status="ready",
         )
@@ -221,16 +224,62 @@ class KogwistarPostgresGraphStateStore:
         self._rt.engine.add_pure_edge(edge)
 
     def _list_nodes(self, record_type: str) -> list[Any]:
-        return self._rt.engine.list_nodes_with_ref_filter(
-            MODELKEYGUARD_DOC_ID,
+        rows = self._rt.engine.backend.node_get(
             where={"mk_record_type": record_type},
+            include=["documents", "metadatas"],
+            limit=10000,
         )
+        ids = rows.get("ids") or []
+        docs = rows.get("documents") or []
+        metadatas = rows.get("metadatas") or []
+        out: list[Any] = []
+        for idx, node_id in enumerate(ids):
+            meta = metadatas[idx] if idx < len(metadatas) and isinstance(metadatas[idx], dict) else {}
+            if str(meta.get("mk_record_type") or "") != record_type:
+                continue
+            doc: dict[str, Any] = {}
+            if idx < len(docs) and isinstance(docs[idx], str):
+                try:
+                    parsed = json.loads(docs[idx])
+                    if isinstance(parsed, dict):
+                        doc = parsed
+                except Exception:
+                    doc = {}
+            if doc.get("doc_id") != MODELKEYGUARD_DOC_ID:
+                continue
+            out.append(SimpleNamespace(id=str(node_id), metadata=meta))
+        return out
 
     def _list_edges(self) -> list[Any]:
-        return self._rt.engine.list_edges_with_ref_filter(
-            MODELKEYGUARD_DOC_ID,
-            where={"mk_record_type": RECORD_EDGE},
+        rows = self._rt.engine.backend.edge_get(
+            where={"doc_id": MODELKEYGUARD_DOC_ID},
+            include=["documents", "metadatas"],
+            limit=10000,
         )
+        ids = rows.get("ids") or []
+        docs = rows.get("documents") or []
+        out: list[Any] = []
+        for idx, edge_id in enumerate(ids):
+            doc: dict[str, Any] = {}
+            if idx < len(docs) and isinstance(docs[idx], str):
+                try:
+                    parsed = json.loads(docs[idx])
+                    if isinstance(parsed, dict):
+                        doc = parsed
+                except Exception:
+                    doc = {}
+            meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
+            if str(meta.get("mk_record_type") or "") != RECORD_EDGE:
+                continue
+            out.append(
+                SimpleNamespace(
+                    id=str(edge_id),
+                    metadata=meta,
+                    source_ids=doc.get("source_ids") or [],
+                    target_ids=doc.get("target_ids") or [],
+                )
+            )
+        return out
 
     def load(self) -> None:
         self.nodes.clear()

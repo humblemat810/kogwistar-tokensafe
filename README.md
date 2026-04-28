@@ -39,6 +39,7 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 6. production deployment notes.
 
 See [`tutorial/slow_quickstart_cli_gui_parity.md`](tutorial/slow_quickstart_cli_gui_parity.md) for a slower, retry-safe CLI and GUI parity walkthrough.
+See [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md) for the copy-paste installed-Kogwistar managed Postgres setup, including no-JSONL graph artifact verification.
 See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_azure_real_setup.md) for final-dev guard setup with real Azure token pathway, PostgreSQL-backed state, and real smoke tests (completion + LangChain structured output).
 
 See [`docs_langchain_provider_native_smoke.md`](docs_langchain_provider_native_smoke.md) for separate-environment LangChain smoke tests covering provider-native endpoints (OpenAI, Azure OpenAI, Ollama, Gemini) and `/v1` universal fallback mode, each with streaming and non-streaming examples, including retry-safe gateway startup with the correct quickstart graph key/path.
@@ -354,29 +355,35 @@ Denied auth and permission events are stored in the access conversation graph. T
 
 ### Delegated Kogwistar Postgres mode
 
-For installed-Kogwistar delegated persistence (pgvector backend + Kogwistar meta-store projections):
+For installed-Kogwistar delegated persistence (pgvector backend + Kogwistar meta-store projections), use this retry-safe developer setup:
 
 ```bash
 pip install -e ".[postgres]"
+./scripts/start_postgres.sh
 export MODELKEYGUARD_STORE=kogwistar_postgres
 export MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:modelguard@localhost:5432/modelguard
+export MODELKEYGUARD_GRAPH_KEY='kogwistar-managed-postgres-dev-key-32-bytes-minimum'
+export MODELKEYGUARD_INIT_RESET_EXISTING=1
 export MODELKEYGUARD_KOGWISTAR_EMBED_DIM=2
 export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
 export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
+./scripts/init_graph.sh
+python scripts/kogwistar_postgres_no_jsonl_smoke.py
 ./scripts/start_gateway.sh
 ```
 
 Notes:
 
 - In delegated mode, runtime imports must resolve from installed `kogwistar` package (not repo-local clones).
-- Serious backend modes (`postgres`, `kogwistar_postgres`) do not rely on JSONL graph files.
+- Serious backend modes (`postgres`, `kogwistar_postgres`) do not rely on JSONL graph files for graph state.
+- The smoke script initializes a fresh temporary working directory and fails if any `*.jsonl` graph artifact is created there.
 
 ## Linux production-ish Compose
 
 `docker-compose.yml` now includes:
 
 ```text
-postgres  persistent volume: modelguard_pgdata -> /var/lib/postgresql/data
+postgres  pgvector-enabled Postgres image with persistent data directory
 keycloak  imports keycloak/modelguard-realm.json and uses the same Postgres service
 ```
 

@@ -42,7 +42,7 @@ TXT
   container_id="$("${compose_cmd[@]}" ps -q postgres)"
 else
   container_name="${MODELKEYGUARD_POSTGRES_CONTAINER:-modelkeyguard-postgres}"
-  image="${MODELKEYGUARD_POSTGRES_IMAGE:-postgres:16}"
+  image="${MODELKEYGUARD_POSTGRES_IMAGE:-pgvector/pgvector:pg16}"
   host_port="${MODELKEYGUARD_POSTGRES_PORT:-5432}"
   db="${MODELKEYGUARD_POSTGRES_DB:-modelguard}"
   user="${MODELKEYGUARD_POSTGRES_USER:-modelguard}"

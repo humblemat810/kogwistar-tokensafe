@@ -80,13 +80,15 @@ JSON
 Set runtime:
 
 ```bash
-export MODELKEYGUARD_STORE='postgres'
+export MODELKEYGUARD_STORE='kogwistar_postgres'
 export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:modelguard@localhost:5432/modelguard'
 export MODELKEYGUARD_POLICY_PATH='out/azure_real_billing_policy.json'
 export MODELKEYGUARD_GRAPH_PATH='out/azure_real_billing_graph.jsonl'
 export MODELKEYGUARD_AUDIT_PATH='out/azure_real_billing_audit.jsonl'
 export MODELKEYGUARD_GRAPH_KEY='<GRAPH_KEY_32+_CHARS>'
 export MODELKEYGUARD_ADMIN_API_SECRET='<ADMIN_SECRET>'
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 export MODELKEYGUARD_DRY_RUN=0
 export AZURE_OPENAI_UPSTREAM_URL='<AZURE_OPENAI_BASE_URL>'
 ```
@@ -99,6 +101,7 @@ Start services:
 ```bash
 ./scripts/start_postgres.sh
 ./scripts/init_graph.sh
+find "$PWD" -maxdepth 2 -name 'azure_real_billing_graph.jsonl' -print -quit | grep -q . && exit 1 || true
 ./scripts/start_gateway.sh
 ```
 
