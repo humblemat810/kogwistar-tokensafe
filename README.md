@@ -29,6 +29,10 @@ It runs in dry-run mode by default, so no real OpenAI key is required.
 
 ## Full tutorial ladder
 
+For the fastest guide, start with the glanceable tutorial index:
+
+[`tutorial/README.md`](tutorial/README.md)
+
 See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 
 1. the one-command quickstart,

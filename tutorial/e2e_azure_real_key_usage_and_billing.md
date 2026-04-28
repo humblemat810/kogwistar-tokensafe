@@ -96,6 +96,25 @@ export AZURE_OPENAI_UPSTREAM_URL='<AZURE_OPENAI_BASE_URL>'
 Use real values in exports. Do not leave placeholders like `<GRAPH_KEY_32+_CHARS>`.
 Keep one consistent `MODELKEYGUARD_GRAPH_KEY` for this run; changing it later will make existing sealed state unreadable.
 
+Optional paid-call cache for retryable developer smokes:
+
+```bash
+export MODELKEYGUARD_LLM_CALL_CACHE='joblib'
+export MODELKEYGUARD_LLM_CALL_CACHE_DIR="$PWD/out/llm_call_cache"
+```
+
+With this enabled, the first identical request still calls Azure OpenAI. Later
+matching requests replay the joblib-cached upstream response while continuing to
+exercise ModelKeyGuard auth, ACL, quota, history, and Kogwistar projections.
+Disable it for production by unsetting `MODELKEYGUARD_LLM_CALL_CACHE`.
+
+Clear the cached upstream responses whenever you want the next run to call Azure
+again:
+
+```bash
+rm -rf "${MODELKEYGUARD_LLM_CALL_CACHE_DIR:-$PWD/out/llm_call_cache}"
+```
+
 Start services:
 
 ```bash

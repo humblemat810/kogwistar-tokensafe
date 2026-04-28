@@ -8,6 +8,7 @@ DEFAULT_KEYCLOAK_DATA_DIR="${MODELKEYGUARD_KEYCLOAK_DATA_DIR:-${TOKENSAFE_HOME%/
 RESET_DATA_DIR="${MODELKEYGUARD_RESET_DATA_DIR:-$DEFAULT_PG_DATA_DIR}"
 RESET_KEYCLOAK_DATA_DIR="${MODELKEYGUARD_RESET_KEYCLOAK_DATA_DIR:-$DEFAULT_KEYCLOAK_DATA_DIR}"
 RESET_OUT_DIR="${MODELKEYGUARD_RESET_OUT_DIR:-$ROOT_DIR/out}"
+RESET_LLM_CALL_CACHE_DIR="${MODELKEYGUARD_LLM_CALL_CACHE_DIR:-${RESET_OUT_DIR%/}/llm_call_cache}"
 
 echo "[reset] stopping local gateway processes (if any)"
 pkill -f "python -m modelkeyguard gateway" >/dev/null 2>&1 || true
@@ -27,6 +28,8 @@ echo "[reset] removing local postgres data directory used by this repo (if writa
 rm -rf "${RESET_DATA_DIR}" >/dev/null 2>&1 || true
 echo "[reset] removing local keycloak data directory used by this repo (if writable): ${RESET_KEYCLOAK_DATA_DIR}"
 rm -rf "${RESET_KEYCLOAK_DATA_DIR}" >/dev/null 2>&1 || true
+echo "[reset] removing local LLM call cache directory (if present): ${RESET_LLM_CALL_CACHE_DIR}"
+rm -rf "${RESET_LLM_CALL_CACHE_DIR}" >/dev/null 2>&1 || true
 
 echo "[reset] removing configured local graph/audit artifacts for any backend"
 ${PYTHON:-python3} - <<'PY' || true

@@ -61,6 +61,9 @@ exit 1
 
     out_dir = tmp_path / "out"
     out_dir.mkdir(parents=True, exist_ok=True)
+    llm_cache_dir = out_dir / "llm_call_cache"
+    llm_cache_dir.mkdir(parents=True, exist_ok=True)
+    (llm_cache_dir / "cached.joblib").write_text("cached", encoding="utf-8")
     target_files = [
         "modelkeyguard_graph.jsonl",
         "modelkeyguard_audit.jsonl",
@@ -118,6 +121,7 @@ exit 1
         assert result.returncode == 0, result.stderr
 
     assert not data_dir.exists()
+    assert not llm_cache_dir.exists()
     assert not Path(env["MODELKEYGUARD_GRAPH_PATH"]).exists()
     assert not Path(env["MODELKEYGUARD_AUDIT_PATH"]).exists()
     assert not Path(env["MODELKEYGUARD_REVIEW_OUT"]).exists()

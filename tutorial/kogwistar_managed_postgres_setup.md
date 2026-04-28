@@ -75,6 +75,41 @@ export OPENAI_API_KEY='kgw_demo_doc_ingestor'
 python scripts/langchain_user_openai_compatible.py
 ```
 
+## Optional: Cache real upstream calls while testing
+
+For a realistic paid-provider smoke that is still retry-friendly, enable the
+joblib-backed LLM call cache before starting the gateway:
+
+```bash
+export MODELKEYGUARD_DRY_RUN=0
+export MODELKEYGUARD_LLM_CALL_CACHE='joblib'
+export MODELKEYGUARD_LLM_CALL_CACHE_DIR="$PWD/out/llm_call_cache"
+```
+
+The first matching request still calls the real provider. Later identical
+requests with the same provider, upstream URL, content type, safe-token route,
+request body, and provider-secret hash replay the cached upstream response.
+Provider secrets are hashed for the cache key and are not written into cache
+filenames.
+
+Use this only for developer smoke runs. Disable it for production:
+
+```bash
+unset MODELKEYGUARD_LLM_CALL_CACHE
+```
+
+Clear the cached upstream responses whenever you want a fresh paid-provider call:
+
+```bash
+rm -rf "${MODELKEYGUARD_LLM_CALL_CACHE_DIR:-$PWD/out/llm_call_cache}"
+```
+
+The repo reset script also removes this directory:
+
+```bash
+./scripts/reset_local_e2e_state.sh
+```
+
 ## Production Shape
 
 Use the same backend flags, but replace local literals with secret files:

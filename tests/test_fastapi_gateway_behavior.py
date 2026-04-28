@@ -2,7 +2,8 @@ import json
 
 import pytest
 
-from modelkeyguard.gateway import build_guard, create_app, process_chat_completion
+from modelkeyguard import gateway
+from modelkeyguard.gateway import build_guard, create_app, forward_provider, process_chat_completion
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
@@ -22,6 +23,46 @@ def _payload(model="gpt-4o-mini", system=EXPECTED_SYSTEM, max_tokens=16):
         ],
         "max_tokens": max_tokens,
     }
+
+
+def test_forward_provider_joblib_cache_replays_real_mode_response(tmp_path, monkeypatch):
+    pytest.importorskip("joblib")
+
+    calls = []
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b'{"id":"real-once","choices":[{"message":{"content":"cached"}}]}'
+
+    def fake_urlopen(req, timeout):
+        calls.append((req.full_url, timeout))
+        return _Resp()
+
+    monkeypatch.setattr(gateway.urllib.request, "urlopen", fake_urlopen)
+    monkeypatch.setenv("MODELKEYGUARD_LLM_CALL_CACHE", "joblib")
+    monkeypatch.setenv("MODELKEYGUARD_LLM_CALL_CACHE_DIR", str(tmp_path / "llm-cache"))
+
+    body = json.dumps(_payload()).encode("utf-8")
+    first = forward_provider("super-secret-provider-key", body, provider="openai", url="https://upstream.example/v1/chat/completions")
+    second = forward_provider("super-secret-provider-key", body, provider="openai", url="https://upstream.example/v1/chat/completions")
+
+    assert first[0] == 200
+    assert second[0] == 200
+    assert second[1]["x-modelkeyguard-llm-cache"] == "hit"
+    assert second[2] == first[2]
+    assert len(calls) == 1
+    cache_files = list((tmp_path / "llm-cache").glob("*.joblib"))
+    assert len(cache_files) == 1
+    assert "super-secret-provider-key" not in cache_files[0].name
 
 
 def test_fastapi_gateway_core_allows_local_token(tmp_path, monkeypatch):

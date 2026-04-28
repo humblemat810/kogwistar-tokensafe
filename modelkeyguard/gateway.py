@@ -375,12 +375,86 @@ def forward_provider(
         _capture_forward_record(capture_path, provider, target_url, headers, raw)
         return 200, {"content-type": "application/json"}, _mock_upstream_response(provider, raw)
 
+    cached = _forward_provider_from_joblib_cache(secret, raw, provider=provider, target_url=target_url, content_type=content_type)
+    if cached is not None:
+        status, cached_headers, body = cached
+        cached_headers = dict(cached_headers)
+        cached_headers["x-modelkeyguard-llm-cache"] = "hit"
+        return status, cached_headers, body
+
     req = urllib.request.Request(target_url, data=raw, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=120) as resp:
-            return resp.status, {"content-type": resp.headers.get("content-type", "application/json")}, resp.read()
+            result = resp.status, {"content-type": resp.headers.get("content-type", "application/json")}, resp.read()
     except urllib.error.HTTPError as e:
-        return e.code, {"content-type": e.headers.get("content-type", "application/json")}, e.read()
+        result = e.code, {"content-type": e.headers.get("content-type", "application/json")}, e.read()
+
+    _store_provider_joblib_cache(secret, raw, result, provider=provider, target_url=target_url, content_type=content_type)
+    return result
+
+
+def _llm_joblib_cache_enabled() -> bool:
+    return os.getenv("MODELKEYGUARD_LLM_CALL_CACHE", "0").strip().lower() in {"1", "true", "yes", "joblib"}
+
+
+def _llm_joblib_cache_path(secret: str, raw: bytes, *, provider: str, target_url: str, content_type: str) -> Path:
+    cache_dir = Path(os.getenv("MODELKEYGUARD_LLM_CALL_CACHE_DIR", "out/llm_call_cache"))
+    key_payload = {
+        "provider": provider,
+        "target_url": target_url,
+        "content_type": content_type,
+        "secret_sha256": sha256_text(secret),
+        "raw_sha256": hashlib.sha256(raw).hexdigest(),
+        "schema": 1,
+    }
+    key = hashlib.sha256(json.dumps(key_payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    return cache_dir / f"{key}.joblib"
+
+
+def _joblib_module():
+    try:
+        import joblib  # type: ignore
+    except Exception as exc:  # pragma: no cover - depends on optional runtime extra
+        raise RuntimeError("MODELKEYGUARD_LLM_CALL_CACHE=joblib requires `pip install joblib`") from exc
+    return joblib
+
+
+def _forward_provider_from_joblib_cache(
+    secret: str,
+    raw: bytes,
+    *,
+    provider: str,
+    target_url: str,
+    content_type: str,
+) -> tuple[int, dict[str, str], bytes] | None:
+    if not _llm_joblib_cache_enabled():
+        return None
+    path = _llm_joblib_cache_path(secret, raw, provider=provider, target_url=target_url, content_type=content_type)
+    if not path.exists():
+        return None
+    cached = _joblib_module().load(path)
+    if not isinstance(cached, tuple) or len(cached) != 3:
+        return None
+    status, headers, body = cached
+    if not isinstance(status, int) or not isinstance(headers, dict) or not isinstance(body, bytes):
+        return None
+    return status, {str(k): str(v) for k, v in headers.items()}, body
+
+
+def _store_provider_joblib_cache(
+    secret: str,
+    raw: bytes,
+    result: tuple[int, dict[str, str], bytes],
+    *,
+    provider: str,
+    target_url: str,
+    content_type: str,
+) -> None:
+    if not _llm_joblib_cache_enabled():
+        return
+    path = _llm_joblib_cache_path(secret, raw, provider=provider, target_url=target_url, content_type=content_type)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _joblib_module().dump(result, path)
 
 
 def _capture_forward_record(path: str, provider: str, url: str, headers: dict[str, str], raw: bytes) -> None:
