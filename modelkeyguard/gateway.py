@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from .core import ModelKey, ModelKeyGuard, Principal, Request as GuardRequest
-from .graph_state import GraphStateStore
+from .graph_state import GraphStateStore, resolve_store_backend
 from .key_manager import KeyLifecycleError, KeyManager
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
 from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page, render_admin_policy_page
@@ -37,6 +37,11 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
     policy = load_policy_json(policy_path)
     graph_state = GraphStateStore.from_policy(policy)
     guard = ModelKeyGuard.create()
+    if resolve_store_backend() == "kogwistar_postgres" and guard.adapter_info.backend != "kogwistar-package":
+        raise RuntimeError(
+            "kogwistar_postgres requires installed Kogwistar ACLGraph; "
+            "set MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1 and ensure kogwistar package extras are installed."
+        )
     guard.graph_state = graph_state
     policy_acl_by_key: dict[str, dict[str, Any]] = {}
     for item in policy.get("model_keys", []):

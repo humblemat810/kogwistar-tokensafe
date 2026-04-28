@@ -352,6 +352,25 @@ Quota projections
 
 Denied auth and permission events are stored in the access conversation graph. They do **not** update named projections. Successful allowed calls append usage ledger nodes and update principal/user/key named projections.
 
+### Delegated Kogwistar Postgres mode
+
+For installed-Kogwistar delegated persistence (pgvector backend + Kogwistar meta-store projections):
+
+```bash
+pip install -e ".[postgres]"
+export MODELKEYGUARD_STORE=kogwistar_postgres
+export MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:modelguard@localhost:5432/modelguard
+export MODELKEYGUARD_KOGWISTAR_EMBED_DIM=2
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
+./scripts/start_gateway.sh
+```
+
+Notes:
+
+- In delegated mode, runtime imports must resolve from installed `kogwistar` package (not repo-local clones).
+- Serious backend modes (`postgres`, `kogwistar_postgres`) do not rely on JSONL graph files.
+
 ## Linux production-ish Compose
 
 `docker-compose.yml` now includes:

@@ -269,6 +269,40 @@ def test_026_load_acl_graph_defaults_to_standalone_without_importing_package(mon
     assert info.backend == "compat"
 
 
+def test_026b_load_acl_graph_ignores_reference_repo_env(monkeypatch):
+    monkeypatch.setenv("KOGWISTAR_REPO", "/tmp/reference-only-not-runtime")
+    monkeypatch.delenv("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", raising=False)
+    graph, info = load_acl_graph()
+    assert isinstance(graph, MiniACLGraph)
+    assert info.backend == "compat"
+
+
+def test_026c_load_acl_graph_enforces_installed_only_guard(monkeypatch):
+    import modelkeyguard.kogwistar_acl_adapter as adapter
+
+    def _fail_guard() -> None:
+        raise RuntimeError("repository-local path import is forbidden")
+
+    monkeypatch.setenv("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", "1")
+    monkeypatch.setattr(adapter, "enforce_installed_kogwistar_only", _fail_guard)
+    graph, info = adapter.load_acl_graph()
+    assert isinstance(graph, MiniACLGraph)
+    assert info.backend == "compat"
+    assert "repository-local path import is forbidden" in info.detail
+
+
+def test_026d_kogwistar_postgres_acl_path_has_no_compat_fallback(monkeypatch):
+    import modelkeyguard.kogwistar_acl_adapter as adapter
+
+    def _fail_guard() -> None:
+        raise RuntimeError("bad install path")
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setattr(adapter, "enforce_installed_kogwistar_only", _fail_guard)
+    with pytest.raises(RuntimeError, match="kogwistar_postgres requires installed Kogwistar ACLGraph"):
+        adapter.load_acl_graph()
+
+
 # ---------------------------------------------------------------------------
 # Graph state, usage lane, projection contract.
 # ---------------------------------------------------------------------------

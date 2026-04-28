@@ -50,6 +50,10 @@ class TokenVerifier:
                 from .postgres_state import PostgresGraphStateStore
 
                 self.graph_state = PostgresGraphStateStore()
+            elif store == "kogwistar_postgres":
+                from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore
+
+                self.graph_state = KogwistarPostgresGraphStateStore()
             else:
                 self.graph_state = GraphStateStore()
         self.keycloak_url = os.getenv("KEYCLOAK_URL", "http://localhost:8080")

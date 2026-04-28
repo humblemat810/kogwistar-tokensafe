@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from modelkeyguard.gateway import build_guard, process_chat_completion
-from modelkeyguard.graph_state import GraphStateStore
+from modelkeyguard.graph_state import GraphStateStore, resolve_store_backend
 from modelkeyguard.registration import RegistrationService, main as registration_main, open_registration_store, register_usage_demo, safe_token_hash
 from modelkeyguard.token_auth import TokenVerifier
 
@@ -145,6 +145,25 @@ def test_registration_store_invariant_uses_postgres_when_configured(monkeypatch)
     assert isinstance(store, FakePostgresStore)
 
 
+def test_registration_store_invariant_uses_kogwistar_postgres_when_configured(monkeypatch):
+    calls: list[str] = []
+
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            calls.append("kogwistar_postgres")
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    store = open_registration_store()
+    assert calls == ["kogwistar_postgres"]
+    assert isinstance(store, FakeKogwistarStore)
+
+
 def test_registration_store_invariant_rejects_unknown_serious_backend(monkeypatch, capsys):
     monkeypatch.setenv("MODELKEYGUARD_STORE", "chroma")
     code = registration_main(["register-user", "--user-id", "user:test"])
@@ -159,3 +178,28 @@ def test_token_verifier_rejects_unknown_serious_backend_without_jsonl_fallback(t
     monkeypatch.setenv("MODELKEYGUARD_STORE", "chroma")
     with pytest.raises(ValueError, match="unsupported_store_backend:chroma"):
         TokenVerifier(policy_path)
+
+
+def test_backend_resolver_accepts_kogwistar_postgres():
+    assert resolve_store_backend("kogwistar_postgres") == "kogwistar_postgres"
+
+
+def test_graph_state_from_policy_dispatches_kogwistar_postgres(monkeypatch):
+    calls: list[str] = []
+
+    class FakeKogwistarStore:
+        @classmethod
+        def from_policy(cls, policy, dsn=None, app_key=None):
+            calls.append("dispatch")
+            return cls()
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    out = GraphStateStore.from_policy({})
+    assert calls == ["dispatch"]
+    assert isinstance(out, FakeKogwistarStore)

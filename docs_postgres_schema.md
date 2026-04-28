@@ -1,6 +1,15 @@
 # PostgreSQL Backend Schema (Current)
 
-This is the **current implemented schema** in `PostgresGraphStateStore._ensure_schema`.
+This document describes the local serious backend:
+
+- `MODELKEYGUARD_STORE=postgres` (implemented in this repo, tables below)
+
+For delegated mode:
+
+- `MODELKEYGUARD_STORE=kogwistar_postgres` uses installed Kogwistar Postgres primitives
+  (`GraphKnowledgeEngine` + `EnginePostgresMetaStore`) instead of these local `graph_*` tables.
+
+The delegated mode stores graph entities/projections in Kogwistar-managed tables (`gke_*` + meta-store tables).
 
 Code reference: [modelkeyguard/postgres_state.py](/home/azureuser/token-safe/modelkeyguard/postgres_state.py#L45)
 

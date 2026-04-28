@@ -12,7 +12,7 @@ from .sealed_payload import open_json, seal_json
 DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl"))
 DEFAULT_APP_KEY = os.getenv("MODELKEYGUARD_GRAPH_KEY", "dev-modelkeyguard-change-me")
 QUOTA_POLICY_PROJECTION_PREFIX = "quota_policy_projection"
-SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres"}
+SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres", "kogwistar_postgres"}
 
 
 def utc_now() -> datetime:
@@ -261,6 +261,10 @@ class GraphStateStore:
         if cls is GraphStateStore and store == "postgres":
             from .postgres_state import PostgresGraphStateStore
             return PostgresGraphStateStore.from_policy(policy, app_key=app_key)  # type: ignore[return-value]
+        if cls is GraphStateStore and store == "kogwistar_postgres":
+            from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore
+
+            return KogwistarPostgresGraphStateStore.from_policy(policy, app_key=app_key)  # type: ignore[return-value]
         store = cls(path, app_key)
         if store.nodes:
             return store

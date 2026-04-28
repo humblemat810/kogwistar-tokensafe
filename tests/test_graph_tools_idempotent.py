@@ -93,13 +93,14 @@ def test_tutorial_rerun_safe_invariant(tmp_path, monkeypatch):
         _TutorialCase("slow_quickstart_cli_gui_parity", "jsonl", "out/quickstart_graph.jsonl"),
         _TutorialCase("e2e_langchain_case1_fake_jsonl", "jsonl", "out/case1_graph.jsonl"),
         _TutorialCase("e2e_langchain_case2_real_postgres", "postgres", "out/case2_graph.jsonl"),
+        _TutorialCase("e2e_kogwistar_postgres_mode", "kogwistar_postgres", "out/case_kogwistar_graph.jsonl"),
         _TutorialCase("e2e_single_azure_gui_key_and_principal", "postgres", "out/single_e2e_graph.jsonl"),
         _TutorialCase("e2e_azure_real_key_usage_and_billing", "postgres", "out/azure_real_billing_graph.jsonl"),
         _TutorialCase("final_dev_guard_azure_real_setup", "postgres", "out/finaldev_graph.jsonl"),
     ]
 
     reset_calls: list[str] = []
-    postgres_namespaces: dict[str, str] = {}
+    serious_namespaces: dict[str, str] = {}
 
     class _DummyGraph:
         nodes: dict = {}
@@ -111,18 +112,19 @@ def test_tutorial_rerun_safe_invariant(tmp_path, monkeypatch):
 
     def fake_postgres_reset(dsn: str | None = None) -> None:
         reset_calls.append(dsn or "")
-        postgres_namespaces.clear()
+        serious_namespaces.clear()
 
     def fake_from_policy(cls, policy, path=None, app_key=None):
-        if os.getenv("MODELKEYGUARD_STORE", "jsonl").lower() != "postgres":
+        store_kind = os.getenv("MODELKEYGUARD_STORE", "jsonl").lower()
+        if store_kind not in {"postgres", "kogwistar_postgres"}:
             return real_from_policy(cls, policy, path=path, app_key=app_key)
 
-        ns = str(path) if path is not None else "__postgres__"
+        ns = f"{store_kind}:{str(path) if path is not None else '__serious__'}"
         key = os.getenv("MODELKEYGUARD_GRAPH_KEY", "")
-        existing = postgres_namespaces.get(ns)
+        existing = serious_namespaces.get(ns)
         if existing and existing != key:
             raise ValueError("sealed graph payload authentication failed")
-        postgres_namespaces[ns] = key
+        serious_namespaces[ns] = key
         return _DummyGraph()
 
     monkeypatch.setattr(graph_tools, "_reset_postgres_graph_state", fake_postgres_reset)
@@ -141,5 +143,8 @@ def test_tutorial_rerun_safe_invariant(tmp_path, monkeypatch):
         monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", f"{case.name}-graph-key-B-32-bytes-minimum")
         assert graph_tools.init_graph(str(policy_path), str(graph_path)) == 0
 
-    postgres_case_runs = sum(1 for c in cases if c.store == "postgres") * 2
-    assert len(reset_calls) >= postgres_case_runs
+        if case.store in {"postgres", "kogwistar_postgres"}:
+            assert not graph_path.exists()
+
+    serious_case_runs = sum(1 for c in cases if c.store in {"postgres", "kogwistar_postgres"}) * 2
+    assert len(reset_calls) >= serious_case_runs

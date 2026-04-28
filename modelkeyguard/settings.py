@@ -40,6 +40,8 @@ class AppSettings:
     history_retention_days: int
     history_max_active_records: int
     history_max_active_bytes: int
+    kogwistar_embed_dim: int
+    kogwistar_enforce_installed_only: bool
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -64,6 +66,8 @@ class AppSettings:
             history_retention_days=int(read_env_or_file("MODELKEYGUARD_HISTORY_RETENTION_DAYS", "30") or "30"),
             history_max_active_records=int(read_env_or_file("MODELKEYGUARD_HISTORY_MAX_ACTIVE_RECORDS", "10000") or "10000"),
             history_max_active_bytes=int(read_env_or_file("MODELKEYGUARD_HISTORY_MAX_ACTIVE_BYTES", "52428800") or "52428800"),
+            kogwistar_embed_dim=int(read_env_or_file("MODELKEYGUARD_KOGWISTAR_EMBED_DIM", "2") or "2"),
+            kogwistar_enforce_installed_only=bool_env("MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY", default=True),
         )
 
     def validate_for_startup(self) -> list[str]:
@@ -87,4 +91,6 @@ class AppSettings:
             errors.append("MODELKEYGUARD_HISTORY_MAX_ACTIVE_RECORDS must be > 0")
         if self.history_max_active_bytes <= 0:
             errors.append("MODELKEYGUARD_HISTORY_MAX_ACTIVE_BYTES must be > 0")
+        if self.kogwistar_embed_dim < 1 or self.kogwistar_embed_dim > 8:
+            errors.append("MODELKEYGUARD_KOGWISTAR_EMBED_DIM must be between 1 and 8")
         return errors

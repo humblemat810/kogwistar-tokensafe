@@ -14,14 +14,14 @@ def init_graph(policy_path: str = "config/gateway_policy.json", graph_path: str 
     policy = load_policy_json(policy_path)
     path = Path(graph_path)
     store_kind = resolve_store_backend()
-    if store_kind != "postgres" and path.exists():
+    if store_kind == "jsonl" and path.exists():
         path.unlink()
 
     reset_existing = _bool_env(
         "MODELKEYGUARD_INIT_RESET_EXISTING",
         default=False,
     )
-    if store_kind == "postgres" and reset_existing:
+    if store_kind in {"postgres", "kogwistar_postgres"} and reset_existing:
         _reset_postgres_graph_state(os.getenv("MODELKEYGUARD_POSTGRES_DSN"))
 
     graph = _init_with_self_heal(
@@ -30,7 +30,7 @@ def init_graph(policy_path: str = "config/gateway_policy.json", graph_path: str 
         store_kind=store_kind,
         reset_existing=reset_existing,
     )
-    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if store_kind == "postgres" else str(path)
+    target = os.getenv("MODELKEYGUARD_POSTGRES_DSN") if store_kind in {"postgres", "kogwistar_postgres"} else str(path)
     print(f"initialized encrypted graph: {target}")
     print(f"nodes={len(graph.nodes)} edges={len(graph.edges)} events={len(graph.events)} projections={len(graph.projections)}")
     return 0
@@ -50,7 +50,7 @@ def _init_with_self_heal(*, policy: dict, graph_path: Path, store_kind: str, res
         msg = str(exc)
         if "sealed graph payload authentication failed" not in msg or not reset_existing:
             raise
-        if store_kind == "postgres":
+        if store_kind in {"postgres", "kogwistar_postgres"}:
             _reset_postgres_graph_state(os.getenv("MODELKEYGUARD_POSTGRES_DSN"))
         else:
             graph_path.unlink(missing_ok=True)
@@ -66,7 +66,36 @@ def _reset_postgres_graph_state(dsn: str | None = None) -> None:
     with psycopg.connect(dsn_value) as conn, conn.cursor() as cur:
         # Reset authoritative append-only records and current projections so
         # init_graph is idempotent across key changes in local/dev workflows.
-        for table in ("graph_records", "graph_events", "graph_edges", "graph_nodes", "named_projections"):
+        for table in (
+            # local postgres backend tables
+            "graph_records",
+            "graph_events",
+            "graph_edges",
+            "graph_nodes",
+            "named_projections",
+            # kogwistar pgvector backend tables
+            "gke_nodes",
+            "gke_edges",
+            "gke_documents",
+            "gke_domains",
+            "gke_edge_endpoints",
+            "gke_edge_refs",
+            "gke_node_docs",
+            "gke_node_refs",
+            # kogwistar meta-store tables
+            "global_seq",
+            "user_seq",
+            "index_jobs",
+            "index_applied_state",
+            "projected_lane_messages",
+            "scoped_seq",
+            "runtime_cursor_projection",
+            "workflow_design_delta",
+            "workflow_design_snapshot",
+            "workflow_steps",
+            "workflow_step_edges",
+            "run_registry",
+        ):
             try:
                 cur.execute(f"truncate table {table} restart identity")
             except Exception:
@@ -80,6 +109,10 @@ def inspect_graph(graph_path: str = "out/modelkeyguard_graph.jsonl") -> int:
     if store_kind == "postgres":
         from .postgres_state import PostgresGraphStateStore
         graph = PostgresGraphStateStore()
+    elif store_kind == "kogwistar_postgres":
+        from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore
+
+        graph = KogwistarPostgresGraphStateStore()
     else:
         graph = GraphStateStore(graph_path)
     node_kinds = Counter(n.kind for n in graph.nodes.values())

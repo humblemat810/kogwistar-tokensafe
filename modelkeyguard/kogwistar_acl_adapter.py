@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import importlib.util
 import os
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Iterable, Literal
+
+from .kogwistar_import_guard import enforce_installed_kogwistar_only
 
 ACLMode = Literal["private", "shared", "scope", "group", "public"]
 
@@ -112,39 +112,18 @@ class MiniACLGraph:
         return decision(False, "unknown_mode")
 
 
-def _load_graph_py_from_repo(repo: str) -> tuple[type[Any] | None, str]:
-    path = Path(repo) / "kogwistar" / "acl" / "graph.py"
-    if not path.exists():
-        return None, f"not found: {path}"
-    spec = importlib.util.spec_from_file_location("_kogwistar_acl_graph_direct", path)
-    if spec is None or spec.loader is None:
-        return None, f"cannot create import spec for {path}"
-    module = importlib.util.module_from_spec(spec)
-    import sys
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return getattr(module, "ACLGraph"), f"loaded direct from {path}"
-
-
 def load_acl_graph() -> tuple[Any, AdapterInfo]:
-    # Prefer an explicit source checkout when the caller provides it. The
-    # standalone bundle must remain fast and deterministic in CI, so importing
-    # an arbitrary installed ``kogwistar`` package is opt-in rather than a
-    # default side effect.
-    repo = os.environ.get("KOGWISTAR_REPO")
-    if repo:
-        try:
-            cls, detail = _load_graph_py_from_repo(repo)
-            if cls is not None:
-                return cls(), AdapterInfo("kogwistar-source", detail)
-        except Exception as exc:
-            return MiniACLGraph(), AdapterInfo("compat", f"source load failed: {exc!r}")
+    store_kind = (os.environ.get("MODELKEYGUARD_STORE", "") or "").strip().lower()
+    require_installed = os.environ.get("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", "0") == "1" or store_kind == "kogwistar_postgres"
 
-    if os.environ.get("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", "0") == "1":
+    if require_installed:
         try:
+            enforce_installed_kogwistar_only()
             from kogwistar.acl.graph import ACLGraph  # type: ignore
             return ACLGraph(), AdapterInfo("kogwistar-package", "from kogwistar.acl.graph import ACLGraph")
         except Exception as exc:
+            if store_kind == "kogwistar_postgres":
+                raise RuntimeError("kogwistar_postgres requires installed Kogwistar ACLGraph (no compat fallback).") from exc
             return MiniACLGraph(), AdapterInfo("compat", f"installed Kogwistar ACL unavailable: {exc!r}")
 
-    return MiniACLGraph(), AdapterInfo("compat", "standalone MiniACLGraph; set KOGWISTAR_REPO or MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1 to use Kogwistar ACLGraph")
+    return MiniACLGraph(), AdapterInfo("compat", "standalone MiniACLGraph; set MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1 to use installed Kogwistar ACLGraph")

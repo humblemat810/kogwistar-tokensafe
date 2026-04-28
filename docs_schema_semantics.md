@@ -1,16 +1,18 @@
 # ModelKeyGuard Schema and Kogwistar-Semantics Map
 
-This document makes one distinction explicit:
+This document makes backend distinctions explicit:
 
-- ACL runtime can use real Kogwistar `ACLGraph` (opt-in via env), with a local compatibility fallback.
-- `named_projections` are implemented locally in this repo, but follow the same primitive shape and contract used in Kogwistar-style projection stores (`get/replace/list/clear`).
+- `MODELKEYGUARD_STORE=jsonl` is toy/tutorial mode.
+- `MODELKEYGUARD_STORE=postgres` is the local serious backend implemented in this repo.
+- `MODELKEYGUARD_STORE=kogwistar_postgres` is delegated serious mode using installed Kogwistar Postgres primitives.
 
 ## Integration truth table
 
 | Capability | Current implementation in this repo | Import from Kogwistar? |
 | --- | --- | --- |
-| ACL decision graph | `kogwistar_acl_adapter.py` loader + `MiniACLGraph` fallback | Yes, optional (`KOGWISTAR_REPO` or `MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1`) |
-| Named projection primitive | `PostgresGraphStateStore.get_named_projection/replace_named_projection/list_named_projections/clear_named_projection` | No (local implementation, Kogwistar-compatible semantics) |
+| ACL decision graph | `kogwistar_acl_adapter.py` | Yes; required in `kogwistar_postgres` mode |
+| Named projection primitive (`postgres`) | `PostgresGraphStateStore.get_named_projection/replace_named_projection/list_named_projections/clear_named_projection` | No (local implementation, Kogwistar-compatible semantics) |
+| Named projection primitive (`kogwistar_postgres`) | `EnginePostgresMetaStore` via installed Kogwistar engine runtime | Yes |
 | Graph entities (principal/user/application/token/key/quota) | Graph nodes + edges in `graph_nodes` / `graph_edges` | No direct import needed |
 
 ## Logical graph semantics
@@ -31,7 +33,9 @@ flowchart LR
     P -->|ACL decision path| K
 ```
 
-## Physical storage (Postgres backend)
+## Physical storage
+
+### Local `postgres` backend
 
 ```mermaid
 flowchart TB
@@ -60,6 +64,14 @@ Complete created-table list (from code scan of `CREATE TABLE` statements):
 - `graph_edges`
 - `graph_events`
 - `named_projections`
+
+### Delegated `kogwistar_postgres` backend
+
+Delegated mode persists graph entities through installed Kogwistar engine primitives
+(`GraphKnowledgeEngine` + pgvector backend), and uses Kogwistar meta-store named
+projection primitives (`EnginePostgresMetaStore`) for projection reads/writes.
+
+In delegated mode, ModelKeyGuard does not write to local `graph_*` tables.
 
 For PK/index details and logical FK mapping, see:
 

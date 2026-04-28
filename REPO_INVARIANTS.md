@@ -9,10 +9,15 @@ It separates **hard invariants** (must hold) from **operational conventions**
 
 1. Backend mode invariant
 - `MODELKEYGUARD_STORE` is validated.
-- Supported runtime backends are currently `jsonl` and `postgres`.
+- Supported runtime backends are `jsonl`, `postgres`, and `kogwistar_postgres`.
 - Unknown/unsupported backend values must fail fast (no silent fallback).
 - `jsonl` is toy/quickstart/testing mode only.
-- Serious flows (real keys, production-shaped runs) must use `postgres`.
+- Serious flows (real keys, production-shaped runs) must use `postgres` or `kogwistar_postgres`.
+
+1a. Kogwistar import-source invariant
+- Local clone `./kogwistar_reference_only` is semantic reference only.
+- Runtime must import pip-installed `kogwistar` package only.
+- Runtime must fail fast if `kogwistar` resolves to a repository-local clone path.
 
 2. State authority invariant
 - The graph/event stream is the authority.
@@ -83,4 +88,3 @@ It separates **hard invariants** (must hold) from **operational conventions**
 5. Production guidance
 - Real deployments should use Postgres-backed graph state and external secret management.
 - JSONL remains acceptable only for local toy quickstart and debugging.
-

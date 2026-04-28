@@ -273,6 +273,10 @@ def open_registration_store():
         from .postgres_state import PostgresGraphStateStore
 
         return PostgresGraphStateStore()
+    if store_kind == "kogwistar_postgres":
+        from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore
+
+        return KogwistarPostgresGraphStateStore()
     raise RegistrationError(f"unsupported_store_backend:{store_kind}")
 
 
