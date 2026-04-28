@@ -4,7 +4,7 @@ This is the copy-paste path for the serious backend:
 
 - runtime Kogwistar is pip-installed, never imported from `./kogwistar_reference_only`;
 - graph authority is stored through Kogwistar Postgres primitives;
-- hot reads use Kogwistar named projections;
+- current serving views and hot reads use Kogwistar named projections;
 - `MODELKEYGUARD_GRAPH_PATH` is not created as a JSONL graph artifact.
 
 The commands are retry-idempotent for local development because they reset the local Postgres graph state before initialization.
@@ -58,6 +58,7 @@ initialized encrypted graph: postgresql://modelguard:modelguard@localhost:5432/m
 ```
 
 The smoke script creates its own fresh temporary working directory and fails if any `*.jsonl` file appears there.
+It also fails if current node/edge serving state leaks into Kogwistar graph rows instead of named projections.
 
 ## 5. Run the gateway
 

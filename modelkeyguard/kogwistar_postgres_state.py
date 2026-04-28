@@ -22,6 +22,8 @@ QUOTA_PROJECTION_NAMESPACE = "modelkeyguard.quota_usage"
 USAGE_LANE_PROJECTION_NAMESPACE = "modelkeyguard.usage_lane_head"
 QUOTA_POLICY_PROJECTION_NAMESPACE = "modelkeyguard.quota_policy"
 GENERIC_PROJECTION_NAMESPACE = "modelkeyguard.generic"
+CURRENT_NODE_PROJECTION_NAMESPACE = "modelkeyguard.current_node"
+CURRENT_EDGE_PROJECTION_NAMESPACE = "modelkeyguard.current_edge"
 PROJECTION_SCHEMA_VERSION = 1
 
 MODELKEYGUARD_DOC_ID = "modelkeyguard.graph"
@@ -33,6 +35,8 @@ RECORD_EDGE_REVISION = "edge_revision"
 
 ALL_PROJECTION_NAMESPACES = (
     GENERIC_PROJECTION_NAMESPACE,
+    CURRENT_NODE_PROJECTION_NAMESPACE,
+    CURRENT_EDGE_PROJECTION_NAMESPACE,
     QUOTA_PROJECTION_NAMESPACE,
     USAGE_LANE_PROJECTION_NAMESPACE,
     QUOTA_POLICY_PROJECTION_NAMESPACE,
@@ -234,45 +238,6 @@ class KogwistarPostgresGraphStateStore:
         )
         self._rt.engine.add_pure_node(node)
 
-    def _add_or_update_edge_record(
-        self,
-        edge_id: str,
-        kind: str,
-        source: str,
-        target: str,
-        payload: dict[str, Any],
-        *,
-        extra_meta: dict[str, Any] | None = None,
-    ) -> None:
-        try:
-            from kogwistar.engine_core.models import PureChromaEdge
-        except Exception as exc:
-            raise RuntimeError("installed kogwistar models are unavailable for kogwistar_postgres backend") from exc
-        meta = {
-            "mk_record_type": RECORD_EDGE,
-            "mk_kind": kind,
-            "mk_source": source,
-            "mk_target": target,
-            "mk_payload_sealed_json": self._encode_payload_meta(payload),
-        }
-        if extra_meta:
-            meta.update(extra_meta)
-        edge = PureChromaEdge(
-            id=edge_id,
-            label=kind,
-            type="relationship",
-            summary=f"{source}->{target}:{kind}",
-            source_ids=[source],
-            target_ids=[target],
-            relation=kind,
-            source_edge_ids=None,
-            target_edge_ids=None,
-            doc_id=MODELKEYGUARD_DOC_ID,
-            metadata=meta,
-            embedding=_stable_embedding(f"{edge_id}:{kind}:{source}:{target}", dim=self.embed_dim, space="policy"),
-        )
-        self._rt.engine.add_pure_edge(edge)
-
     def _append_graph_revision(
         self,
         *,
@@ -329,58 +294,11 @@ class KogwistarPostgresGraphStateStore:
             out.append(SimpleNamespace(id=str(node_id), metadata=meta))
         return out
 
-    def _list_edges(self) -> list[Any]:
-        rows = self._rt.engine.backend.edge_get(
-            where={"doc_id": MODELKEYGUARD_DOC_ID},
-            include=["documents", "metadatas"],
-            limit=10000,
-        )
-        ids = rows.get("ids") or []
-        docs = rows.get("documents") or []
-        out: list[Any] = []
-        for idx, edge_id in enumerate(ids):
-            doc: dict[str, Any] = {}
-            if idx < len(docs) and isinstance(docs[idx], str):
-                try:
-                    parsed = json.loads(docs[idx])
-                    if isinstance(parsed, dict):
-                        doc = parsed
-                except Exception:
-                    doc = {}
-            meta = doc.get("metadata") if isinstance(doc.get("metadata"), dict) else {}
-            if str(meta.get("mk_record_type") or "") != RECORD_EDGE:
-                continue
-            out.append(
-                SimpleNamespace(
-                    id=str(edge_id),
-                    metadata=meta,
-                    source_ids=doc.get("source_ids") or [],
-                    target_ids=doc.get("target_ids") or [],
-                )
-            )
-        return out
-
     def load(self) -> None:
         self.nodes.clear()
         self.edges.clear()
         self.events.clear()
         self.projections.clear()
-
-        for node in self._list_nodes(RECORD_NODE):
-            meta = self._meta_to_dict(getattr(node, "metadata", None))
-            payload = self._decode_payload_from_meta(meta)
-            node_id = str(getattr(node, "id"))
-            kind = str(meta.get("mk_kind") or "")
-            self.nodes[node_id] = GraphNode(node_id, kind, payload)
-
-        for edge in self._list_edges():
-            meta = self._meta_to_dict(getattr(edge, "metadata", None))
-            payload = self._decode_payload_from_meta(meta)
-            edge_id = str(getattr(edge, "id"))
-            kind = str(meta.get("mk_kind") or "")
-            source = str(meta.get("mk_source") or (getattr(edge, "source_ids", [""])[0] if getattr(edge, "source_ids", None) else ""))
-            target = str(meta.get("mk_target") or (getattr(edge, "target_ids", [""])[0] if getattr(edge, "target_ids", None) else ""))
-            self.edges[edge_id] = GraphEdge(edge_id, kind, source, target, payload)
 
         events_with_seq: list[tuple[int, dict[str, Any]]] = []
         for node in self._list_nodes(RECORD_EVENT):
@@ -413,6 +331,22 @@ class KogwistarPostgresGraphStateStore:
                 payload = row.get("payload")
                 if key and isinstance(payload, dict):
                     self.projections[f"{namespace}:{key}"] = payload
+                    if namespace == CURRENT_NODE_PROJECTION_NAMESPACE:
+                        node_id = str(payload.get("id") or key)
+                        node_payload = payload.get("payload")
+                        if isinstance(node_payload, dict):
+                            self.nodes[node_id] = GraphNode(node_id, str(payload.get("kind") or ""), node_payload)
+                    elif namespace == CURRENT_EDGE_PROJECTION_NAMESPACE:
+                        edge_id = str(payload.get("id") or key)
+                        edge_payload = payload.get("payload")
+                        if isinstance(edge_payload, dict):
+                            self.edges[edge_id] = GraphEdge(
+                                edge_id,
+                                str(payload.get("kind") or ""),
+                                str(payload.get("source") or ""),
+                                str(payload.get("target") or ""),
+                                edge_payload,
+                            )
 
     # ------------------------------------------------------------------
     # Kogwistar-style named projection primitive.
@@ -456,6 +390,48 @@ class KogwistarPostgresGraphStateStore:
             if key:
                 self._rt.meta.clear_named_projection(namespace, key)
                 self.projections.pop(f"{namespace}:{key}", None)
+
+    def _replace_current_node_projection(
+        self,
+        node_id: str,
+        kind: str,
+        payload: dict[str, Any],
+        *,
+        content_hash: str,
+        revision_id: str,
+    ) -> None:
+        projection = {
+            "id": node_id,
+            "kind": kind,
+            "payload": payload,
+            "content_hash": content_hash,
+            "current_revision_id": revision_id,
+            "projection_schema_version": PROJECTION_SCHEMA_VERSION,
+        }
+        self.replace_named_projection(CURRENT_NODE_PROJECTION_NAMESPACE, node_id, projection)
+
+    def _replace_current_edge_projection(
+        self,
+        edge_id: str,
+        kind: str,
+        source: str,
+        target: str,
+        payload: dict[str, Any],
+        *,
+        content_hash: str,
+        revision_id: str,
+    ) -> None:
+        projection = {
+            "id": edge_id,
+            "kind": kind,
+            "source": source,
+            "target": target,
+            "payload": payload,
+            "content_hash": content_hash,
+            "current_revision_id": revision_id,
+            "projection_schema_version": PROJECTION_SCHEMA_VERSION,
+        }
+        self.replace_named_projection(CURRENT_EDGE_PROJECTION_NAMESPACE, edge_id, projection)
 
     # ------------------------------------------------------------------
     # Graph state API used by ModelKeyGuard.
@@ -505,16 +481,12 @@ class KogwistarPostgresGraphStateStore:
             )
 
         self.nodes[node_id] = GraphNode(node_id, kind, payload)
-        self._add_or_update_node_record(
+        self._replace_current_node_projection(
             node_id,
             kind,
             payload,
-            record_type=RECORD_NODE,
-            extra_meta={
-                "mk_payload_hash": content_hash,
-                "mk_current_revision_id": revision_id,
-                "mk_current": True,
-            },
+            content_hash=content_hash,
+            revision_id=revision_id,
         )
         return True
 
@@ -571,34 +543,29 @@ class KogwistarPostgresGraphStateStore:
             )
 
         self.edges[edge_id] = GraphEdge(edge_id, kind, source, target, payload)
-        self._add_or_update_edge_record(
+        self._replace_current_edge_projection(
             edge_id,
             kind,
             source,
             target,
             payload,
-            extra_meta={
-                "mk_payload_hash": content_hash,
-                "mk_current_revision_id": revision_id,
-                "mk_current": True,
-            },
+            content_hash=content_hash,
+            revision_id=revision_id,
         )
         return True
 
     def _current_node_revision_id(self, node_id: str) -> str | None:
-        for node in self._list_nodes(RECORD_NODE):
-            if str(getattr(node, "id")) == node_id:
-                meta = self._meta_to_dict(getattr(node, "metadata", None))
-                value = meta.get("mk_current_revision_id")
-                return str(value) if value else None
+        row = self.get_named_projection(CURRENT_NODE_PROJECTION_NAMESPACE, node_id)
+        if row and isinstance(row.get("payload"), dict):
+            value = row["payload"].get("current_revision_id")
+            return str(value) if value else None
         return None
 
     def _current_edge_revision_id(self, edge_id: str) -> str | None:
-        for edge in self._list_edges():
-            if str(getattr(edge, "id")) == edge_id:
-                meta = self._meta_to_dict(getattr(edge, "metadata", None))
-                value = meta.get("mk_current_revision_id")
-                return str(value) if value else None
+        row = self.get_named_projection(CURRENT_EDGE_PROJECTION_NAMESPACE, edge_id)
+        if row and isinstance(row.get("payload"), dict):
+            value = row["payload"].get("current_revision_id")
+            return str(value) if value else None
         return None
 
     def put_node(self, node_id: str, kind: str, payload: dict[str, Any]) -> None:

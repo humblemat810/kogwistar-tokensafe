@@ -15,6 +15,8 @@ if str(REPO_ROOT) not in sys.path:
 from modelkeyguard.graph_tools import init_graph, inspect_graph
 from modelkeyguard.kogwistar_import_guard import enforce_installed_kogwistar_only
 from modelkeyguard.kogwistar_postgres_state import (
+    CURRENT_EDGE_PROJECTION_NAMESPACE,
+    CURRENT_NODE_PROJECTION_NAMESPACE,
     KogwistarPostgresGraphStateStore,
     QUOTA_POLICY_PROJECTION_NAMESPACE,
 )
@@ -72,6 +74,14 @@ def main() -> int:
             raise RuntimeError("kogwistar_postgres smoke initialized zero graph edges")
         if not store.events:
             raise RuntimeError("kogwistar_postgres smoke initialized zero graph events")
+        if store._list_nodes("node"):
+            raise RuntimeError("current node serving state leaked into Kogwistar graph nodes")
+        if store._rt.engine.backend.edge_get(where={"doc_id": "modelkeyguard.graph"}, include=["documents"], limit=1).get("ids"):
+            raise RuntimeError("current edge serving state leaked into Kogwistar graph edges")
+        if not store.list_named_projections(CURRENT_NODE_PROJECTION_NAMESPACE):
+            raise RuntimeError("current nodes were not materialized as named projections")
+        if not store.list_named_projections(CURRENT_EDGE_PROJECTION_NAMESPACE):
+            raise RuntimeError("current edges were not materialized as named projections")
 
         quota_node = next((n for n in store.nodes.values() if n.kind == "quota_policy"), None)
         if quota_node is None:
@@ -85,6 +95,17 @@ def main() -> int:
 
         node_revision_count = len(reloaded._list_nodes("node_revision"))
         edge_revision_count = len(reloaded._list_nodes("edge_revision"))
+        os.environ["MODELKEYGUARD_INIT_RESET_EXISTING"] = "0"
+        init_graph(str(policy_path), str(graph_path))
+        os.environ["MODELKEYGUARD_INIT_RESET_EXISTING"] = "1"
+        retry_loaded = KogwistarPostgresGraphStateStore(dsn=dsn, app_key=os.environ["MODELKEYGUARD_GRAPH_KEY"])
+        if len(retry_loaded._list_nodes("node_revision")) != node_revision_count:
+            raise RuntimeError("same-policy init retry appended node revisions")
+        if len(retry_loaded._list_nodes("edge_revision")) != edge_revision_count:
+            raise RuntimeError("same-policy init retry appended edge revisions")
+        if len(retry_loaded.nodes) != len(reloaded.nodes) or len(retry_loaded.edges) != len(reloaded.edges):
+            raise RuntimeError("same-policy init retry changed current serving projection cardinality")
+        reloaded = retry_loaded
 
         if not reloaded.append_node_if_updated("smoke:node", "smoke_node", {"value": 1}):
             raise RuntimeError("first append_node_if_updated should append")

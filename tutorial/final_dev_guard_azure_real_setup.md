@@ -102,11 +102,11 @@ Initialize policy graph into Kogwistar Postgres once:
 ./scripts/init_graph.sh
 ```
 
-Verify graph rows exist in Kogwistar Postgres and no graph JSONL artifact was created:
+Verify append-only graph facts and current named projections exist in Kogwistar Postgres, and no graph JSONL artifact was created:
 
 ```bash
-docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as kogwistar_nodes from gke_nodes;"
-docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as kogwistar_edges from gke_edges;"
+docker compose exec -T postgres psql -U modelguard -d modelguard -c "select count(*) as revision_facts from gke_nodes where metadata->>'mk_record_type' in ('node_revision','edge_revision','event');"
+docker compose exec -T postgres psql -U modelguard -d modelguard -c "select namespace, count(*) from named_projections where namespace in ('modelkeyguard.current_node','modelkeyguard.current_edge','modelkeyguard.quota_policy') group by namespace order by namespace;"
 find "$PWD" -maxdepth 2 -name 'finaldev_graph.jsonl' -print -quit | grep -q . && exit 1 || true
 ```
 

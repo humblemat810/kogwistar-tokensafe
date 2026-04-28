@@ -67,9 +67,9 @@ Complete created-table list (from code scan of `CREATE TABLE` statements):
 
 ### Delegated `kogwistar_postgres` backend
 
-Delegated mode persists graph entities through installed Kogwistar engine primitives
-(`GraphKnowledgeEngine` + pgvector backend), and uses Kogwistar meta-store named
-projection primitives (`EnginePostgresMetaStore`) for projection reads/writes.
+Delegated mode persists append-only graph facts through installed Kogwistar engine
+primitives (`GraphKnowledgeEngine` + pgvector backend), and uses Kogwistar
+meta-store named projection primitives for current serving views and hot reads.
 
 In delegated mode, ModelKeyGuard does not write to local `graph_*` tables or
 create `MODELKEYGUARD_GRAPH_PATH` JSONL graph artifacts. The smoke check is:
