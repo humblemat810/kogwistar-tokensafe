@@ -650,6 +650,26 @@ single-host production-style Compose run, use the production runner:
 ./scripts/production_compose.sh up
 ```
 
+To push the same workflow to another user account on the same machine or to a
+different host over SSH, use the remote deploy wrapper and then run the shared
+deployment smoke:
+
+```bash
+./scripts/deploy_remote_stack.sh up --ssh user@host --shape compose
+./scripts/deploy_remote_stack.sh smoke --ssh user@host --shape compose
+```
+
+That wrapper builds the gateway image locally, loads it on the remote Docker
+host, and keeps secrets only in a runtime tmpfs staging area on the target
+while the deployment is active.
+
+The smoke checks the browser OIDC redirect, CLI token auth, and the reusable
+usage-analysis agent against the deployed surface:
+
+```bash
+./scripts/deployment_smoke.sh
+```
+
 Next step after the stack is up:
 
 - [Register And Use](docs_production.md#register-and-use)

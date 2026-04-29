@@ -274,6 +274,20 @@ For gateway-on-machine-A deployment, use the same single source directly:
 ./scripts/gateway_from_deployment_targets.sh up
 ```
 
+If you want to push the same workflow to another login on the same machine or
+to a different host over SSH, use:
+
+```bash
+./scripts/deploy_remote_stack.sh up --ssh user@host --shape compose
+./scripts/deploy_remote_stack.sh up --ssh user@host --shape gateway-only
+./scripts/deploy_remote_stack.sh smoke --ssh user@host --shape compose
+```
+
+The remote wrapper builds the gateway image locally, loads that image onto the
+remote Docker host, and stages secrets into a tmpfs-backed runtime directory on
+the target host for the lifetime of the deployment, rather than leaving
+persistent secret files behind.
+
 The script renders `gateway.env`, `postgres.env`, `keycloak.env`, and
 `gateway-compose.env` under `out/deployment_targets_rendered/` and passes the
 gateway env files to Compose. Those rendered files are artifacts, not a second
@@ -389,6 +403,13 @@ For a CI/deployment runner, use the variable contract printed by:
 
 ```bash
 ./scripts/oidc_protect_everything_smoke.sh --print-required-env
+```
+
+For a deployment smoke that checks the browser OIDC redirect, CLI token auth,
+and the usage-analysis agent against a live deployment, run:
+
+```bash
+./scripts/deployment_smoke.sh
 ```
 
 ## Register And Use

@@ -35,6 +35,7 @@ services:
       - ${MODELKEYGUARD_KEYCLOAK_DATA_DIR:-./data/keycloak}:/opt/keycloak/data/h2
 
   gateway:
+    image: ${MODELKEYGUARD_IMAGE:-token-safe-gateway:latest}
     build: .
     depends_on:
       postgres:

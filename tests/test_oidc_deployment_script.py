@@ -287,6 +287,31 @@ def test_usage_analysis_agent_tutorial_and_script_pin_reusable_library():
     assert "--key" in script
 
 
+def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
+    repo_root = Path(__file__).resolve().parents[1]
+    deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
+    smoke = (repo_root / "scripts" / "deployment_smoke.sh").read_text(encoding="utf-8")
+    scripts_readme = (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
+    docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+
+    assert "another unprivileged user on the same machine" in deploy
+    assert "Build the gateway image locally" in deploy
+    assert "load it onto a remote SSH target" in deploy
+    assert "--shape MODE" in deploy
+    assert "compose | gateway-only" in deploy
+    assert "tmpfs-backed runtime directory" in deploy
+    assert "browser OIDC redirect" in smoke
+    assert "CLI/service-account token path" in smoke
+    assert "usage-analysis agent" in smoke
+    assert "deploy_remote_stack.sh" in scripts_readme
+    assert "deployment_smoke.sh" in scripts_readme
+    assert "deploy_remote_stack.sh" in docs
+    assert "deployment_smoke.sh" in docs
+    assert "deploy_remote_stack.sh" in readme
+    assert "deployment_smoke.sh" in readme
+
+
 def test_render_deployment_env_generates_matching_component_files(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "render_deployment_env.sh"
