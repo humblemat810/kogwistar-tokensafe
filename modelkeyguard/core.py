@@ -152,6 +152,7 @@ class ModelKeyGuard:
                     "principal": "principal_capacity_exceeded",
                     "user": "user_quota_exceeded",
                     "key": "key_quota_exceeded",
+                    "token": "token_quota_exceeded",
                 }.get(lane, reason)
                 return self._deny(request, rid, 429, status_reason, acl_reason, remaining)
         if key.approval_threshold_usd and request.estimated_cost_usd >= key.approval_threshold_usd:
@@ -183,6 +184,7 @@ class ModelKeyGuard:
                 "principal": decision.principal_id,
                 **({"user": decision.on_behalf_of_user_id} if decision.on_behalf_of_user_id else {}),
                 "key": decision.key_id,
+                **({"token": f"token:{decision.token_id}"} if decision.token_id else {}),
             }.items():
                 for q in self._quota_policies(lane, subject_id):
                     self.graph_state.add_quota_usage(lane, subject_id, q["period"], actual_cost_usd, actual_tokens)
@@ -219,6 +221,8 @@ class ModelKeyGuard:
         out = {"principal": request.principal.id, "key": request.key_id}
         if request.on_behalf_of_user_id:
             out["user"] = request.on_behalf_of_user_id
+        if request.token_id:
+            out["token"] = f"token:{request.token_id}"
         return out
 
     def _quota_policies(self, lane: str, subject_id: str) -> list[dict[str, Any]]:

@@ -64,7 +64,7 @@ PRINCIPAL_BODY_SCHEMA: dict[str, Any] = {
 QUOTA_UPSERT_BODY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "lane": {"type": "string", "enum": ["principal", "user", "key"], "example": "principal"},
+        "lane": {"type": "string", "enum": ["principal", "user", "key", "token"], "example": "principal"},
         "subject_id": {"type": "string", "example": "agent:azure-manual-demo"},
         "quota_name": {"type": "string", "example": "hour"},
         "period": {"type": "string", "enum": ["10s", "hour", "day", "week", "month", "infinite"], "example": "hour"},
@@ -78,7 +78,7 @@ QUOTA_UPSERT_BODY_SCHEMA: dict[str, Any] = {
 QUOTA_REVOKE_BODY_SCHEMA: dict[str, Any] = {
     "type": "object",
     "properties": {
-        "lane": {"type": "string", "enum": ["principal", "user", "key"], "example": "principal"},
+        "lane": {"type": "string", "enum": ["principal", "user", "key", "token"], "example": "principal"},
         "subject_id": {"type": "string", "example": "agent:azure-manual-demo"},
         "quota_name": {"type": "string", "example": "hour"},
         "reason": {"type": "string", "example": "temporary freeze"},
@@ -606,7 +606,7 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             return JSONResponse(status_code=400, content={"error": {"message": "lane_subject_id_quota_name_required"}})
 
         graph_state = request.app.state.guard.graph_state
-        if lane in {"principal", "user"} and subject_id not in graph_state.nodes:
+        if lane in {"principal", "user", "token"} and subject_id not in graph_state.nodes:
             return JSONResponse(status_code=400, content={"error": {"message": "subject_not_registered"}})
         if lane == "key" and subject_id not in graph_state.nodes and subject_id not in request.app.state.guard.keys:
             return JSONResponse(status_code=400, content={"error": {"message": "subject_not_registered"}})

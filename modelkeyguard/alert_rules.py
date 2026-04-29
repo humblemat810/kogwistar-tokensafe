@@ -166,11 +166,11 @@ def default_rules() -> list[AlertRule]:
         return Alert("system_prompt_signature_mismatch", "high", ctx["subject_type"], ctx["subject_id"], "system prompt hash differs from assigned usage profile", {"count": len(rows), "hashes": sorted({r.get("system_prompt_hash") for r in rows if r.get("system_prompt_hash")})})
 
     def quota_condition(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> bool:
-        reasons = {"principal_capacity_exceeded", "user_quota_exceeded", "key_quota_exceeded"}
+        reasons = {"principal_capacity_exceeded", "user_quota_exceeded", "key_quota_exceeded", "token_quota_exceeded"}
         return any(r.get("reason") in reasons for r in ctx["events"])
 
     def quota_alert(ctx: dict[str, Any], _events: list[dict[str, Any]], _policy: dict[str, Any]) -> Alert:
-        rows = [r for r in ctx["events"] if r.get("reason") in {"principal_capacity_exceeded", "user_quota_exceeded", "key_quota_exceeded"}]
+        rows = [r for r in ctx["events"] if r.get("reason") in {"principal_capacity_exceeded", "user_quota_exceeded", "key_quota_exceeded", "token_quota_exceeded"}]
         reasons = Counter(str(r.get("reason")) for r in rows).most_common(5)
         return Alert("quota_exhausted", "medium", ctx["subject_type"], ctx["subject_id"], "quota/capacity exhausted", {"count": len(rows), "top_reasons": reasons})
 
@@ -279,7 +279,7 @@ def default_rules() -> list[AlertRule]:
         AlertRule("high_denial_rate", "Raise when denied/blocked requests exceed threshold", "medium", high_denial_condition, high_denial_alert),
         AlertRule("deny_spike", "Raise when recent deny ratio spikes", "medium", deny_spike_condition, deny_spike_alert),
         AlertRule("system_prompt_signature_mismatch", "Raise when system prompt hash mismatches profile", "high", prompt_mismatch_condition, prompt_mismatch_alert),
-        AlertRule("quota_exhausted", "Raise on principal/user/key quota exhaustion", "medium", quota_condition, quota_alert),
+        AlertRule("quota_exhausted", "Raise on principal/user/key/token quota exhaustion", "medium", quota_condition, quota_alert),
         AlertRule("usage_profile_model_violation", "Raise on unexpected model for profile", "high", unexpected_model_condition, unexpected_model_alert),
         AlertRule("token_exfiltration_attempt", "Raise on token/secret extraction attempt patterns", "high", token_exfiltration_condition, token_exfiltration_alert),
         AlertRule("intent_drift", "Raise when observed intent drifts from configured profile intent", "high", intent_drift_condition, intent_drift_alert),
@@ -382,7 +382,7 @@ class LLMUsageReviewer:
             if risk != "high":
                 risk = "medium"; rec = "review_profile_and_intent_scope"
             findings.append("intent drift observed"); labels.append("intent-drift")
-        if reasons.get("principal_capacity_exceeded", 0) or reasons.get("user_quota_exceeded", 0):
+        if reasons.get("principal_capacity_exceeded", 0) or reasons.get("user_quota_exceeded", 0) or reasons.get("token_quota_exceeded", 0):
             if risk != "high":
                 risk = "medium"; rec = "review_quota_or_possible_token_leak"
             findings.append("quota or capacity exceeded")

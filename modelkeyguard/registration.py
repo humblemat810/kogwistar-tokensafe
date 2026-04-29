@@ -105,8 +105,8 @@ class RegistrationService:
         max_tokens: int | None = None,
         max_requests: int | None = None,
     ) -> str:
-        if lane not in {"principal", "user", "key"}:
-            raise RegistrationError("quota_lane_must_be_principal_user_or_key")
+        if lane not in {"principal", "user", "key", "token"}:
+            raise RegistrationError("quota_lane_must_be_principal_user_or_key_or_token")
         try:
             period = normalize_quota_period(period)
         except ValueError as exc:
@@ -148,8 +148,8 @@ class RegistrationService:
         revoked: bool = False,
         reason: str = "",
     ) -> str:
-        if lane not in {"principal", "user", "key"}:
-            raise RegistrationError("quota_lane_must_be_principal_user_or_key")
+        if lane not in {"principal", "user", "key", "token"}:
+            raise RegistrationError("quota_lane_must_be_principal_user_or_key_or_token")
         if period is not None:
             try:
                 period = normalize_quota_period(period)
@@ -351,7 +351,7 @@ def main(argv: list[str] | None = None) -> int:
     principal.add_argument("--namespace", default="tenant:kogwistar")
     principal.add_argument("--application-id")
     quota = sub.add_parser("set-quota")
-    quota.add_argument("--lane", required=True, choices=["principal", "user", "key"])
+    quota.add_argument("--lane", required=True, choices=["principal", "user", "key", "token"])
     quota.add_argument("--subject-id", required=True)
     quota.add_argument("--quota-name", required=True)
     quota.add_argument("--period", required=True, choices=["10s", "hour", "day", "week", "month", "infinite", "lifetime"])

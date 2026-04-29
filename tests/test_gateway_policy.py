@@ -85,6 +85,25 @@ def test_denied_event_does_not_increment_quota_projection(tmp_path, monkeypatch)
     assert guard.graph_state.get_quota_used("key", key_id, "hour")["tokens"] == 0
 
 
+def test_safe_token_quota_returns_429_token_quota(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    guard, policy = build_guard("config/gateway_policy.json")
+    key_id = select_key(policy, "gpt-4o-mini")
+    assert key_id is not None
+    assert guard.graph_state is not None
+    token_subject = "token:tok-hard-limit"
+    RegistrationService(guard.graph_state).set_quota("token", token_subject, "lifetime", period="infinite", max_requests=1)
+
+    first = guard.check(Request(Principal("agent:doc-ingestor", "agent", ("agent-dev",)), key_id, "gpt-4o-mini", "tenant:kogwistar", estimated_cost_usd=0.001, estimated_tokens=100, on_behalf_of_user_id="user:alice", token_id="tok-hard-limit"))
+    assert first.allowed
+    guard.record_usage(first, estimated_cost_usd=0.001, actual_cost_usd=0.001, actual_tokens=100)
+
+    second = guard.check(Request(Principal("agent:doc-ingestor", "agent", ("agent-dev",)), key_id, "gpt-4o-mini", "tenant:kogwistar", estimated_cost_usd=0.001, estimated_tokens=100, on_behalf_of_user_id="user:alice", token_id="tok-hard-limit"))
+    assert not second.allowed
+    assert second.http_status == 429
+    assert second.reason == "token_quota_exceeded"
+
+
 def test_infinite_quota_remains_capped_forever_for_key_lane(tmp_path, monkeypatch):
     graph_path = tmp_path / "graph.jsonl"
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))

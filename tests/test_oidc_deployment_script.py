@@ -237,12 +237,16 @@ def test_production_doc_pins_quota_patterns_and_model_specific_limits():
     assert "`month` resets on the first day of the UTC month" in text
     assert "`infinite` never refreshes and accumulates forever" in text
     assert "| Goal | Lane | `subject_id` example |" in text
+    assert "| One issued safe token | `token` | `token:abc123` |" in text
+    assert "| Client credential with its own hard cap | `/admin/policy/tokens` + `lane=token` quota on `token:<jti>` |" in text
     assert "Per-user budget" in text
     assert "Per-principal budget" in text
     assert "Per-model budget" in text
     assert "register one key per model when you want a hard model-level cap" in text
+    assert 'If you want this issued safe token to have its own hard cap, add a `token`\nquota on `token:<jti>` after issuance.' in text
     assert '"lane":"key","subject_id":"key:openai:prod-gpt4o","quota_name":"month","period":"month"' in text
     assert '"lane":"user","subject_id":"user:alice","quota_name":"lifetime","period":"infinite"' in text
+    assert '"lane":"token","subject_id":"token:abc123","quota_name":"lifetime","period":"infinite"' in text
 
 
 def test_production_doc_shows_explicit_key_examples_for_each_provider():

@@ -84,7 +84,7 @@ class GraphStateStore:
     * policy graph: principal/token/user/key/quota/policy-version nodes and grant edges
     * access conversation graph: every request outcome, including denied auth
     * usage ledger graph: only successful quota-consuming usage, strict linked list lanes
-    * quota projection: rebuildable O(1) counters per principal/user/key and period
+    * quota projection: rebuildable O(1) counters per token/user/principal/key and period
 
     Every node/edge/event payload is sealed at rest. The app opens it with
     MODELKEYGUARD_GRAPH_KEY. This is intentionally not a provider-key vault; raw

@@ -568,6 +568,7 @@ def test_admin_policy_routes_expose_swagger_request_bodies(tmp_path, monkeypatch
     assert "lane" in quota_body["properties"]
     assert "subject_id" in quota_body["properties"]
     assert "quota_name" in quota_body["properties"]
+    assert "token" in quota_body["properties"]["lane"]["enum"]
 
 
 def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):
@@ -701,3 +702,57 @@ def test_admin_policy_quota_upsert_accepts_infinite_period(tmp_path, monkeypatch
     )
     assert resp.status_code == 200
     assert resp.json()["quota_policy_id"].startswith("quota:user:user:infinite:lifetime")
+
+
+def test_admin_policy_quota_upsert_accepts_token_lane_for_issued_safe_token(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    app = create_app("config/gateway_policy.json")
+    client = TestClient(app)
+
+    assert client.post("/admin/policy/applications", headers=ADMIN_HEADERS, json={"application_id": "app:token-demo", "display_name": "Token Demo"}).status_code == 200
+    assert client.post("/admin/policy/users", headers=ADMIN_HEADERS, json={"user_id": "user:token-demo", "display_name": "Token Demo"}).status_code == 200
+    assert client.post(
+        "/admin/policy/principals",
+        headers=ADMIN_HEADERS,
+        json={
+            "principal_id": "agent:token-demo",
+            "kind": "agent",
+            "groups": ["agent-dev"],
+            "namespace": "tenant:kogwistar",
+            "application_id": "app:token-demo",
+            "description": "token quota demo",
+        },
+    ).status_code == 200
+
+    issued = client.post(
+        "/admin/policy/tokens",
+        headers=ADMIN_HEADERS,
+        json={
+            "principal_id": "agent:token-demo",
+            "namespace": "tenant:kogwistar",
+            "on_behalf_of_user_id": "user:token-demo",
+            "application_id": "app:token-demo",
+            "scopes": ["model.invoke"],
+        },
+    )
+    assert issued.status_code == 200
+    token_id = issued.json()["token_id"]
+
+    resp = client.post(
+        "/admin/policy/quotas/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "lane": "token",
+            "subject_id": token_id,
+            "quota_name": "lifetime",
+            "period": "infinite",
+            "max_requests": 1,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["quota_policy_id"].startswith(f"quota:token:{token_id}:lifetime")

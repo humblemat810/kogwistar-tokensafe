@@ -49,7 +49,7 @@
 
       <label for="query_quotas_lane">Quota Lane</label>
       <small class="field-help">Filter revisions by lane.</small>
-      <input id="query_quotas_lane" name="quotas_lane" value="{{quotas_lane}}" placeholder="principal|user|key">
+      <input id="query_quotas_lane" name="quotas_lane" value="{{quotas_lane}}" placeholder="principal|user|key|token">
 
       <label for="query_quotas_subject_id">Quota Subject ID</label>
       <small class="field-help">Exact match for subject policy history (click user/principal rows for shortcut).</small>
@@ -134,8 +134,8 @@
       <form method="post" action="/admin/policy">
         <input type="hidden" name="action" value="quota_upsert">
         <label for="quota_upsert_lane">Lane</label>
-        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>.</small>
-        <input id="quota_upsert_lane" name="lane" placeholder="principal|user|key" required>
+        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>, <code>token</code>.</small>
+        <input id="quota_upsert_lane" name="lane" placeholder="principal|user|key|token" required>
         <label for="quota_upsert_subject_id">Subject ID</label>
         <small class="field-help">Required. The node ID for that lane (example: <code>agent:azure-manual-demo</code>).</small>
         <input id="quota_upsert_subject_id" name="subject_id" placeholder="agent:azure-manual-demo" required>
@@ -163,8 +163,8 @@
       <form method="post" action="/admin/policy">
         <input type="hidden" name="action" value="quota_revoke">
         <label for="quota_revoke_lane">Lane</label>
-        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>.</small>
-        <input id="quota_revoke_lane" name="lane" placeholder="principal|user|key" required>
+        <small class="field-help">Required. One of: <code>principal</code>, <code>user</code>, <code>key</code>, <code>token</code>.</small>
+        <input id="quota_revoke_lane" name="lane" placeholder="principal|user|key|token" required>
         <label for="quota_revoke_subject_id">Subject ID</label>
         <small class="field-help">Required subject ID to revoke quota for.</small>
         <input id="quota_revoke_subject_id" name="subject_id" placeholder="agent:azure-manual-demo" required>

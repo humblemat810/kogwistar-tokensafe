@@ -405,16 +405,37 @@ client request with model=gpt-4o-mini
 gateway may forward using the sealed provider key
 ```
 
-The two different "keys" have different jobs:
+The two different "keys" have different jobs, and the quota lane for the safe
+token itself is separate from both of them:
 
 | Object | Created by | What it means | Who sees it |
 | --- | --- | --- | --- |
 | Safe token | `/admin/policy/tokens` | Client credential for a principal such as `agent:doc-ingestor`. It says who is calling. | The application/client receives this. |
 | Provider key | `/admin/keys` | Server-side provider credential plus allowed model names such as `gpt-4o-mini`. It says what upstream model route exists. | Only the gateway stores and uses this. Clients never see the raw provider secret. |
 
+The quota lanes map to those objects like this:
+
+| Quota lane | What it caps | Example subject ID |
+| --- | --- | --- |
+| `token` | One issued safe token. Use this when you want the exact token to stop even if the user and principal still have budget elsewhere. | `token:<jti>` |
+| `user` | The end user behind the call. | `user:alice` |
+| `principal` | The agent or service that is making the call. | `agent:doc-ingestor` |
+| `key` | One provider key and the model bundle attached to it. | `key:openai:prod-gpt4o` |
+
+The common composition cases are:
+
+| Case | Set these fields | Result |
+| --- | --- | --- |
+| Client credential only | `/admin/policy/tokens` | You get a usable safe token, but no spending caps beyond whatever broader user/principal quotas already exist. |
+| Client credential with its own hard cap | `/admin/policy/tokens` + `lane=token` quota on `token:<jti>` | The issued safe token itself stops when it hits the limit, even if the user or principal still has budget left elsewhere. |
+| End-user budget | `/admin/policy/tokens` + `on_behalf_of_user_id=user:alice` + `lane=user` quota | All calls on behalf of that user share the same cap. |
+| Agent/service budget | `/admin/policy/tokens` + `principal_id=agent:doc-ingestor` + `lane=principal` quota | All calls from that agent share the same cap. |
+| Provider route budget | `/admin/keys` + `models=...` + `lane=key` quota | One model route or model bundle stops when that key hits its cap. |
+| Full composite | `/admin/policy/tokens` + `lane=token` quota + `lane=user` quota + `lane=principal` quota + `/admin/keys` + `lane=key` quota | Every active dimension must pass. This is the strictest production pattern. |
+
 At request time, the client sends the safe token and a model name. The gateway
-uses the model name to find a registered provider key, then checks the
-principal's namespace, scopes, ACL, and quota before forwarding.
+uses the model name to find a registered provider key, then checks the token,
+principal, user, namespace, scopes, ACL, and quota before forwarding.
 
 You can add provider keys three ways and they all land on the same backend
 routes:
@@ -511,15 +532,17 @@ Choose the lane that matches the thing you want to cap:
 
 | Goal | Lane | `subject_id` example | Typical period | What it covers |
 | --- | --- | --- | --- | --- |
+| One issued safe token | `token` | `token:abc123` | `day`, `week`, `month`, or `infinite` | Exactly one issued token. This is the answer when you want the generated credential itself to be capped. |
 | Per-user budget | `user` | `user:alice` | `day`, `week`, `month`, or `infinite` | All calls made on behalf of that user across every model and every key. |
 | Per-principal budget | `principal` | `agent:doc-ingestor` | `day`, `week`, `month`, or `infinite` | All requests from that agent or service principal. |
 | Per-model budget | `key` | `key:openai:prod-gpt4o` | `day`, `week`, `month`, or `infinite` | One registered provider key. Because each key is tied to a `models` list, this is how you cap a specific model or a small bundle of models. |
 
 A common production pattern is:
 
-1. give each user or principal a coarse `month` quota, or `infinite` if you want a hard lifetime cap
-2. give each key its own `day`, `month`, or `infinite` quota
-3. register one key per model when you want a hard model-level cap
+1. give each issued token its own `infinite` quota when you want the client credential itself to stop after a fixed lifetime amount
+2. give each user or principal a coarse `month` quota, or `infinite` if you want a hard lifetime cap across all their tokens
+3. give each key its own `day`, `month`, or `infinite` quota
+4. register one key per model when you want a hard model-level cap
 
 Examples:
 
@@ -550,6 +573,13 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H 'content-type: application/json' \
   -d '{"lane":"user","subject_id":"user:alice","quota_name":"lifetime","period":"infinite","max_usd":100,"max_tokens":1000000,"max_requests":5000}' \
+  | python -m json.tool
+
+# issued safe-token cap
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"token","subject_id":"token:abc123","quota_name":"lifetime","period":"infinite","max_usd":5,"max_tokens":50000,"max_requests":100}' \
   | python -m json.tool
 ```
 
@@ -663,6 +693,10 @@ SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
   -d '{"principal_id":"agent:doc-ingestor","namespace":"tenant:kogwistar","on_behalf_of_user_id":"user:alice","application_id":"app:doc-ingestor","scopes":["model.invoke"]}' \
   | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
 ```
+
+If you want this issued safe token to have its own hard cap, add a `token`
+quota on `token:<jti>` after issuance. That is separate from the user,
+principal, and provider-key quotas.
 
 This token can use a provider key only when the runtime request joins all three
 pieces:
