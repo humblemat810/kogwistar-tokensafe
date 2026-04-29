@@ -2,7 +2,7 @@ services:
   gateway:
     image: ${MODELKEYGUARD_IMAGE:-token-safe-gateway:latest}
     env_file:
-      - ./gateway.env.example
+      - ${MODELKEYGUARD_GATEWAY_ENV_FILE:-./gateway.env.example}
     environment:
       MODELKEYGUARD_GRAPH_KEY_FILE: /run/secrets/modelkeyguard_graph_key
       MODELKEYGUARD_ADMIN_API_SECRET_FILE: /run/secrets/modelkeyguard_admin_api_secret

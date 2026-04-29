@@ -2,15 +2,15 @@ services:
   postgres:
     image: pgvector/pgvector:pg16
     environment:
-      POSTGRES_DB: modelguard
-      POSTGRES_USER: modelguard
-      POSTGRES_PASSWORD: modelguard
+      POSTGRES_DB: ${MODELKEYGUARD_POSTGRES_DB:-modelguard}
+      POSTGRES_USER: ${MODELKEYGUARD_POSTGRES_USER:-modelguard}
+      POSTGRES_PASSWORD: ${MODELKEYGUARD_POSTGRES_PASSWORD:-modelguard}
     ports:
       - "${MODELKEYGUARD_POSTGRES_BIND:-127.0.0.1:5432}:5432"
     volumes:
       - ${MODELKEYGUARD_POSTGRES_DATA_DIR:-./data/postgres}:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U modelguard -d modelguard"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
       retries: 20
@@ -22,12 +22,12 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: admin
-      KC_BOOTSTRAP_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}
       KC_DB: postgres
-      KC_DB_URL: jdbc:postgresql://postgres:5432/modelguard
-      KC_DB_USERNAME: modelguard
-      KC_DB_PASSWORD: modelguard
+      KC_DB_URL: jdbc:postgresql://postgres:5432/${MODELKEYGUARD_POSTGRES_DB:-modelguard}
+      KC_DB_USERNAME: ${MODELKEYGUARD_POSTGRES_USER:-modelguard}
+      KC_DB_PASSWORD: ${MODELKEYGUARD_POSTGRES_PASSWORD:-modelguard}
     ports:
       - "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080"
     volumes:
@@ -45,7 +45,7 @@ services:
     environment:
       MODELKEYGUARD_ENV: local
       MODELKEYGUARD_STORE: kogwistar_postgres
-      MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard
+      MODELKEYGUARD_POSTGRES_DSN: ${MODELKEYGUARD_POSTGRES_DSN:-postgresql://modelguard:modelguard@postgres:5432/modelguard}
       MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY: "1"
       MODELKEYGUARD_USE_INSTALLED_KOGWISTAR: "1"
       MODELKEYGUARD_HOST: 0.0.0.0

@@ -195,8 +195,8 @@ compose-local service names with reachable DNS names:
 
 ```bash
 export MODELKEYGUARD_STORE='kogwistar_postgres'
-export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<password>@postgres-b.example:5432/modelguard'
-export KEYCLOAK_URL='https://keycloak-c.example'
+export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<postgres-password>@<postgres-machine-b-dns-or-ip>:5432/modelguard'
+export KEYCLOAK_URL='https://<keycloak-machine-c-dns>'
 export KEYCLOAK_REALM='modelguard'
 export MODELKEYGUARD_GRAPH_KEY_FILE='/run/secrets/modelkeyguard_graph_key'
 export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
@@ -215,10 +215,31 @@ The copy-and-edit target templates live in [`deploy/`](deploy/):
 
 | Target | Template |
 | --- | --- |
-| Gateway on machine A | [`deploy/gateway.env.example`](deploy/gateway.env.example) |
-| Postgres on machine B | [`deploy/postgres.env.example`](deploy/postgres.env.example) |
-| Keycloak/OIDC on machine C | [`deploy/keycloak.env.example`](deploy/keycloak.env.example) |
+| One source of truth | [`deploy/deployment-targets.env.example`](deploy/deployment-targets.env.example) |
+| Renderer | [`scripts/render_deployment_env.sh`](scripts/render_deployment_env.sh) |
+| Gateway on machine A | rendered `gateway.env` |
+| Postgres on machine B | rendered `postgres.env` |
+| Keycloak/OIDC on machine C | rendered `keycloak.env` |
 | Gateway-only Compose example | [`deploy/docker-compose.gateway-only.yml`](deploy/docker-compose.gateway-only.yml) |
+
+Render the component files from one filled target file:
+
+```bash
+cp deploy/deployment-targets.env.example deploy/deployment-targets.env
+# edit deploy/deployment-targets.env
+./scripts/gateway_from_deployment_targets.sh config
+```
+
+For gateway-on-machine-A deployment, use the same single source directly:
+
+```bash
+./scripts/gateway_from_deployment_targets.sh up
+```
+
+The script renders `gateway.env`, `postgres.env`, `keycloak.env`, and
+`gateway-compose.env` under `out/deployment_targets_rendered/` and passes the
+gateway env files to Compose. Those rendered files are artifacts, not a second
+configuration source.
 
 | Target | What runs there | Required configuration |
 | --- | --- | --- |
@@ -232,12 +253,12 @@ Gateway-only container environment for machine A:
 ```bash
 export MODELKEYGUARD_ENV='production'
 export MODELKEYGUARD_STORE='kogwistar_postgres'
-export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<password>@postgres-b.example:5432/modelguard'
+export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<postgres-password>@<postgres-machine-b-dns-or-ip>:5432/modelguard'
 export MODELKEYGUARD_GRAPH_KEY_FILE='/run/secrets/modelkeyguard_graph_key'
 export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
 export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
 
-export KEYCLOAK_URL='https://keycloak-c.example'
+export KEYCLOAK_URL='https://<keycloak-machine-c-dns>'
 export KEYCLOAK_REALM='modelguard'
 export KEYCLOAK_INTROSPECTION_CLIENT_ID='modelguard-gateway'
 export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
@@ -262,7 +283,7 @@ the key:
 export OPENAI_UPSTREAM_URL='https://api.openai.com/v1/chat/completions'
 export AZURE_OPENAI_UPSTREAM_URL='https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=<version>'
 export GEMINI_UPSTREAM_URL='https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent'
-export OLLAMA_UPSTREAM_URL='http://ollama-b.example:11434/api/chat'
+export OLLAMA_UPSTREAM_URL='http://<ollama-host-or-ip>:11434/api/chat'
 ```
 
 What the repo gives you today:

@@ -9,6 +9,8 @@ The most useful bash entrypoints are below.
 | --- | --- |
 | `bootstrap_secrets.sh` | Creates local secret files under `./secrets` if they do not already exist. Local mode is demo-friendly and may create a placeholder provider key. `--production` generates strong graph/admin/Keycloak secrets, does not create placeholder provider keys, and never overwrites existing files. |
 | `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose with the hardened override. Use `fresh-up` for a clean local rehearsal after stale data; it starts with a new data directory instead of relying on deleting container-owned files. Provider keys are registered later through `/admin/keys`. |
+| `render_deployment_env.sh` | Renders split-target `gateway.env`, `postgres.env`, `keycloak.env`, and `gateway-compose.env` from one filled `deployment-targets.env` file. |
+| `gateway_from_deployment_targets.sh` | Gateway-only split-target runner. It reads one source of truth, renders component env files, and runs `deploy/docker-compose.gateway-only.yml`. |
 | `start_postgres.sh` | Starts the pgvector-backed Postgres container or compose service used by the repo. It also prints the DSN and tells you what to export next. |
 | `start_keycloak.sh` | Starts only the Keycloak container from the compose stack and waits for the realm discovery endpoint to answer. |
 | `start_stack.sh` | Starts the local Postgres + Keycloak compose services together. It is the quick “local infrastructure” launcher. |
