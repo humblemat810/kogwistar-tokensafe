@@ -5,6 +5,8 @@ A small standalone application that turns provider model keys into graph-governe
 The client never receives the real OpenAI/Azure/Anthropic key. It receives a short-lived Keycloak token or local `kgw_*` token, calls this gateway with an OpenAI-compatible API, and the gateway verifies identity, checks Kogwistar-style ACL, checks named projections, decrypts/looks up the provider key, forwards the request, and appends audit/usage graph events.
 
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
+For a plain-English explanation of the runnable shell entrypoints, see
+[`scripts/README.md`](scripts/README.md).
 
 ## 60-second quickstart
 ### step 0 (for restart only, skip if fresh run)
@@ -501,6 +503,8 @@ Authentication support today:
   to require Keycloak/OIDC bearer tokens with `model.admin`.
 - For the OIDC-only deployment path, including authenticated `/v1/models`, see
   [`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
+  The local executable smoke is:
+  `./scripts/oidc_protect_everything_smoke.sh`.
 
 ## Testcontainers PostgreSQL tests
 
@@ -622,6 +626,13 @@ Terminal 1:
 ```bash
 ./scripts/bootstrap_secrets.sh
 MODELKEYGUARD_DRY_RUN=1 ./scripts/start_gateway.sh
+```
+
+`bootstrap_secrets.sh` defaults to local/dev convenience. For hardened
+production-style secret files, pass a real provider key and use:
+
+```bash
+OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production
 ```
 
 Terminal 2:

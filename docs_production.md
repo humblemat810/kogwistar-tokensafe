@@ -11,6 +11,27 @@ POST /v1/chat/completions
 
 The gateway verifies the token, checks Kogwistar graph ACL/quota state, resolves a sealed provider-key payload only inside the backend, forwards upstream, and appends access/usage events.
 
+## One Workflow
+
+This is the single production deployment document. Follow it in order for
+config, deploy, register application, register key, and first use.
+
+1. Bootstrap secrets.
+   - Local rehearsal: `OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production`
+   - Real production: create the same secret files from your secret manager or CI secrets, then mount them with `_FILE` env vars.
+2. Deploy the stack.
+   - One host: `docker compose up --build`
+   - Split host: build and push the gateway image, then point `MODELKEYGUARD_POSTGRES_DSN` and `KEYCLOAK_URL` at the remote services.
+3. Validate the gateway.
+   - OIDC-only smoke: `./scripts/oidc_protect_everything_smoke.sh`
+   - If port `8789` is busy: `MODELKEYGUARD_PORT=8791 ./scripts/oidc_protect_everything_smoke.sh`
+4. Register application, principal, quota, and key.
+   - Use the admin Keycloak client or, during migration only, the admin secret.
+5. Use the gateway from a client.
+   - Send a Keycloak bearer token or a safe token as `OPENAI_API_KEY`.
+
+The rest of this document explains each step.
+
 ## Local one-minute E2E
 
 Terminal 1:
@@ -45,10 +66,28 @@ The page can create, rotate, and revoke provider keys. Raw keys are accepted onl
 
 ## Docker Compose
 
+For local/dev compose only:
+
 ```bash
 ./scripts/bootstrap_secrets.sh
 docker compose up --build
 ```
+
+For a hardened production-style secret bootstrap, provide real provider material
+and use production mode:
+
+```bash
+OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production
+docker compose up --build
+```
+
+`bootstrap_secrets.sh --production` refuses to create
+`secrets/openai_provider_key` from a placeholder. It generates missing graph,
+admin, and Keycloak secret files with random values and never overwrites
+existing secret files. The bundled local Keycloak realm still uses the demo
+introspection secret `gateway-secret`; if production mode generated a different
+`secrets/keycloak_client_secret`, update the real Keycloak client secret to
+match before relying on OIDC introspection.
 
 Linux volume mapping:
 
@@ -62,9 +101,15 @@ Use `_FILE` env vars in production, for example:
 
 ```text
 MODELKEYGUARD_GRAPH_KEY_FILE=/run/secrets/modelkeyguard_graph_key
+MODELKEYGUARD_ADMIN_API_SECRET_FILE=/run/secrets/modelkeyguard_admin_api_secret
 MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE=/run/secrets/openai_provider_key
 KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE=/run/secrets/keycloak_client_secret
 ```
+
+If you are trying to understand the local shell entrypoints first, start with
+[`scripts/README.md`](scripts/README.md). It explains `bootstrap_secrets.sh`,
+`start_stack.sh`, `init_graph.sh`, `start_gateway.sh`, and the OIDC smoke in
+plain English.
 
 ## Distributed deployment shape
 
@@ -144,8 +189,95 @@ export MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH=1
 
 In that mode, model endpoints require Keycloak bearer tokens, `/v1/models`
 requires authentication, and `/admin/*` requires a Keycloak token mapped to
-`model.admin`. See
-[`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
+`model.admin`.
+
+For local proof, run:
+
+```bash
+./scripts/oidc_protect_everything_smoke.sh
+```
+
+For a CI/deployment runner, use the variable contract printed by:
+
+```bash
+./scripts/oidc_protect_everything_smoke.sh --print-required-env
+```
+
+## Register And Use
+
+After the gateway is up, register the application, principal, quota, and key in
+that order. The examples below use a Keycloak admin bearer token. If you are in
+a migration window, the same endpoints also accept the admin secret header.
+
+```bash
+export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"
+```
+
+Register an application:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/applications' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"application_id":"app:doc-ingestor","display_name":"Doc Ingestor"}' \
+  | python -m json.tool
+```
+
+Register a principal:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/principals' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:doc-ingestor","kind":"agent","groups":["agent-dev"],"namespace":"tenant:kogwistar","application_id":"app:doc-ingestor","description":"Document summarizer"}' \
+  | python -m json.tool
+```
+
+Register quota:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"principal","subject_id":"agent:doc-ingestor","quota_name":"hour","period":"hour","max_usd":10,"max_tokens":50000,"max_requests":500}' \
+  | python -m json.tool
+```
+
+Register the provider key:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -F key_id='key:openai:prod' \
+  -F provider='openai' \
+  -F models='gpt-4o-mini,gpt-5.3-mini' \
+  -F display_name='OpenAI production key' \
+  -F provider_secret='sk-...real-provider-key...' \
+  | python -m json.tool
+```
+
+Issue a safe token for the principal:
+
+```bash
+SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:doc-ingestor","namespace":"tenant:kogwistar","on_behalf_of_user_id":"user:alice","application_id":"app:doc-ingestor","scopes":["model.invoke"]}' \
+  | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
+```
+
+Use it as an OpenAI-compatible client:
+
+```bash
+OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
+OPENAI_API_KEY="${SAFE_TOKEN}" \
+OPENAI_MODEL='gpt-4o-mini' \
+python scripts/langchain_user_openai_compatible.py
+```
+
+If you are using Keycloak tokens directly instead of safe tokens, keep
+`MODELKEYGUARD_REQUIRE_KEYCLOAK=1` and set `OPENAI_API_KEY` to a real access
+token from your IdP client.
 
 OIDC protects the gateway's HTTP surface. It does not and cannot remove
 host/operator break-glass power: a Linux, Docker, cloud, or Kubernetes

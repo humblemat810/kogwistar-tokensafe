@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Start the local Postgres + Keycloak compose stack used by the tutorials.
+# This is the local infrastructure launcher, not the gateway itself.
+
 if docker compose version >/dev/null 2>&1; then
   compose_cmd=(docker compose)
 elif command -v docker-compose >/dev/null 2>&1; then

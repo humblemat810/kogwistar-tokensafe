@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Start the pgvector Postgres backend used by serious graph/projection modes.
+# Reuses an existing container if present, otherwise launches a fresh one.
+
 if ! docker info >/dev/null 2>&1; then
   cat >&2 <<'TXT'
 Unable to connect to the Docker daemon.

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Reset local dev/test state for a clean rerun.
+# Stops local services, clears bind-mounted data, and removes generated artifacts.
+
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 TOKENSAFE_HOME="${MODELKEYGUARD_HOME:-${TOKENSAFE_HOME:-$HOME/.tokensafe}}"
 DEFAULT_PG_DATA_DIR="${MODELKEYGUARD_POSTGRES_DATA_DIR:-${TOKENSAFE_HOME%/}/postgres}"

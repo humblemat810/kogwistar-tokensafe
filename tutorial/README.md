@@ -2,6 +2,10 @@
 
 Start here when you know what you want to prove.
 
+For the single production workflow that covers config, deploy, register, and
+use, follow [`../docs_production.md`](../docs_production.md). The entries below
+are narrower demos and sub-flows.
+
 ```text
 First 5 minutes, no real key
   -> slow_quickstart_cli_gui_parity.md
@@ -33,6 +37,7 @@ Container hardening and private admin/public serving split
 
 | Goal | Real provider key? | Backend | Cache? | Go here |
 | --- | --- | --- | --- | --- |
+| Full production deploy, register app/key, and use it | Yes | `kogwistar_postgres` | Optional | [../docs_production.md](../docs_production.md) |
 | Learn the app safely | No | `jsonl` toy mode | No | [slow_quickstart_cli_gui_parity.md](slow_quickstart_cli_gui_parity.md) |
 | Verify installed Kogwistar + pgvector + no JSONL graph artifact | No | `kogwistar_postgres` | No | [kogwistar_managed_postgres_setup.md](kogwistar_managed_postgres_setup.md) |
 | Real Azure call through Kogwistar-managed Postgres | Yes | `kogwistar_postgres` | No | [e2e_azure_real_key_usage_and_billing.md](e2e_azure_real_key_usage_and_billing.md) |

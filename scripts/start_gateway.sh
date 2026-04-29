@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Start the ModelKeyGuard FastAPI gateway with the current policy and env.
+# If the gateway is already healthy on the target port, skip restarting.
 if [[ -n "${PYTHON:-}" ]]; then
   PYTHON_BIN="$PYTHON"
 elif [[ -x ".venv/bin/python" ]]; then

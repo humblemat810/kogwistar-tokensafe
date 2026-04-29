@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Initialize or reinitialize graph state from config/gateway_policy.json.
+# This seeds the graph/projection backend with the current policy contract.
 cd "$(dirname "$0")/.."
 export PYTHONPATH="${PYTHONPATH:-.}"
 export PYTHONDONTWRITEBYTECODE=1

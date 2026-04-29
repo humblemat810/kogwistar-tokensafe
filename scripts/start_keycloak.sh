@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
+
+# Start the local Keycloak container and wait for the realm discovery endpoint.
+# This is the auth service used by the OIDC and Keycloak tutorial paths.
 cd "$(dirname "$0")/.."
 docker compose up -d keycloak
 printf 'Waiting for Keycloak'
