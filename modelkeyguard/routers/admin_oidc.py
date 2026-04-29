@@ -17,6 +17,7 @@ def create_router() -> APIRouter:
             secret=settings.admin_api_secret,
             next_path=next,
             keycloak_url=settings.keycloak_url,
+            keycloak_public_url=settings.keycloak_public_url,
             realm=settings.keycloak_realm,
             client_id=settings.browser_oidc_client_id,
             gateway_public_url=settings.gateway_public_url,

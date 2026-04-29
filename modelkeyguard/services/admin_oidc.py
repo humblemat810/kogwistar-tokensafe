@@ -99,6 +99,7 @@ def admin_oidc_login_response(
     secret: str,
     next_path: str,
     keycloak_url: str,
+    keycloak_public_url: str,
     realm: str,
     client_id: str,
     gateway_public_url: str,
@@ -108,7 +109,7 @@ def admin_oidc_login_response(
     code_verifier, code_challenge = pkce_pair()
     state_cookie, state = issue_login_state(secret, ttl_seconds=ttl_seconds, next_path=next_path, redirect_uri=redirect_uri, code_verifier=code_verifier)
     login_url = build_oidc_login_url(
-        keycloak_url=keycloak_url,
+        keycloak_url=keycloak_public_url or keycloak_url,
         realm=realm,
         client_id=client_id,
         redirect_uri=redirect_uri,

@@ -505,10 +505,19 @@ Authentication support today:
   the browser secret-session path entirely.
 - Browser OIDC login is available at `/admin/oidc/login` and lands on the
   standard Keycloak authorization-code flow before returning to the admin UI.
+  The browser redirect uses `MODELKEYGUARD_KEYCLOAK_PUBLIC_URL` so the browser
+  lands on a Keycloak URL it can actually reach, while the gateway still uses
+  `KEYCLOAK_URL` for server-side token exchange.
   The browser login client defaults to `MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID`
   (`modelguard-admin-web` in the bundled realm).
+- Machine usage-analysis agents can use `MODELKEYGUARD_OIDC_USAGE_CLIENT_ID`
+  (`modelguard-usage-agent` in the bundled realm) with the `model.usage.read`
+  role to read `/admin/usage` and `/admin/usage.json` without policy mutation.
+  The reusable Python client lives in `modelkeyguard.analytics`.
 - For the OIDC-only deployment path, including authenticated `/v1/models`, see
   [`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
+  For a small reusable usage-analysis agent example, see
+  [`tutorial/usage_analysis_agent.md`](tutorial/usage_analysis_agent.md).
   The local executable smoke is:
   `./scripts/oidc_protect_everything_smoke.sh`.
 

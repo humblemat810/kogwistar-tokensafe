@@ -29,6 +29,12 @@ Final dev/prod-shaped guard setup
 Keycloak/OIDC protects model and admin endpoints
   -> keycloak_oidc_protect_everything.md
 
+Keycloak usage-analysis agent via reusable Python client
+  -> usage_analysis_agent.md
+
+Keycloak usage-analysis agent smoke after fresh-up
+  -> ../scripts/usage_analysis_agent_smoke.sh
+
 Container hardening and private admin/public serving split
   -> container_hardened_nonadmin_key_safety.md
 ```
@@ -45,6 +51,8 @@ Container hardening and private admin/public serving split
 | Register one principal/key in GUI, then call it | Yes or fake | `kogwistar_postgres` in real mode | Optional | [e2e_single_azure_gui_key_and_principal.md](e2e_single_azure_gui_key_and_principal.md) |
 | Check billing survives price changes | Yes | same as prior real flow | Optional | [price_change_billing_integrity.md](price_change_billing_integrity.md) |
 | Require Keycloak/OIDC for model and admin endpoints | No | `kogwistar_postgres` | No | [keycloak_oidc_protect_everything.md](keycloak_oidc_protect_everything.md) |
+| Build a simple usage-analysis agent with Keycloak service-account auth | No | `kogwistar_postgres` | No | [usage_analysis_agent.md](usage_analysis_agent.md) |
+| Smoke the usage-analysis agent against a fresh-up compose stack | No | `kogwistar_postgres` | No | [../scripts/usage_analysis_agent_smoke.sh](../scripts/usage_analysis_agent_smoke.sh) |
 | Harden container deployment | Yes | `kogwistar_postgres` | No | [container_hardened_nonadmin_key_safety.md](container_hardened_nonadmin_key_safety.md) |
 
 ## Kogwistar Real Call Modes

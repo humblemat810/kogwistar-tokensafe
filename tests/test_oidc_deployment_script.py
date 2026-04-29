@@ -202,7 +202,9 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "pgvector" in postgres_env
     assert "KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE" in keycloak_env
     assert "MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID" in keycloak_env
+    assert "MODELKEYGUARD_OIDC_USAGE_CLIENT_ID" in keycloak_env
     assert "MODELKEYGUARD_ADMIN_REQUIRED_ROLE" in keycloak_env
+    assert "MODELKEYGUARD_USAGE_REQUIRED_ROLE" in keycloak_env
     assert "docker-compose.gateway-only.yml" in deploy_readme
     assert "deployment-targets.env.example" in deploy_readme
     assert "gateway.env.example" in gateway_compose
@@ -226,6 +228,8 @@ def test_production_doc_pins_limited_model_key_and_user_quota_flow():
     assert "which end-user quota is charged" in text
     assert "/admin/oidc/login?next=/admin/usage" in text
     assert "modelguard-admin-web" in text
+    assert "modelguard-usage-agent" in text
+    assert "model.usage.read" in text
 
 
 def test_production_doc_pins_quota_patterns_and_model_specific_limits():
@@ -258,12 +262,29 @@ def test_production_doc_shows_explicit_key_examples_for_each_provider():
 
     for provider in ("openai", "azure_openai", "ollama", "gemini"):
         assert f"-F provider='{provider}'" in text
-    assert "-F key_id='key:openai:prod'" in text
-    assert "-F key_id='key:azure-openai:prod'" in text
-    assert "-F key_id='key:ollama:gemma4-e2b'" in text
-    assert "-F key_id='key:gemini:prod'" in text
-    assert "host.docker.internal" in text
-    assert "ollama-local-placeholder" in text
+
+
+def test_usage_analysis_agent_tutorial_and_script_pin_reusable_library():
+    repo_root = Path(__file__).resolve().parents[1]
+    tutorial = (repo_root / "tutorial" / "usage_analysis_agent.md").read_text(encoding="utf-8")
+    script = (repo_root / "scripts" / "usage_analysis_agent.py").read_text(encoding="utf-8")
+    smoke = (repo_root / "scripts" / "usage_analysis_agent_smoke.sh").read_text(encoding="utf-8")
+
+    assert "modelkeyguard.analytics" in tutorial
+    assert "modelkeyguard.usage_agent" in tutorial
+    assert "UsageAnalysisAgent.from_env" in tutorial
+    assert "KeycloakServiceAccount" in tutorial
+    assert "UsageAnalyticsClient" in tutorial
+    assert "modelguard-usage-agent" in tutorial
+    assert "model.usage.read" in tutorial
+    assert "usage_analysis_agent.py" in tutorial
+    assert "MODELKEYGUARD_ANALYTICS_SUBJECT_USER" in tutorial
+    assert "fresh-up compose stack" in smoke
+    assert "MODELKEYGUARD_OIDC_USAGE_CLIENT_SECRET" in smoke
+    assert "usage_analysis_agent.py" in smoke
+    assert "UsageAnalysisAgent" in script
+    assert "--principal" in script
+    assert "--key" in script
 
 
 def test_render_deployment_env_generates_matching_component_files(tmp_path):

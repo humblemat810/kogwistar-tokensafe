@@ -4,12 +4,13 @@
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
   "ssoSessionMaxLifespan": 3600,
-  "roles": {"realm": [{"name": "model.invoke"}, {"name": "model.admin"}]},
+  "roles": {"realm": [{"name": "model.invoke"}, {"name": "model.admin"}, {"name": "model.usage.read"}]},
   "clients": [
     {"clientId": "modelguard-gateway", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "gateway-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
     {"clientId": "langchain-agent", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "agent-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
     {"clientId": "external-agent", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "external-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
     {"clientId": "modelguard-admin", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "admin-agent-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
+    {"clientId": "modelguard-usage-agent", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "usage-agent-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
     {"clientId": "modelguard-admin-web", "enabled": true, "protocol": "openid-connect", "publicClient": true, "serviceAccountsEnabled": false, "standardFlowEnabled": true, "directAccessGrantsEnabled": false, "redirectUris": ["http://localhost:8789/admin/oidc/callback", "http://127.0.0.1:8789/admin/oidc/callback"], "webOrigins": ["+"], "rootUrl": "http://127.0.0.1:8789", "baseUrl": "/"}
   ],
   "users": [

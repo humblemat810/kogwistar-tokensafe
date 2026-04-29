@@ -110,6 +110,16 @@ bootstrap_keycloak_admin_role() {
     ./scripts/bootstrap_keycloak_admin_role.sh
 }
 
+bootstrap_keycloak_usage_role() {
+  KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}" \
+  KEYCLOAK_REALM="${KEYCLOAK_REALM:-modelguard}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}" \
+  MODELKEYGUARD_KEYCLOAK_ROLE_GRANT_CLIENT_ID="${MODELKEYGUARD_OIDC_USAGE_CLIENT_ID:-modelguard-usage-agent}" \
+  MODELKEYGUARD_KEYCLOAK_ROLE_GRANT_ROLE="${MODELKEYGUARD_USAGE_REQUIRED_ROLE:-model.usage.read}" \
+    ./scripts/bootstrap_keycloak_admin_role.sh
+}
+
 preflight() {
   require_dockerignore_entry "data"
   require_dockerignore_entry "out"
@@ -232,6 +242,7 @@ TXT
     gateway_port="${gateway_bind##*:}"
     wait_http "http://127.0.0.1:${keycloak_port}/realms/master/.well-known/openid-configuration" "Keycloak"
     bootstrap_keycloak_admin_role
+    bootstrap_keycloak_usage_role
     wait_http "http://127.0.0.1:${gateway_port}/healthz" "Gateway"
     cat <<'TXT'
 production compose stack started in the background.

@@ -518,6 +518,31 @@ def test_admin_routes_can_require_keycloak_admin_role(tmp_path, monkeypatch):
     assert client.get("/admin/usage", headers={"authorization": "Bearer kc-admin"}).status_code == 200
 
 
+def test_admin_usage_routes_can_accept_keycloak_usage_role(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "model.admin")
+    monkeypatch.setenv("MODELKEYGUARD_USAGE_REQUIRED_ROLE", "model.usage.read")
+
+    def fake_keycloak(self, token):
+        if token == "kc-usage":
+            return TokenPrincipal("agent:usage", "service", ("model.usage.read",), "tenant:kogwistar", ("model.invoke",), "jti-usage", None)
+        if token == "kc-admin":
+            return TokenPrincipal("human:admin", "human", ("model.admin",), "tenant:kogwistar", ("model.invoke",), "jti-admin", None)
+        return None
+
+    monkeypatch.setattr("modelkeyguard.token_auth.TokenVerifier._verify_keycloak_token", fake_keycloak)
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert client.get("/admin/usage", headers={"authorization": "Bearer kc-usage"}).status_code == 200
+    assert client.get("/admin/usage.json", headers={"authorization": "Bearer kc-usage"}).status_code == 200
+    assert client.get("/admin/keys", headers={"authorization": "Bearer kc-usage"}).status_code == 403
+    assert client.get("/admin/policy", headers={"authorization": "Bearer kc-usage"}).status_code == 403
+
+
 def test_admin_routes_can_allow_secret_or_keycloak(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
@@ -604,6 +629,7 @@ def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, 
     monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
     monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789")
     monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.example")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "http://127.0.0.1:8080")
     monkeypatch.setenv("KEYCLOAK_REALM", "modelguard")
     monkeypatch.setenv("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web")
 
@@ -612,6 +638,7 @@ def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, 
 
     login = client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
     assert login.status_code == 303
+    assert login.headers["location"].startswith("http://127.0.0.1:8080/")
     assert "code_challenge=" in login.headers["location"]
     assert "client_id=modelguard-admin-web" in login.headers["location"]
     assert "state=" in login.headers["location"]

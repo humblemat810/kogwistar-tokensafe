@@ -283,7 +283,7 @@ configuration source.
 | --- | --- | --- |
 | Machine A | `token-safe` gateway image | `MODELKEYGUARD_STORE=kogwistar_postgres`, `MODELKEYGUARD_POSTGRES_DSN`, `KEYCLOAK_URL`, `KEYCLOAK_REALM`, graph/admin/IdP secret `_FILE` env vars |
 | Machine B | pgvector PostgreSQL | network access from A, database/user/password, backups, TLS/firewall rules, `pgvector` available |
-| Machine C | Keycloak or another OIDC IdP | realm/client setup, introspection client, `model.admin` role/scope mapping, TLS/firewall rules |
+| Machine C | Keycloak or another OIDC IdP | realm/client setup, introspection client, `model.admin` and `model.usage.read` role/scope mapping, TLS/firewall rules |
 | Registry/runner | image build and delivery | `docker build`, `docker push`, deployment credentials |
 
 Gateway-only container environment for machine A:
@@ -300,6 +300,8 @@ export KEYCLOAK_URL='https://<keycloak-machine-c-dns>'
 export KEYCLOAK_REALM='modelguard'
 export KEYCLOAK_INTROSPECTION_CLIENT_ID='modelguard-gateway'
 export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
+export MODELKEYGUARD_OIDC_USAGE_CLIENT_ID='modelguard-usage-agent'
+export MODELKEYGUARD_USAGE_REQUIRED_ROLE='model.usage.read'
 
 export MODELKEYGUARD_AUTH_MODE='keycloak'
 export MODELKEYGUARD_REQUIRE_KEYCLOAK=1
@@ -675,8 +677,43 @@ Admin browser login has two working paths:
    - post the admin secret
 2. Keycloak browser login:
    - open `http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage`
+   - the browser is redirected to the browser-reachable Keycloak URL from
+     `MODELKEYGUARD_KEYCLOAK_PUBLIC_URL`
    - sign in with the bundled `admin` user in the `modelguard-admin-web`
      client, or your own Keycloak user that has `model.admin`
+
+3. Keycloak machine agent for usage analysis:
+   - mint a client-credentials token for the bundled `modelguard-usage-agent`
+     service account
+   - assign that service account the `model.usage.read` realm role
+   - use that token for `/admin/usage` and `/admin/usage.json` when you want a
+     non-human Kogwistar workflow to analyze usage without policy mutation
+
+The reusable Python path for that agent is the `modelkeyguard.analytics`
+module:
+
+```python
+from modelkeyguard.analytics import KeycloakServiceAccount, UsageAnalyticsClient
+
+token = KeycloakServiceAccount(
+    keycloak_url="http://127.0.0.1:8080",
+    realm="modelguard",
+    client_id="modelguard-usage-agent",
+    client_secret="usage-agent-secret",
+).mint_access_token()
+
+client = UsageAnalyticsClient(base_url="http://127.0.0.1:8789", bearer_token=token)
+print(client.for_user("user:alice"))
+print(client.for_principal("agent:doc-ingestor"))
+print(client.for_key("key:openai:prod"))
+```
+
+After `./scripts/production_compose.sh fresh-up`, the ready-to-run smoke harness
+for that same agent is:
+
+```bash
+./scripts/usage_analysis_agent_smoke.sh
+```
 
 The GUI writes to the same `/admin/keys` backend route as the curl command
 above. It is convenient for one-off admin work; the curl path is better for
@@ -692,6 +729,9 @@ Admin access itself has two setup paths:
      use the browser OIDC route at `/admin/oidc/login`
    - the browser login client is `MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID`
      (default: `modelguard-admin-web`)
+   - the read-only usage agent client is `MODELKEYGUARD_OIDC_USAGE_CLIENT_ID`
+     (default: `modelguard-usage-agent`) and it should carry
+     `model.usage.read`
    - set `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
 
 The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,

@@ -807,6 +807,8 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             if required and provided == required:
                 return await call_next(request)
 
+        is_usage_route = path in {"/admin/usage", "/admin/usage.json"}
+
         if settings.admin_auth_mode in {"keycloak", "secret_or_keycloak"}:
             try:
                 admin_principal = app.state.verifier.verify_keycloak_authorization_header(request.headers.get("authorization"))
@@ -814,6 +816,9 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                 admin_principal = None
             if admin_principal is not None:
                 if _principal_has_admin_role(admin_principal, settings.admin_required_role):
+                    request.state.admin_principal = admin_principal
+                    return await call_next(request)
+                if is_usage_route and _principal_has_admin_role(admin_principal, settings.usage_required_role):
                     request.state.admin_principal = admin_principal
                     return await call_next(request)
                 return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required"}})
@@ -829,6 +834,10 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
 
         if settings.admin_auth_mode == "keycloak":
             if admin_session and str(admin_session.get("source") or "secret") == "oidc":
+                return await call_next(request)
+
+        if is_usage_route and settings.admin_auth_mode in {"secret", "secret_or_keycloak"}:
+            if admin_session and str(admin_session.get("source") or "secret") in {"secret", "oidc"}:
                 return await call_next(request)
 
         wants_html = (
