@@ -353,6 +353,12 @@ def dry_run_response(model: str, principal_id: str, key_id: str, event: dict[str
         },
     }
 
+
+def _principal_has_admin_role(principal: TokenPrincipal, required_role: str) -> bool:
+    allowed = set(principal.scopes) | set(principal.groups)
+    return required_role in allowed
+
+
 def forward_provider(
     secret: str,
     raw: bytes,
@@ -761,7 +767,18 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             if required and provided == required:
                 return await call_next(request)
 
-        if is_admin_authenticated(request, settings.admin_api_secret):
+        if settings.admin_auth_mode in {"keycloak", "secret_or_keycloak"}:
+            try:
+                admin_principal = app.state.verifier.verify_keycloak_authorization_header(request.headers.get("authorization"))
+            except TokenAuthError:
+                admin_principal = None
+            if admin_principal is not None:
+                if _principal_has_admin_role(admin_principal, settings.admin_required_role):
+                    request.state.admin_principal = admin_principal
+                    return await call_next(request)
+                return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required"}})
+
+        if settings.admin_auth_mode in {"secret", "secret_or_keycloak"} and is_admin_authenticated(request, settings.admin_api_secret):
             return await call_next(request)
 
         wants_html = (
@@ -769,7 +786,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             and not path.endswith(".json")
             and "text/html" in (request.headers.get("accept") or "").lower()
         )
-        if wants_html:
+        if wants_html and settings.admin_auth_mode != "keycloak":
             return admin_html_login_response(path)
         return JSONResponse(status_code=401, content={"error": {"message": "admin_auth_required"}})
 
@@ -778,7 +795,12 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         return {"ok": True, "service": "modelkeyguard-gateway", "server": "fastapi", "env": settings.env}
 
     @app.get("/v1/models")
-    def models() -> dict[str, Any]:
+    def models(request: FastAPIRequest):
+        if settings.require_model_list_auth:
+            try:
+                app.state.verifier.verify_authorization_header(request.headers.get("authorization"))
+            except TokenAuthError as exc:
+                return JSONResponse(status_code=401, content={"error": {"message": str(exc)}})
         items = []
         seen = set()
         for key in app.state.policy.get("model_keys", []):

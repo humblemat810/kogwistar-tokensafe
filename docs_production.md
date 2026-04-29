@@ -66,6 +66,94 @@ MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE=/run/secrets/openai_provider_key
 KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE=/run/secrets/keycloak_client_secret
 ```
 
+## Distributed deployment shape
+
+The default `docker-compose.yml` is a local all-in-one stack, not a complete
+multi-machine production deployment. It builds the gateway image on the current
+Docker host and starts Postgres, Keycloak, and the gateway on the same compose
+network.
+
+Supported runtime topology:
+
+```text
+machine A: token-safe gateway container
+machine B: pgvector PostgreSQL for Kogwistar/ModelKeyGuard state
+machine C: Keycloak
+
+A may equal B, C, or both for smaller deployments.
+```
+
+For a split deployment, keep the gateway environment contract and replace
+compose-local service names with reachable DNS names:
+
+```bash
+export MODELKEYGUARD_STORE='kogwistar_postgres'
+export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<password>@postgres-b.example:5432/modelguard'
+export KEYCLOAK_URL='https://keycloak-c.example'
+export KEYCLOAK_REALM='modelguard'
+export MODELKEYGUARD_GRAPH_KEY_FILE='/run/secrets/modelkeyguard_graph_key'
+export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
+```
+
+What the repo gives you today:
+
+| Need | Current support |
+| --- | --- |
+| Local all-in-one stack | `docker-compose.yml` |
+| Persistent local Postgres bind mount | `MODELKEYGUARD_POSTGRES_DATA_DIR` |
+| Container secret-file loading | `_FILE` environment variables |
+| Gateway image build | `docker compose build gateway` or `docker build .` |
+| Remote Postgres/Keycloak endpoints | Supported by env vars, requires your own compose override or orchestrator config |
+| CI runner build-and-push workflow | Not provided yet |
+| Cross-machine TLS, firewalling, backups, migrations, registry auth | Site-specific; not encoded in default compose |
+
+A GitHub/GitLab runner can build and push the gateway image with ordinary Docker
+commands, but the current repo does not yet include a pinned CI workflow for
+that. The minimum shape is:
+
+```bash
+docker build -t registry.example/token-safe/modelkeyguard:<tag> .
+docker push registry.example/token-safe/modelkeyguard:<tag>
+```
+
+Deploy that image on machine A with the remote `MODELKEYGUARD_POSTGRES_DSN` and
+`KEYCLOAK_URL` above. Do not use `MODELKEYGUARD_INIT_RESET_EXISTING=1` against a
+production database.
+
+Authentication boundary:
+
+- Model endpoints such as `/v1/chat/completions` verify
+  `Authorization: Bearer ...` with `TokenVerifier`. In Keycloak mode, the token
+  is introspected against `KEYCLOAK_URL`/`KEYCLOAK_REALM` and mapped to a
+  graph principal through configured `keycloak_client:*` nodes.
+- Set `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` when local `kgw_*` tokens must be
+  rejected even if they exist in the graph.
+- Admin pages and admin JSON APIs use `x-modelkeyguard-admin-secret` or the
+  admin session cookie by default. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
+  to require a Keycloak bearer token with the configured admin role/scope.
+
+For an OIDC-only HTTP surface, use:
+
+```bash
+export MODELKEYGUARD_AUTH_MODE='keycloak'
+export MODELKEYGUARD_REQUIRE_KEYCLOAK=1
+export MODELKEYGUARD_ADMIN_AUTH_MODE='keycloak'
+export MODELKEYGUARD_ADMIN_REQUIRED_ROLE='model.admin'
+export MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH=1
+```
+
+In that mode, model endpoints require Keycloak bearer tokens, `/v1/models`
+requires authentication, and `/admin/*` requires a Keycloak token mapped to
+`model.admin`. See
+[`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
+
+OIDC protects the gateway's HTTP surface. It does not and cannot remove
+host/operator break-glass power: a Linux, Docker, cloud, or Kubernetes
+administrator can still stop containers, change env vars, mount secrets, connect
+to Postgres with database credentials, or deploy a different image. Control that
+layer with infrastructure IAM, SSH policy, audit logging, change approval,
+backups, and secret rotation.
+
 ## Test suite
 
 ```bash
@@ -334,4 +422,3 @@ The extended alert suite pins down:
 - sample-size limiting
 - review batch output
 - secret redaction before graph persistence or review callback execution
-

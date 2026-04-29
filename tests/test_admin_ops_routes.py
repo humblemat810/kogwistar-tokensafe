@@ -7,6 +7,7 @@ import time
 import pytest
 
 from modelkeyguard.gateway import create_app
+from modelkeyguard.token_auth import TokenPrincipal
 
 ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret"}
 
@@ -491,6 +492,60 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.post("/admin/policy/quotas/upsert", json={}).status_code == 401
     assert client.post("/admin/policy/quotas/revoke", json={}).status_code == 401
     assert client.post("/admin/review/run", json={}).status_code == 401
+
+
+def test_admin_routes_can_require_keycloak_admin_role(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "model.admin")
+
+    def fake_keycloak(self, token):
+        if token == "kc-admin":
+            return TokenPrincipal("human:admin", "human", ("model.admin",), "tenant:kogwistar", ("model.invoke",), "jti-admin", None)
+        if token == "kc-user":
+            return TokenPrincipal("human:user", "human", ("model.invoke",), "tenant:kogwistar", ("model.invoke",), "jti-user", None)
+        return None
+
+    monkeypatch.setattr("modelkeyguard.token_auth.TokenVerifier._verify_keycloak_token", fake_keycloak)
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert client.get("/admin/usage", headers=ADMIN_HEADERS).status_code == 401
+    assert client.get("/admin/usage", headers={"authorization": "Bearer kc-user"}).status_code == 403
+    assert client.get("/admin/usage", headers={"authorization": "Bearer kc-admin"}).status_code == 200
+
+
+def test_admin_routes_can_allow_secret_or_keycloak(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "secret_or_keycloak")
+
+    def fake_keycloak(self, token):
+        if token == "kc-admin":
+            return TokenPrincipal("human:admin", "human", ("model.admin",), "tenant:kogwistar", ("model.invoke",), "jti-admin", None)
+        return None
+
+    monkeypatch.setattr("modelkeyguard.token_auth.TokenVerifier._verify_keycloak_token", fake_keycloak)
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert client.get("/admin/usage", headers=ADMIN_HEADERS).status_code == 200
+    assert client.get("/admin/usage", headers={"authorization": "Bearer kc-admin"}).status_code == 200
+
+
+def test_model_list_can_require_authorization(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    assert client.get("/v1/models").status_code == 401
+    assert client.get("/v1/models", headers={"authorization": "Bearer kgw_demo_doc_ingestor"}).status_code == 200
 
 
 def test_admin_policy_routes_expose_swagger_request_bodies(tmp_path, monkeypatch):

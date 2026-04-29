@@ -456,9 +456,51 @@ the next step after the local Kogwistar Postgres developer setup above.
 ```text
 postgres  pgvector-enabled Postgres image with persistent data directory
 keycloak  imports keycloak/modelguard-realm.json and uses the same Postgres service
+gateway   builds the token-safe app image locally and connects to those services
 ```
 
-This is not a hardened production deployment, but it has the right local shape: persistent Postgres volume, Keycloak, and the gateway configured to use Postgres by DSN.
+The checked-in compose file is an all-in-one local deployment shape. It is good
+for one machine where Postgres, Keycloak, and the gateway share the compose
+network:
+
+```text
+same Docker host
+  gateway -> postgres:5432
+  gateway -> keycloak:8080
+  keycloak -> postgres:5432
+```
+
+It is **not** currently a CI runner recipe that builds and pushes the gateway
+image to another registry or host, and it is **not** a complete split-machine
+deployment file. For a split topology, use the same built image, but replace the
+service-local hostnames with reachable remote endpoints:
+
+```text
+machine A: token-safe gateway container
+machine B: pgvector Postgres, or A if colocated
+machine C: Keycloak, or A/B if colocated
+
+MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:...@postgres-b.example:5432/modelguard
+KEYCLOAK_URL=https://keycloak-c.example
+```
+
+In that shape, Postgres and Keycloak need their own backups, TLS/network policy,
+secret injection, and health checks outside this repo's default compose file.
+See [`docs_production.md#distributed-deployment-shape`](docs_production.md#distributed-deployment-shape)
+for the supported topology and what still needs site-specific deployment glue.
+
+Authentication support today:
+
+- OpenAI-compatible model endpoints accept `Authorization: Bearer ...` and can
+  validate real Keycloak access tokens by introspection when
+  `MODELKEYGUARD_AUTH_MODE=keycloak` or `local_or_keycloak` is configured.
+- Local `kgw_*` demo/safe tokens remain available for developer flows unless
+  `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` is set.
+- Admin pages and admin JSON APIs use `x-modelkeyguard-admin-secret` or the
+  admin session cookie by default. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
+  to require Keycloak/OIDC bearer tokens with `model.admin`.
+- For the OIDC-only deployment path, including authenticated `/v1/models`, see
+  [`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
 
 ## Testcontainers PostgreSQL tests
 

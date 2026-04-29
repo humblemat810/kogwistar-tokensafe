@@ -35,7 +35,10 @@ class AppSettings:
     policy_path: str
     provider_openai_key: str | None
     admin_api_secret: str
+    admin_auth_mode: str
+    admin_required_role: str
     admin_session_ttl_seconds: int
+    require_model_list_auth: bool
     history_enabled: bool
     history_retention_days: int
     history_max_active_records: int
@@ -61,7 +64,10 @@ class AppSettings:
             policy_path=read_env_or_file("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json") or "config/gateway_policy.json",
             provider_openai_key=read_env_or_file("MODELKEYGUARD_PROVIDER_KEY_OPENAI") or read_env_or_file("OPENAI_API_KEY"),
             admin_api_secret=read_env_or_file("MODELKEYGUARD_ADMIN_API_SECRET", "dev-modelkeyguard-admin-secret") or "dev-modelkeyguard-admin-secret",
+            admin_auth_mode=read_env_or_file("MODELKEYGUARD_ADMIN_AUTH_MODE", "secret") or "secret",
+            admin_required_role=read_env_or_file("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "model.admin") or "model.admin",
             admin_session_ttl_seconds=int(read_env_or_file("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS", "3600") or "3600"),
+            require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=False),
             history_enabled=bool_env("MODELKEYGUARD_HISTORY_ENABLED", default=True),
             history_retention_days=int(read_env_or_file("MODELKEYGUARD_HISTORY_RETENTION_DAYS", "30") or "30"),
             history_max_active_records=int(read_env_or_file("MODELKEYGUARD_HISTORY_MAX_ACTIVE_RECORDS", "10000") or "10000"),
@@ -79,12 +85,18 @@ class AppSettings:
                 errors.append("MODELKEYGUARD_GRAPH_KEY must be at least 32 characters")
             if self.auth_mode not in {"keycloak", "local_or_keycloak"}:
                 errors.append("MODELKEYGUARD_AUTH_MODE must be keycloak or local_or_keycloak in production")
-            if self.admin_api_secret == "dev-modelkeyguard-admin-secret":
+            if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
+                errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
+            if self.admin_auth_mode in {"secret", "secret_or_keycloak"} and self.admin_api_secret == "dev-modelkeyguard-admin-secret":
                 errors.append("MODELKEYGUARD_ADMIN_API_SECRET_FILE or MODELKEYGUARD_ADMIN_API_SECRET must be configured for production")
-            if len(self.admin_api_secret) < 16:
+            if self.admin_auth_mode in {"secret", "secret_or_keycloak"} and len(self.admin_api_secret) < 16:
                 errors.append("MODELKEYGUARD_ADMIN_API_SECRET must be at least 16 characters")
+        elif self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
+            errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
         if self.admin_session_ttl_seconds <= 0:
             errors.append("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS must be > 0")
+        if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.admin_required_role:
+            errors.append("MODELKEYGUARD_ADMIN_REQUIRED_ROLE must be configured when Keycloak admin auth is enabled")
         if self.history_retention_days <= 0:
             errors.append("MODELKEYGUARD_HISTORY_RETENTION_DAYS must be > 0")
         if self.history_max_active_records <= 0:

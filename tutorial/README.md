@@ -22,6 +22,9 @@ One deterministic GUI-first Azure flow
 Final dev/prod-shaped guard setup
   -> final_dev_guard_azure_real_setup.md
 
+Keycloak/OIDC protects model and admin endpoints
+  -> keycloak_oidc_protect_everything.md
+
 Container hardening and private admin/public serving split
   -> container_hardened_nonadmin_key_safety.md
 ```
@@ -36,6 +39,7 @@ Container hardening and private admin/public serving split
 | Real Azure call once, then replay identical upstream response | Yes | `kogwistar_postgres` | `joblib` | [e2e_azure_real_key_usage_and_billing.md](e2e_azure_real_key_usage_and_billing.md) |
 | Register one principal/key in GUI, then call it | Yes or fake | `kogwistar_postgres` in real mode | Optional | [e2e_single_azure_gui_key_and_principal.md](e2e_single_azure_gui_key_and_principal.md) |
 | Check billing survives price changes | Yes | same as prior real flow | Optional | [price_change_billing_integrity.md](price_change_billing_integrity.md) |
+| Require Keycloak/OIDC for model and admin endpoints | No | `kogwistar_postgres` | No | [keycloak_oidc_protect_everything.md](keycloak_oidc_protect_everything.md) |
 | Harden container deployment | Yes | `kogwistar_postgres` | No | [container_hardened_nonadmin_key_safety.md](container_hardened_nonadmin_key_safety.md) |
 
 ## Kogwistar Real Call Modes

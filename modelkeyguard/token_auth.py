@@ -13,6 +13,7 @@ from typing import Any
 
 from .graph_state import GraphStateStore, resolve_store_backend
 from .policy_loader import load_policy_json
+from .settings import read_env_or_file
 
 
 @dataclass(frozen=True)
@@ -59,14 +60,23 @@ class TokenVerifier:
         self.keycloak_url = os.getenv("KEYCLOAK_URL", "http://localhost:8080")
         self.realm = os.getenv("KEYCLOAK_REALM", "modelguard")
         self.introspection_client_id = os.getenv("KEYCLOAK_INTROSPECTION_CLIENT_ID", "modelguard-gateway")
-        self.introspection_client_secret = os.getenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "gateway-secret")
+        self.introspection_client_secret = read_env_or_file("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "gateway-secret") or "gateway-secret"
         self.require_keycloak = os.getenv("MODELKEYGUARD_REQUIRE_KEYCLOAK", "0") == "1"
 
     def verify_authorization_header(self, header: str | None) -> TokenPrincipal:
+        return self.verify_token(self._bearer_token_from_header(header))
+
+    def verify_keycloak_authorization_header(self, header: str | None) -> TokenPrincipal:
+        token = self._bearer_token_from_header(header)
+        principal = self._verify_keycloak_token(token)
+        if principal:
+            return principal
+        raise TokenAuthError("invalid_or_inactive_keycloak_token")
+
+    def _bearer_token_from_header(self, header: str | None) -> str:
         if not header or not header.lower().startswith("bearer "):
             raise TokenAuthError("missing_bearer_token")
-        token = header.split(" ", 1)[1].strip()
-        return self.verify_token(token)
+        return header.split(" ", 1)[1].strip()
 
     def verify_token(self, token: str) -> TokenPrincipal:
         local = self._verify_local_token(token)

@@ -77,6 +77,13 @@
       "groups": [],
       "namespace": "tenant:other",
       "scopes": ["model.invoke"]
+    },
+    "modelguard-admin": {
+      "principal_id": "human:platform-admin",
+      "kind": "human",
+      "groups": ["platform-admin"],
+      "namespace": "tenant:kogwistar",
+      "scopes": ["model.invoke", "model.admin"]
     }
   },
   "model_keys": [

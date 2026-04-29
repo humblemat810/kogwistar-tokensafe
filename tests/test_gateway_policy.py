@@ -109,6 +109,18 @@ def test_blank_policy_file_bootstraps_token_verifier(tmp_path, monkeypatch):
         verifier.verify_token("missing-token")
 
 
+def test_keycloak_introspection_secret_supports_file_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    secret_file = tmp_path / "kc_secret"
+    secret_file.write_text("file-secret\n", encoding="utf-8")
+    monkeypatch.delenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", raising=False)
+    monkeypatch.setenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE", str(secret_file))
+
+    verifier = TokenVerifier("config/gateway_policy.json")
+
+    assert verifier.introspection_client_secret == "file-secret"
+
+
 def test_quota_check_uses_quota_policy_projection_fast_path(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     guard, policy = build_guard("config/gateway_policy.json")
