@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Create secret files needed by the compose stack and gateway.
 # Default mode is local/dev convenience. Use --production to refuse unsafe
-# placeholders and require real provider/admin material.
+# placeholders while generating only runtime/admin/IdP material by default.
 MODE="local"
 if [[ "${1:-}" == "--production" || "${1:-}" == "--prod" ]]; then
   MODE="production"
@@ -18,10 +18,10 @@ Local mode:
 
 Production mode:
   Generates missing graph/admin/Keycloak secret files with strong random values.
-  Refuses to create a placeholder provider key. Provide one of:
-    MODELKEYGUARD_PROVIDER_KEY_OPENAI
-    OPENAI_API_KEY
-    existing secrets/openai_provider_key
+  Does not create placeholder provider keys. Provider keys should normally be
+  registered later through /admin/keys. If MODELKEYGUARD_PROVIDER_KEY_OPENAI or
+  OPENAI_API_KEY is set, writes secrets/openai_provider_key as an optional
+  runtime fallback.
 
 Existing secret files are never overwritten.
 TXT
@@ -56,14 +56,9 @@ if [[ "${MODE}" == "production" ]]; then
 
   if [[ ! -f secrets/openai_provider_key ]]; then
     provider_key="${MODELKEYGUARD_PROVIDER_KEY_OPENAI:-${OPENAI_API_KEY:-}}"
-    if [[ -z "${provider_key}" ]]; then
-      cat >&2 <<'TXT'
-Refusing to create secrets/openai_provider_key with a placeholder in production mode.
-Set MODELKEYGUARD_PROVIDER_KEY_OPENAI or OPENAI_API_KEY, or create secrets/openai_provider_key yourself.
-TXT
-      exit 1
+    if [[ -n "${provider_key}" ]]; then
+      printf '%s\n' "${provider_key}" > secrets/openai_provider_key
     fi
-    printf '%s\n' "${provider_key}" > secrets/openai_provider_key
   fi
 else
   write_secret_if_missing secrets/modelkeyguard_admin_api_secret "${MODELKEYGUARD_ADMIN_API_SECRET:-$(random_secret)}"
@@ -81,5 +76,8 @@ Production note:
   The bundled local Keycloak realm uses the demo introspection secret
   "gateway-secret". If you generated a different keycloak_client_secret, update
   the real Keycloak client secret to match before using OIDC introspection.
+  Provider keys are normally registered after deploy through /admin/keys; this
+  script only writes secrets/openai_provider_key when you explicitly provide
+  MODELKEYGUARD_PROVIDER_KEY_OPENAI or OPENAI_API_KEY.
 TXT
 fi

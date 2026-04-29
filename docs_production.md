@@ -17,10 +17,14 @@ This is the single production deployment document. Follow it in order for
 config, deploy, register application, register key, and first use.
 
 1. Bootstrap secrets.
-   - Local rehearsal: `OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production`
+   - Local rehearsal: `./scripts/bootstrap_secrets.sh --production`
    - Real production: create the same secret files from your secret manager or CI secrets, then mount them with `_FILE` env vars.
+   - The bootstrap step creates `secrets/modelkeyguard_admin_api_secret` for the gateway admin API when running locally or in production rehearsal mode. Docker Compose mounts that file as `MODELKEYGUARD_ADMIN_API_SECRET_FILE`.
+   - Provider keys are registered later through `/admin/keys`; bootstrap does not need your OpenAI, Azure OpenAI, Gemini, or Ollama secret.
+   - If you want Keycloak-only admin access, keep the file for break-glass migration use or omit it in your deployment and rely on the configured Keycloak admin role instead.
 2. Deploy the stack.
-   - One host: `docker compose up --build`
+   - One host: `./scripts/production_compose.sh up`
+   - Clean one-host rehearsal after stale local data: `./scripts/production_compose.sh fresh-up`
    - Split host: build and push the gateway image, then point `MODELKEYGUARD_POSTGRES_DSN` and `KEYCLOAK_URL` at the remote services.
 3. Validate the gateway.
    - OIDC-only smoke: `./scripts/oidc_protect_everything_smoke.sh`
@@ -31,6 +35,23 @@ config, deploy, register application, register key, and first use.
    - Send a Keycloak bearer token or a safe token as `OPENAI_API_KEY`.
 
 The rest of this document explains each step.
+
+### Provider Cases
+
+The gateway can forward to these provider families. Use the same deployment
+workflow, then choose the provider when registering keys in `/admin/keys`.
+
+| Provider | Register key with | Put the secret value here | Upstream URL env | Notes |
+| --- | --- | --- | --- | --- |
+| OpenAI | `provider=openai` | `/admin/keys` `provider_secret` field | `OPENAI_UPSTREAM_URL` | Default `/v1/chat/completions` or `/v1/responses` flow. |
+| Azure OpenAI | `provider=azure_openai` | `/admin/keys` `provider_secret` field | `AZURE_OPENAI_UPSTREAM_URL` | Uses Azure deployment paths such as `/openai/deployments/<deployment>/chat/completions`. |
+| Ollama | `provider=ollama` | `/admin/keys` `provider_secret` field, if your Ollama endpoint is fronted by auth; otherwise a local placeholder secret is fine | `OLLAMA_UPSTREAM_URL` | Uses the local Ollama chat API shape. |
+| Gemini | `provider=gemini` | `/admin/keys` `provider_secret` field | `GEMINI_UPSTREAM_URL` | Uses Gemini `generateContent` / `streamGenerateContent`. |
+
+For local rehearsal, the simplest provider case is still OpenAI with a demo
+placeholder or a safe token. For production, create each provider key through
+`/admin/keys` with the correct `provider` value and provider secret, then keep
+the raw secret only in the backend.
 
 ## Local one-minute E2E
 
@@ -66,28 +87,51 @@ The page can create, rotate, and revoke provider keys. Raw keys are accepted onl
 
 ## Docker Compose
 
-For local/dev compose only:
+For local/dev compose only, raw Compose is allowed but it is intentionally not
+the production runbook:
 
 ```bash
 ./scripts/bootstrap_secrets.sh
 docker compose up --build
 ```
 
-For a hardened production-style secret bootstrap, provide real provider material
-and use production mode:
+If raw Compose reuses an old `data/postgres` directory with a different
+`secrets/modelkeyguard_graph_key`, the gateway will refuse to start because the
+existing graph payloads cannot be decrypted. Restore the original graph key, or
+for local rehearsal only run:
 
 ```bash
-OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production
-docker compose up --build
+./scripts/production_compose.sh fresh-up
 ```
 
-`bootstrap_secrets.sh --production` refuses to create
-`secrets/openai_provider_key` from a placeholder. It generates missing graph,
-admin, and Keycloak secret files with random values and never overwrites
-existing secret files. The bundled local Keycloak realm still uses the demo
-introspection secret `gateway-secret`; if production mode generated a different
-`secrets/keycloak_client_secret`, update the real Keycloak client secret to
-match before relying on OIDC introspection.
+For a hardened production-style single-host Compose run, use:
+
+```bash
+./scripts/production_compose.sh up
+```
+
+`production_compose.sh` runs `bootstrap_secrets.sh --production`, verifies the
+Docker build context excludes runtime state such as `data/`, `out/`, `secrets/`,
+and `kogwistar_reference_only/`, then runs Compose with
+`docker-compose.container-secure.yml`. This runner uses the bundled local
+Keycloak realm, so `secrets/keycloak_client_secret` must match that realm's
+`modelguard-gateway` client secret: `gateway-secret`.
+
+Use `fresh-up` only when you want a clean local rehearsal database. It stops the
+local Compose stack and starts with a new data directory under
+`out/production_compose_fresh/`, so it does not depend on deleting
+container-owned files from an old `data/postgres` bind mount. Do not use it
+against production data you need to keep.
+
+`bootstrap_secrets.sh --production` generates missing graph, admin, and Keycloak
+secret files with random values and never overwrites existing secret files. It
+does not create placeholder provider keys. Register OpenAI, Azure OpenAI,
+Gemini, or Ollama credentials after deployment through `/admin/keys`.
+
+For real split-host production, do not rely on the bundled local Keycloak realm.
+Create the Keycloak/OIDC client in your IdP, store that real client secret in
+your secret manager, and mount it with
+`KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE`.
 
 Linux volume mapping:
 
@@ -96,6 +140,24 @@ Linux volume mapping:
 ./out           -> /app/out
 ./secrets/*     -> /run/secrets/*
 ```
+
+Local single-host port targets:
+
+| Component | Default bind | Override |
+| --- | --- | --- |
+| Gateway | `127.0.0.1:8789` | `MODELKEYGUARD_GATEWAY_BIND` |
+| Postgres | `127.0.0.1:5432` | `MODELKEYGUARD_POSTGRES_BIND` |
+| Keycloak | `127.0.0.1:8080` | `MODELKEYGUARD_KEYCLOAK_BIND` |
+
+Example:
+
+```bash
+MODELKEYGUARD_GATEWAY_BIND='0.0.0.0:8789' ./scripts/production_compose.sh up
+```
+
+Expose `0.0.0.0` only behind a firewall, reverse proxy, or load balancer with
+TLS. The default binds to localhost because that is safer for a single-machine
+rehearsal.
 
 Use `_FILE` env vars in production, for example:
 
@@ -138,6 +200,69 @@ export KEYCLOAK_URL='https://keycloak-c.example'
 export KEYCLOAK_REALM='modelguard'
 export MODELKEYGUARD_GRAPH_KEY_FILE='/run/secrets/modelkeyguard_graph_key'
 export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
+```
+
+### Deployment Target Configuration
+
+Compose does not deploy one file across multiple machines by itself. The repo
+supports split targets by configuration: run the gateway container on machine A,
+point it at Postgres on machine B, and point it at Keycloak/OIDC on machine C.
+Your orchestrator, CI runner, systemd unit, Nomad job, Kubernetes manifest, or
+site-specific Compose override is responsible for placing each container on the
+right machine.
+
+The copy-and-edit target templates live in [`deploy/`](deploy/):
+
+| Target | Template |
+| --- | --- |
+| Gateway on machine A | [`deploy/gateway.env.example`](deploy/gateway.env.example) |
+| Postgres on machine B | [`deploy/postgres.env.example`](deploy/postgres.env.example) |
+| Keycloak/OIDC on machine C | [`deploy/keycloak.env.example`](deploy/keycloak.env.example) |
+| Gateway-only Compose example | [`deploy/docker-compose.gateway-only.yml`](deploy/docker-compose.gateway-only.yml) |
+
+| Target | What runs there | Required configuration |
+| --- | --- | --- |
+| Machine A | `token-safe` gateway image | `MODELKEYGUARD_STORE=kogwistar_postgres`, `MODELKEYGUARD_POSTGRES_DSN`, `KEYCLOAK_URL`, `KEYCLOAK_REALM`, graph/admin/IdP secret `_FILE` env vars |
+| Machine B | pgvector PostgreSQL | network access from A, database/user/password, backups, TLS/firewall rules, `pgvector` available |
+| Machine C | Keycloak or another OIDC IdP | realm/client setup, introspection client, `model.admin` role/scope mapping, TLS/firewall rules |
+| Registry/runner | image build and delivery | `docker build`, `docker push`, deployment credentials |
+
+Gateway-only container environment for machine A:
+
+```bash
+export MODELKEYGUARD_ENV='production'
+export MODELKEYGUARD_STORE='kogwistar_postgres'
+export MODELKEYGUARD_POSTGRES_DSN='postgresql://modelguard:<password>@postgres-b.example:5432/modelguard'
+export MODELKEYGUARD_GRAPH_KEY_FILE='/run/secrets/modelkeyguard_graph_key'
+export MODELKEYGUARD_KOGWISTAR_ENFORCE_INSTALLED_ONLY=1
+export MODELKEYGUARD_USE_INSTALLED_KOGWISTAR=1
+
+export KEYCLOAK_URL='https://keycloak-c.example'
+export KEYCLOAK_REALM='modelguard'
+export KEYCLOAK_INTROSPECTION_CLIENT_ID='modelguard-gateway'
+export KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE='/run/secrets/keycloak_client_secret'
+
+export MODELKEYGUARD_AUTH_MODE='keycloak'
+export MODELKEYGUARD_REQUIRE_KEYCLOAK=1
+export MODELKEYGUARD_ADMIN_AUTH_MODE='keycloak'
+export MODELKEYGUARD_ADMIN_REQUIRED_ROLE='model.admin'
+export MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH=1
+export MODELKEYGUARD_ADMIN_API_SECRET_FILE='/run/secrets/modelkeyguard_admin_api_secret'
+
+export MODELKEYGUARD_DRY_RUN=0
+export MODELKEYGUARD_HOST='0.0.0.0'
+export MODELKEYGUARD_PORT=8789
+```
+
+Provider-specific upstream defaults are optional. You can set them on the
+gateway container, or provide `upstream_url` per provider key when registering
+the key:
+
+```bash
+export OPENAI_UPSTREAM_URL='https://api.openai.com/v1/chat/completions'
+export AZURE_OPENAI_UPSTREAM_URL='https://<resource>.openai.azure.com/openai/deployments/<deployment>/chat/completions?api-version=<version>'
+export GEMINI_UPSTREAM_URL='https://generativelanguage.googleapis.com/v1beta/models/<model>:generateContent'
+export OLLAMA_UPSTREAM_URL='http://ollama-b.example:11434/api/chat'
 ```
 
 What the repo gives you today:
@@ -205,6 +330,16 @@ For a CI/deployment runner, use the variable contract printed by:
 
 ## Register And Use
 
+You can add provider keys three ways and they all land on the same backend
+routes:
+
+1. CLI/API with `curl` against `/admin/keys`
+2. GUI at `http://127.0.0.1:8789/admin/keys`
+3. Direct JSON or form POST to the same `/admin/keys` route
+
+Use whichever is easiest for the current environment. The backend behavior is
+the same.
+
 After the gateway is up, register the application, principal, quota, and key in
 that order. The examples below use a Keycloak admin bearer token. If you are in
 a migration window, the same endpoints also accept the admin secret header.
@@ -255,6 +390,30 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F provider_secret='sk-...real-provider-key...' \
   | python -m json.tool
 ```
+
+GUI path:
+
+1. Open `http://127.0.0.1:8789/admin/keys`
+2. Enter the same `key_id`, `provider`, `models`, `display_name`, and
+   `provider_secret` values in the create form
+3. Submit the form and confirm the row appears in the keys table
+
+The GUI writes to the same `/admin/keys` backend route as the curl command
+above. It is convenient for one-off admin work; the curl path is better for
+repeatable deployment runbooks.
+
+Admin access itself has two setup paths:
+
+1. Admin secret header for local or migration use:
+   - set `MODELKEYGUARD_ADMIN_API_SECRET_FILE=/run/secrets/modelkeyguard_admin_api_secret`
+   - send `x-modelkeyguard-admin-secret: <secret>`
+2. Keycloak admin for production:
+   - use a Keycloak bearer token with the configured `model.admin` role
+   - set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
+
+The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,
+`/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
+cases once the admin identity is configured.
 
 Issue a safe token for the principal:
 

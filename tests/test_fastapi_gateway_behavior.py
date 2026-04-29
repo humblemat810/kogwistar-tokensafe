@@ -88,6 +88,21 @@ def test_fastapi_gateway_core_allows_local_token(tmp_path, monkeypatch):
     assert data["choices"][0]["message"]["content"].startswith("ModelKeyGuard allowed")
 
 
+def test_gateway_startup_explains_graph_key_mismatch(monkeypatch):
+    def fake_from_policy(policy):
+        raise ValueError("sealed graph payload authentication failed")
+
+    monkeypatch.setattr(gateway.GraphStateStore, "from_policy", fake_from_policy)
+
+    with pytest.raises(RuntimeError) as exc_info:
+        build_guard("config/gateway_policy.json")
+
+    msg = str(exc_info.value)
+    assert "MODELKEYGUARD_GRAPH_KEY" in msg
+    assert "restore the original graph key" in msg
+    assert "reset the local state" in msg
+
+
 def test_fastapi_gateway_core_denies_invalid_token(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     guard, policy = build_guard("config/gateway_policy.json")

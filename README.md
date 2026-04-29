@@ -628,12 +628,16 @@ Terminal 1:
 MODELKEYGUARD_DRY_RUN=1 ./scripts/start_gateway.sh
 ```
 
-`bootstrap_secrets.sh` defaults to local/dev convenience. For hardened
-production-style secret files, pass a real provider key and use:
+`bootstrap_secrets.sh` defaults to local/dev convenience. For a hardened
+single-host production-style Compose run, use the production runner:
 
 ```bash
-OPENAI_API_KEY='sk-...' ./scripts/bootstrap_secrets.sh --production
+./scripts/production_compose.sh up
 ```
+
+Provider keys are registered after deploy through `/admin/keys`; the production
+bootstrap step does not need your OpenAI, Azure OpenAI, Gemini, or Ollama
+secret.
 
 Terminal 2:
 

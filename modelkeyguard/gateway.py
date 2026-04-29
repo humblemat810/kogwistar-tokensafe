@@ -35,7 +35,18 @@ def extract_system_prompt(messages: list[dict[str, Any]]) -> str:
 
 def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard, dict[str, Any]]:
     policy = load_policy_json(policy_path)
-    graph_state = GraphStateStore.from_policy(policy)
+    try:
+        graph_state = GraphStateStore.from_policy(policy)
+    except ValueError as exc:
+        if "sealed graph payload authentication failed" not in str(exc):
+            raise
+        raise RuntimeError(
+            "Graph state could not be decrypted with the configured MODELKEYGUARD_GRAPH_KEY. "
+            "This usually means the Postgres/jsonl state was sealed with a different graph key. "
+            "For production, restore the original graph key from your secret manager. "
+            "For local rehearsal only, reset the local state with ./scripts/reset_local_e2e_state.sh "
+            "or run ./scripts/production_compose.sh fresh-up."
+        ) from exc
     guard = ModelKeyGuard.create()
     if resolve_store_backend() == "kogwistar_postgres" and guard.adapter_info.backend != "kogwistar-package":
         raise RuntimeError(

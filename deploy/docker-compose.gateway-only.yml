@@ -1,0 +1,23 @@
+services:
+  gateway:
+    image: ${MODELKEYGUARD_IMAGE:-token-safe-gateway:latest}
+    env_file:
+      - ./gateway.env.example
+    environment:
+      MODELKEYGUARD_GRAPH_KEY_FILE: /run/secrets/modelkeyguard_graph_key
+      MODELKEYGUARD_ADMIN_API_SECRET_FILE: /run/secrets/modelkeyguard_admin_api_secret
+      KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE: /run/secrets/keycloak_client_secret
+    secrets:
+      - modelkeyguard_graph_key
+      - modelkeyguard_admin_api_secret
+      - keycloak_client_secret
+    ports:
+      - "${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:8789}:8789"
+
+secrets:
+  modelkeyguard_graph_key:
+    file: ${MODELKEYGUARD_GRAPH_KEY_SOURCE:-../secrets/modelkeyguard_graph_key}
+  modelkeyguard_admin_api_secret:
+    file: ${MODELKEYGUARD_ADMIN_API_SECRET_SOURCE:-../secrets/modelkeyguard_admin_api_secret}
+  keycloak_client_secret:
+    file: ${KEYCLOAK_INTROSPECTION_CLIENT_SECRET_SOURCE:-../secrets/keycloak_client_secret}

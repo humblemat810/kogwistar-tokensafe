@@ -1,18 +1,12 @@
 services:
-  postgres:
-    ports:
-      - "127.0.0.1:5432:5432"
-
-  keycloak:
-    ports:
-      - "127.0.0.1:8080:8080"
-
   gateway:
-    ports:
-      - "127.0.0.1:8789:8789"
     environment:
       MODELKEYGUARD_ENV: production
       MODELKEYGUARD_AUTH_MODE: keycloak
+      MODELKEYGUARD_REQUIRE_KEYCLOAK: "1"
+      MODELKEYGUARD_ADMIN_AUTH_MODE: keycloak
+      MODELKEYGUARD_ADMIN_REQUIRED_ROLE: model.admin
+      MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH: "1"
       MODELKEYGUARD_DRY_RUN: "0"
       MODELKEYGUARD_STORE: kogwistar_postgres
       MODELKEYGUARD_POSTGRES_DSN: postgresql://modelguard:modelguard@postgres:5432/modelguard

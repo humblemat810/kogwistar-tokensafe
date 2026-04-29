@@ -39,6 +39,7 @@ secrets/
 Thumbs.db
 
 # Project runtime artifacts
+data/
 out/
 token-safe-chatgpt.zip
 *-chatgpt.zip

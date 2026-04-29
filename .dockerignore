@@ -1,0 +1,25 @@
+# Runtime state and generated artifacts must never enter the Docker build
+# context. Postgres data may be owned by the container user and unreadable from
+# the host, and secrets/out files should not be baked into images.
+.git
+.pytest_cache
+.venv
+.venv-*
+__pycache__
+*.pyc
+
+data
+out
+secrets
+
+# Reference-only clone: runtime Kogwistar must come from the installed package,
+# not this repository-local tree.
+kogwistar_reference_only
+
+# Large/local artifacts.
+*.zip
+*.png
+
+# Local/editor files.
+.vscode
+.env

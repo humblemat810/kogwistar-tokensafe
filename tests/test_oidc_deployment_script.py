@@ -75,15 +75,19 @@ def test_bootstrap_secrets_local_creates_admin_secret_and_placeholders(tmp_path)
     assert "admin secret file" in result.stdout
 
 
-def test_bootstrap_secrets_production_refuses_placeholder_provider_key(tmp_path):
+def test_bootstrap_secrets_production_does_not_require_provider_key(tmp_path):
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "bootstrap_secrets.sh"
 
     result = subprocess.run(["bash", str(script), "--production"], cwd=tmp_path, capture_output=True, text=True, check=False)
 
-    assert result.returncode == 1
-    assert "Refusing to create secrets/openai_provider_key with a placeholder" in result.stderr
+    assert result.returncode == 0, result.stderr
+    secrets_dir = tmp_path / "secrets"
+    assert (secrets_dir / "modelkeyguard_graph_key").exists()
+    assert (secrets_dir / "modelkeyguard_admin_api_secret").exists()
+    assert (secrets_dir / "keycloak_client_secret").exists()
     assert not (tmp_path / "secrets" / "openai_provider_key").exists()
+    assert "Provider keys are normally registered after deploy through /admin/keys" in result.stdout
 
 
 def test_bootstrap_secrets_production_accepts_real_provider_key(tmp_path):
@@ -100,3 +104,78 @@ def test_bootstrap_secrets_production_accepts_real_provider_key(tmp_path):
     assert (secrets_dir / "modelkeyguard_admin_api_secret").read_text(encoding="utf-8").strip() != "dev-modelkeyguard-admin-secret"
     assert (secrets_dir / "keycloak_client_secret").read_text(encoding="utf-8").strip() != "gateway-secret"
     assert "Production note:" in result.stdout
+
+
+def test_production_compose_script_has_valid_bash_syntax():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "production_compose.sh"
+
+    result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+
+
+def test_production_compose_script_pins_build_context_and_secrets_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "production_compose.sh"
+    text = script.read_text(encoding="utf-8")
+
+    assert "./scripts/bootstrap_secrets.sh --production" in text
+    assert "fresh-up" in text
+    assert "MODELKEYGUARD_FRESH_ROOT" in text
+    assert "out/production_compose_fresh" in text
+    assert "./scripts/reset_local_e2e_state.sh" in text
+    assert "gateway-secret" in text
+    assert 'require_dockerignore_entry "data"' in text
+    assert 'require_dockerignore_entry "out"' in text
+    assert 'require_dockerignore_entry "secrets"' in text
+    assert 'require_dockerignore_entry "kogwistar_reference_only"' in text
+    assert "secrets/modelkeyguard_admin_api_secret" in text
+    assert "Provider keys" in text
+
+
+def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
+    repo_root = Path(__file__).resolve().parents[1]
+    secure = (repo_root / "docker-compose.container-secure.yml").read_text(encoding="utf-8")
+    compose = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
+
+    assert "MODELKEYGUARD_REQUIRE_KEYCLOAK" in secure
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE: keycloak" in secure
+    assert "MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH" in secure
+    assert "MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE" not in compose
+    assert "openai_provider_key" not in compose
+    assert "${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:8789}:8789" in compose
+    assert "${MODELKEYGUARD_POSTGRES_BIND:-127.0.0.1:5432}:5432" in compose
+    assert "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080" in compose
+
+
+def test_root_dockerignore_excludes_runtime_state_and_reference_clone():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / ".dockerignore").read_text(encoding="utf-8")
+
+    assert "\ndata\n" in f"\n{text}"
+    assert "\nout\n" in f"\n{text}"
+    assert "\nsecrets\n" in f"\n{text}"
+    assert "\nkogwistar_reference_only\n" in f"\n{text}"
+
+
+def test_split_target_deploy_templates_document_required_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    gateway_env = (repo_root / "deploy" / "gateway.env.example").read_text(encoding="utf-8")
+    postgres_env = (repo_root / "deploy" / "postgres.env.example").read_text(encoding="utf-8")
+    keycloak_env = (repo_root / "deploy" / "keycloak.env.example").read_text(encoding="utf-8")
+    gateway_compose = (repo_root / "deploy" / "docker-compose.gateway-only.yml").read_text(encoding="utf-8")
+    deploy_readme = (repo_root / "deploy" / "README.md").read_text(encoding="utf-8")
+
+    assert "MODELKEYGUARD_POSTGRES_DSN" in gateway_env
+    assert "MODELKEYGUARD_GRAPH_KEY_FILE" in gateway_env
+    assert "KEYCLOAK_URL" in gateway_env
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak" in gateway_env
+    assert "MODELKEYGUARD_REQUIRE_KEYCLOAK=1" in gateway_env
+    assert "MODELKEYGUARD_POSTGRES_DSN" in postgres_env
+    assert "pgvector" in postgres_env
+    assert "KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE" in keycloak_env
+    assert "MODELKEYGUARD_ADMIN_REQUIRED_ROLE" in keycloak_env
+    assert "docker-compose.gateway-only.yml" in deploy_readme
+    assert "gateway.env.example" in gateway_compose
+    assert "MODELKEYGUARD_GATEWAY_BIND" in gateway_compose
