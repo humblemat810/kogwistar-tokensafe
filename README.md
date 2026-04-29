@@ -499,8 +499,14 @@ Authentication support today:
 - Local `kgw_*` demo/safe tokens remain available for developer flows unless
   `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` is set.
 - Admin pages and admin JSON APIs use `x-modelkeyguard-admin-secret` or the
-  admin session cookie by default. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
-  to require Keycloak/OIDC bearer tokens with `model.admin`.
+  admin session cookie by default. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
+  to keep the browser admin-session path and Keycloak/OIDC bearer tokens with
+  `model.admin` working together. Use `keycloak` only when you want to remove
+  the browser secret-session path entirely.
+- Browser OIDC login is available at `/admin/oidc/login` and lands on the
+  standard Keycloak authorization-code flow before returning to the admin UI.
+  The browser login client defaults to `MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID`
+  (`modelguard-admin-web` in the bundled realm).
 - For the OIDC-only deployment path, including authenticated `/v1/models`, see
   [`tutorial/keycloak_oidc_protect_everything.md`](tutorial/keycloak_oidc_protect_everything.md).
   The local executable smoke is:

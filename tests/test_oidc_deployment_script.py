@@ -160,7 +160,7 @@ def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
     compose = (repo_root / "docker-compose.yml").read_text(encoding="utf-8")
 
     assert "MODELKEYGUARD_REQUIRE_KEYCLOAK" in secure
-    assert "MODELKEYGUARD_ADMIN_AUTH_MODE: keycloak" in secure
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE: secret_or_keycloak" in secure
     assert "MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH" in secure
     assert "MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE" not in compose
     assert "openai_provider_key" not in compose
@@ -201,6 +201,7 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_POSTGRES_DSN" in postgres_env
     assert "pgvector" in postgres_env
     assert "KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE" in keycloak_env
+    assert "MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID" in keycloak_env
     assert "MODELKEYGUARD_ADMIN_REQUIRED_ROLE" in keycloak_env
     assert "docker-compose.gateway-only.yml" in deploy_readme
     assert "deployment-targets.env.example" in deploy_readme
@@ -223,6 +224,8 @@ def test_production_doc_pins_limited_model_key_and_user_quota_flow():
     assert "-F shared_with_principals='agent:doc-ingestor'" in text
     assert "only `agent:doc-ingestor` can use the key" in text
     assert "which end-user quota is charged" in text
+    assert "/admin/oidc/login?next=/admin/usage" in text
+    assert "modelguard-admin-web" in text
 
 
 def test_production_doc_pins_quota_patterns_and_model_specific_limits():

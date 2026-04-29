@@ -15,7 +15,7 @@ from .graph_state import GraphStateStore, resolve_store_backend
 from .key_manager import KeyLifecycleError, KeyManager
 from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIAdapter, ProviderAdapter, default_upstream_url
 from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page, render_admin_policy_page
-from .services.admin_auth import admin_html_login_response, is_admin_authenticated
+from .services.admin_auth import ADMIN_COOKIE_NAME, ADMIN_HEADER_NAME, admin_html_login_response, decode_admin_session, verify_admin_session
 from .services.history_ops import capture_history_record
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
@@ -762,6 +762,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         create_admin_keys_router,
         create_admin_policy_router,
         create_admin_security_router,
+        create_admin_oidc_router,
         create_admin_session_router,
         create_admin_usage_router,
         create_provider_azure_router,
@@ -795,7 +796,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         path = request.url.path
         if not path.startswith("/admin/"):
             return await call_next(request)
-        if path == "/admin/session":
+        if path in {"/admin/session", "/admin/oidc/login", "/admin/oidc/callback"}:
             return await call_next(request)
 
         # Host security watcher keeps using its shared secret while all admin
@@ -817,8 +818,18 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                     return await call_next(request)
                 return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required"}})
 
-        if settings.admin_auth_mode in {"secret", "secret_or_keycloak"} and is_admin_authenticated(request, settings.admin_api_secret):
-            return await call_next(request)
+        admin_cookie = request.cookies.get(ADMIN_COOKIE_NAME)
+        admin_session = decode_admin_session(settings.admin_api_secret, admin_cookie)
+        if settings.admin_auth_mode in {"secret", "secret_or_keycloak"}:
+            header_val = request.headers.get(ADMIN_HEADER_NAME, "")
+            if header_val and header_val == settings.admin_api_secret:
+                return await call_next(request)
+            if admin_session and str(admin_session.get("source") or "secret") in {"secret", "oidc"}:
+                return await call_next(request)
+
+        if settings.admin_auth_mode == "keycloak":
+            if admin_session and str(admin_session.get("source") or "secret") == "oidc":
+                return await call_next(request)
 
         wants_html = (
             request.method.upper() == "GET"
@@ -1012,6 +1023,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.include_router(create_admin_usage_router())
     app.include_router(create_admin_history_router())
     app.include_router(create_admin_security_router())
+    app.include_router(create_admin_oidc_router())
 
     return app
 

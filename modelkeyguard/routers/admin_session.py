@@ -29,7 +29,7 @@ def create_router() -> APIRouter:
             return JSONResponse(status_code=401, content={"error": {"message": "invalid_admin_secret"}})
 
         ttl = int(request.app.state.settings.admin_session_ttl_seconds)
-        token, exp = issue_admin_session(expected, ttl)
+        token, exp = issue_admin_session(expected, ttl, source="secret")
 
         if _wants_redirect(request):
             response: Response = RedirectResponse(url=next_path if next_path.startswith("/admin/") else "/admin/usage", status_code=303)
@@ -50,11 +50,13 @@ def create_router() -> APIRouter:
     def admin_logout():
         response = JSONResponse(status_code=200, content={"ok": True})
         response.delete_cookie(ADMIN_COOKIE_NAME, path="/")
+        response.delete_cookie("kgw_admin_oidc_state", path="/")
         return response
 
     @router.get("/admin/session")
     def admin_login_page(next: str = "/admin/usage"):
-        return admin_html_login_response(next)
+        oidc_login_url = f"/admin/oidc/login?next={next}"
+        return admin_html_login_response(next, oidc_login_url=oidc_login_url)
 
     return router
 

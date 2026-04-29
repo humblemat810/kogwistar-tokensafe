@@ -28,15 +28,19 @@ class AppSettings:
     env: str
     host: str
     port: int
+    gateway_public_url: str
     dry_run: bool
     graph_key: str
     auth_mode: str
+    keycloak_url: str
+    keycloak_realm: str
     audit_path: str
     policy_path: str
     provider_openai_key: str | None
     admin_api_secret: str
     admin_auth_mode: str
     admin_required_role: str
+    browser_oidc_client_id: str
     admin_session_ttl_seconds: int
     require_model_list_auth: bool
     history_enabled: bool
@@ -57,15 +61,19 @@ class AppSettings:
             env=env,
             host=read_env_or_file("MODELKEYGUARD_HOST", "127.0.0.1") or "127.0.0.1",
             port=int(read_env_or_file("MODELKEYGUARD_PORT", "8789") or "8789"),
+            gateway_public_url=read_env_or_file("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789") or "http://127.0.0.1:8789",
             dry_run=bool_env("MODELKEYGUARD_DRY_RUN", default=True),
             graph_key=graph_key,
             auth_mode=read_env_or_file("MODELKEYGUARD_AUTH_MODE", "local") or "local",
+            keycloak_url=read_env_or_file("KEYCLOAK_URL", "http://localhost:8080") or "http://localhost:8080",
+            keycloak_realm=read_env_or_file("KEYCLOAK_REALM", "modelguard") or "modelguard",
             audit_path=read_env_or_file("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl") or "out/audit.jsonl",
             policy_path=read_env_or_file("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json") or "config/gateway_policy.json",
             provider_openai_key=read_env_or_file("MODELKEYGUARD_PROVIDER_KEY_OPENAI") or read_env_or_file("OPENAI_API_KEY"),
             admin_api_secret=read_env_or_file("MODELKEYGUARD_ADMIN_API_SECRET", "dev-modelkeyguard-admin-secret") or "dev-modelkeyguard-admin-secret",
             admin_auth_mode=read_env_or_file("MODELKEYGUARD_ADMIN_AUTH_MODE", "secret") or "secret",
             admin_required_role=read_env_or_file("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "model.admin") or "model.admin",
+            browser_oidc_client_id=read_env_or_file("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web") or "modelguard-admin-web",
             admin_session_ttl_seconds=int(read_env_or_file("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS", "3600") or "3600"),
             require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=False),
             history_enabled=bool_env("MODELKEYGUARD_HISTORY_ENABLED", default=True),
@@ -95,8 +103,14 @@ class AppSettings:
             errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
         if self.admin_session_ttl_seconds <= 0:
             errors.append("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS must be > 0")
+        if not self.gateway_public_url.startswith(("http://", "https://")):
+            errors.append("MODELKEYGUARD_GATEWAY_PUBLIC_URL must start with http:// or https://")
+        if not self.keycloak_url.startswith(("http://", "https://")):
+            errors.append("KEYCLOAK_URL must start with http:// or https://")
         if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.admin_required_role:
             errors.append("MODELKEYGUARD_ADMIN_REQUIRED_ROLE must be configured when Keycloak admin auth is enabled")
+        if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.browser_oidc_client_id:
+            errors.append("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID must be configured when browser OIDC admin auth is enabled")
         if self.history_retention_days <= 0:
             errors.append("MODELKEYGUARD_HISTORY_RETENTION_DAYS must be > 0")
         if self.history_max_active_records <= 0:

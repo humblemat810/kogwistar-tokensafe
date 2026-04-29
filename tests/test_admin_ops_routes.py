@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import re
 import time
@@ -591,6 +592,73 @@ def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):
     logout = client.delete("/admin/session")
     assert logout.status_code == 200
     assert client.get("/admin/usage").status_code == 401
+
+
+def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789")
+    monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.example")
+    monkeypatch.setenv("KEYCLOAK_REALM", "modelguard")
+    monkeypatch.setenv("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web")
+
+    app = create_app("config/gateway_policy.json")
+    client = TestClient(app)
+
+    login = client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
+    assert login.status_code == 303
+    assert "code_challenge=" in login.headers["location"]
+    assert "client_id=modelguard-admin-web" in login.headers["location"]
+    assert "state=" in login.headers["location"]
+
+    state_cookie = login.cookies.get("kgw_admin_oidc_session")
+    assert state_cookie
+
+    def _fake_exchange_authorization_code(**kwargs):
+        payload = {
+            "alg": "none",
+            "typ": "JWT",
+        }
+        claims = {
+            "sub": "user:admin",
+            "preferred_username": "admin",
+            "iss": "http://keycloak.example/realms/modelguard",
+            "realm_access": {"roles": ["model.admin"]},
+        }
+        header = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
+        body = base64.urlsafe_b64encode(json.dumps(claims).encode("utf-8")).decode("ascii").rstrip("=")
+        return {"access_token": f"{header}.{body}.sig"}
+
+    monkeypatch.setattr("modelkeyguard.services.admin_oidc.exchange_authorization_code", _fake_exchange_authorization_code)
+
+    callback = client.get(
+        "/admin/oidc/callback",
+        params={"code": "auth-code-123", "state": login.headers["location"].split("state=")[1].split("&", 1)[0], "next": "/admin/usage"},
+        cookies={"kgw_admin_oidc_session": state_cookie},
+        follow_redirects=False,
+    )
+    assert callback.status_code == 303
+    assert callback.headers["location"].endswith("/admin/usage")
+    assert client.get("/admin/usage").status_code == 200
+
+
+def test_admin_login_page_shows_keycloak_entry_point(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    page = client.get("/admin/session")
+    assert page.status_code == 401
+    assert "Sign in with Keycloak" in page.text
 
 
 def test_admin_policy_quota_upsert_and_revoke_are_append_only_and_effective(tmp_path, monkeypatch):

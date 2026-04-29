@@ -358,22 +358,24 @@ Authentication boundary:
 - Set `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` when local `kgw_*` tokens must be
   rejected even if they exist in the graph.
 - Admin pages and admin JSON APIs use `x-modelkeyguard-admin-secret` or the
-  admin session cookie by default. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
-  to require a Keycloak bearer token with the configured admin role/scope.
+  admin session cookie by default. Use `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
+  for the production runner so the browser GUI and Keycloak bearer-token path
+  both work. Set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak` only when you want to
+  remove the browser secret-session path entirely.
 
 For an OIDC-only HTTP surface, use:
 
 ```bash
 export MODELKEYGUARD_AUTH_MODE='keycloak'
 export MODELKEYGUARD_REQUIRE_KEYCLOAK=1
-export MODELKEYGUARD_ADMIN_AUTH_MODE='keycloak'
+export MODELKEYGUARD_ADMIN_AUTH_MODE='secret_or_keycloak'
 export MODELKEYGUARD_ADMIN_REQUIRED_ROLE='model.admin'
 export MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH=1
 ```
 
 In that mode, model endpoints require Keycloak bearer tokens, `/v1/models`
-requires authentication, and `/admin/*` requires a Keycloak token mapped to
-`model.admin`.
+requires authentication, and `/admin/*` accepts either the browser admin
+session cookie or a Keycloak token mapped to `model.admin`.
 
 For local proof, run:
 
@@ -666,6 +668,16 @@ GUI path:
    `provider_secret` values in the create form
 3. Submit the form and confirm the row appears in the keys table
 
+Admin browser login has two working paths:
+
+1. Local or migration secret session:
+   - open `http://127.0.0.1:8789/admin/session`
+   - post the admin secret
+2. Keycloak browser login:
+   - open `http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage`
+   - sign in with the bundled `admin` user in the `modelguard-admin-web`
+     client, or your own Keycloak user that has `model.admin`
+
 The GUI writes to the same `/admin/keys` backend route as the curl command
 above. It is convenient for one-off admin work; the curl path is better for
 repeatable deployment runbooks.
@@ -676,8 +688,11 @@ Admin access itself has two setup paths:
    - set `MODELKEYGUARD_ADMIN_API_SECRET_FILE=/run/secrets/modelkeyguard_admin_api_secret`
    - send `x-modelkeyguard-admin-secret: <secret>`
 2. Keycloak admin for production:
-   - use a Keycloak bearer token with the configured `model.admin` role
-   - set `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak`
+   - use a Keycloak bearer token with the configured `model.admin` role, or
+     use the browser OIDC route at `/admin/oidc/login`
+   - the browser login client is `MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID`
+     (default: `modelguard-admin-web`)
+   - set `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
 
 The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,
 `/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
