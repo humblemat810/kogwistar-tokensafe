@@ -10,6 +10,10 @@ from ..core import ModelKey
 from ..key_manager import KeyLifecycleError
 
 
+def _parse_csv(value: object) -> list[str]:
+    return [item.strip() for item in str(value or "").split(",") if item.strip()]
+
+
 def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
     router = APIRouter(tags=["admin-keys"])
 
@@ -26,14 +30,22 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
     @router.post("/admin/keys")
     async def admin_create_key(request: Request):
         form = await request.form()
+        acl_mode = str(form.get("acl_mode", "scope") or "scope").strip()
+        namespace = str(form.get("namespace", "tenant:kogwistar") or "tenant:kogwistar").strip()
+        shared_with_principals = _parse_csv(form.get("shared_with_principals", ""))
+        shared_with_groups = _parse_csv(form.get("shared_with_groups", ""))
         try:
             view = request.app.state.key_manager.create_key(
                 key_id=str(form.get("key_id", "")),
                 provider=str(form.get("provider", "")),
-                models=[m.strip() for m in str(form.get("models", "")).split(",") if m.strip()],
+                models=_parse_csv(form.get("models", "")),
                 display_name=str(form.get("display_name", "")),
                 upstream_url=str(form.get("upstream_url", "")),
                 intended_use=str(form.get("intended_use", "")),
+                acl_mode=acl_mode,
+                namespace=namespace,
+                shared_with_principals=shared_with_principals,
+                shared_with_groups=shared_with_groups,
                 provider_secret=str(form.get("provider_secret", "")),
                 created_by="admin:web",
                 expires_at_epoch=int(form["expires_at_epoch"]) if form.get("expires_at_epoch") else None,
@@ -51,18 +63,25 @@ def create_router(render_admin_html: Callable[[list[Any]], str]) -> APIRouter:
             )
             request.app.state.guard.grant(
                 key_id=view.key_id,
-                mode="scope",
+                mode=view.acl_mode,
                 created_by="admin:web",
                 owner_id="admin:web",
-                namespace="tenant:kogwistar",
+                namespace=view.namespace,
+                shared_with_principals=view.shared_with_principals,
+                shared_with_groups=view.shared_with_groups,
             )
             if request.app.state.guard.graph_state:
                 request.app.state.guard.graph_state.put_edge(
-                    f"edge:{view.key_id}:AVAILABLE_IN:tenant:kogwistar",
+                    f"edge:{view.key_id}:AVAILABLE_IN:{view.namespace}",
                     "AVAILABLE_IN",
                     view.key_id,
-                    "tenant:kogwistar",
-                    {"acl_mode": "scope", "created_by": "admin:web"},
+                    view.namespace,
+                    {
+                        "acl_mode": view.acl_mode,
+                        "created_by": "admin:web",
+                        "shared_with_principals": list(view.shared_with_principals),
+                        "shared_with_groups": list(view.shared_with_groups),
+                    },
                 )
             return {"ok": True, "key_id": view.key_id, "secret_ref": view.active_secret_ref, "secret_value": None}
         except KeyLifecycleError as e:

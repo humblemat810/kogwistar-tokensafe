@@ -29,6 +29,16 @@
     <input name="models" placeholder="gpt-4o-mini,gpt-5.3-mini" required>
     <input name="display_name" placeholder="OpenAI production">
     <input name="upstream_url" placeholder="optional upstream base URL (e.g. https://my-azure.openai.azure.com)">
+    <select name="acl_mode">
+      <option value="shared">shared: listed principals only</option>
+      <option value="group">group: listed groups only</option>
+      <option value="scope" selected>scope: whole namespace</option>
+      <option value="private">private: owner only</option>
+      <option value="public">public: any authenticated principal</option>
+    </select>
+    <input name="namespace" value="tenant:kogwistar" placeholder="tenant:kogwistar">
+    <input name="shared_with_principals" placeholder="agent:doc-ingestor,agent:reviewer">
+    <input name="shared_with_groups" placeholder="agent-dev,finance">
     <textarea name="intended_use" placeholder="Intended use (paragraph): e.g. This key is only for internal document summarization and retrieval workflows. Do not use for coding assistants, prompt-hacking experiments, or secret extraction tasks."></textarea>
     <input type='password' name='provider_secret' placeholder='provider key' autocomplete='off' required>
     <input name="expires_at_epoch" placeholder="optional epoch expiry">
@@ -38,7 +48,7 @@
   <h2>Keys</h2>
   <table>
     <thead>
-      <tr><th>Key</th><th>Provider</th><th>Models</th><th>Display name</th><th>Upstream override</th><th>Intended use</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr>
+      <tr><th>Key</th><th>Provider</th><th>Models</th><th>Display name</th><th>Upstream override</th><th>ACL</th><th>Intended use</th><th>Status</th><th>Secret ref</th><th>Secret expiry</th><th>Action</th></tr>
     </thead>
     <tbody>
       {{rows}}

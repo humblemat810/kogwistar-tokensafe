@@ -12,6 +12,10 @@ usage() {
 Usage:
   ./scripts/production_compose.sh up
   ./scripts/production_compose.sh fresh-up
+  ./scripts/production_compose.sh stop
+  ./scripts/production_compose.sh start
+  ./scripts/production_compose.sh logs
+  ./scripts/production_compose.sh down
   ./scripts/production_compose.sh build
   ./scripts/production_compose.sh config
   ./scripts/production_compose.sh preflight
@@ -41,11 +45,16 @@ Fresh local rehearsal:
   fresh-up stops the local compose stack, then starts with a new local data
   directory so it cannot reuse stale encrypted Postgres state. Use it only for
   local rehearsal, never against production data you need to keep.
+
+Pause/resume:
+  stop pauses existing containers without removing them.
+  start resumes containers stopped by stop.
+  down removes containers/networks and is more destructive than stop.
 TXT
 }
 
 case "${1:-}" in
-  up|fresh-up|build|config|preflight)
+  up|fresh-up|stop|start|logs|down|build|config|preflight)
     command_name="$1"
     ;;
   -h|--help|"")
@@ -68,12 +77,37 @@ else
   exit 1
 fi
 
+compose_files=(-f docker-compose.yml -f docker-compose.container-secure.yml)
+
 require_dockerignore_entry() {
   local pattern="$1"
   if [[ ! -f .dockerignore ]] || ! grep -Fxq "$pattern" .dockerignore; then
     echo ".dockerignore must exclude '${pattern}' before building production images." >&2
     exit 1
   fi
+}
+
+wait_http() {
+  local url="$1"
+  local label="$2"
+  for _ in $(seq 1 60); do
+    if curl -fsS "$url" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "${label} did not become ready: ${url}" >&2
+  return 1
+}
+
+bootstrap_keycloak_admin_role() {
+  KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}" \
+  KEYCLOAK_REALM="${KEYCLOAK_REALM:-modelguard}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}" \
+  MODELKEYGUARD_OIDC_ADMIN_CLIENT_ID="${MODELKEYGUARD_OIDC_ADMIN_CLIENT_ID:-modelguard-admin}" \
+  MODELKEYGUARD_ADMIN_REQUIRED_ROLE="${MODELKEYGUARD_ADMIN_REQUIRED_ROLE:-model.admin}" \
+    ./scripts/bootstrap_keycloak_admin_role.sh
 }
 
 preflight() {
@@ -119,6 +153,9 @@ if [[ "$command_name" == "fresh-up" ]]; then
   export MODELKEYGUARD_KEYCLOAK_DATA_DIR="${fresh_root%/}/keycloak"
   mkdir -p "$MODELKEYGUARD_POSTGRES_DATA_DIR" "$MODELKEYGUARD_KEYCLOAK_DATA_DIR"
 
+  echo "stopping production compose stack, including secure override services"
+  "${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans -v >/dev/null 2>&1 || true
+
   MODELKEYGUARD_RESET_DATA_DIR="$MODELKEYGUARD_POSTGRES_DATA_DIR" \
     MODELKEYGUARD_RESET_KEYCLOAK_DATA_DIR="$MODELKEYGUARD_KEYCLOAK_DATA_DIR" \
     MODELKEYGUARD_RESET_OUT_DIR="${MODELKEYGUARD_RESET_OUT_DIR:-./out}" \
@@ -135,23 +172,75 @@ TXT
   command_name="up"
 fi
 
-if [[ "$command_name" != "preflight" ]]; then
+case "$command_name" in
+  up|build|config)
+    needs_bootstrap=1
+    ;;
+  *)
+    needs_bootstrap=0
+    ;;
+esac
+
+if [[ "$needs_bootstrap" == "1" ]]; then
   KEYCLOAK_INTROSPECTION_CLIENT_SECRET="${KEYCLOAK_INTROSPECTION_CLIENT_SECRET:-gateway-secret}" \
     ./scripts/bootstrap_secrets.sh --production
 fi
 
-preflight
+case "$command_name" in
+  up|build|config|preflight)
+    preflight
+    ;;
+esac
 
 case "$command_name" in
   preflight)
     ;;
   config)
-    "${compose_cmd[@]}" -f docker-compose.yml -f docker-compose.container-secure.yml config
+    "${compose_cmd[@]}" "${compose_files[@]}" config
     ;;
   build)
-    "${compose_cmd[@]}" -f docker-compose.yml -f docker-compose.container-secure.yml build gateway
+    "${compose_cmd[@]}" "${compose_files[@]}" build gateway
+    ;;
+  down)
+    "${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans
+    ;;
+  stop)
+    "${compose_cmd[@]}" "${compose_files[@]}" stop
+    cat <<'TXT'
+production compose stack stopped without removing containers, networks, or data.
+Resume it with:
+  ./scripts/production_compose.sh start
+TXT
+    ;;
+  start)
+    "${compose_cmd[@]}" "${compose_files[@]}" start
+    cat <<'TXT'
+production compose stack resumed from stopped containers.
+Follow logs with:
+  ./scripts/production_compose.sh logs
+TXT
+    ;;
+  logs)
+    "${compose_cmd[@]}" "${compose_files[@]}" logs -f
     ;;
   up)
-    "${compose_cmd[@]}" -f docker-compose.yml -f docker-compose.container-secure.yml up --build
+    "${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans >/dev/null 2>&1 || true
+    "${compose_cmd[@]}" "${compose_files[@]}" up -d --build
+    keycloak_bind="${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}"
+    keycloak_port="${keycloak_bind##*:}"
+    gateway_bind="${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:8789}"
+    gateway_port="${gateway_bind##*:}"
+    wait_http "http://127.0.0.1:${keycloak_port}/realms/master/.well-known/openid-configuration" "Keycloak"
+    bootstrap_keycloak_admin_role
+    wait_http "http://127.0.0.1:${gateway_port}/healthz" "Gateway"
+    cat <<'TXT'
+production compose stack started in the background.
+Follow logs with:
+  ./scripts/production_compose.sh logs
+Stop it with:
+  ./scripts/production_compose.sh stop
+Remove containers/networks with:
+  ./scripts/production_compose.sh down
+TXT
     ;;
 esac

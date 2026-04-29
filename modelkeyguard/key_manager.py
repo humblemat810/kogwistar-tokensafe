@@ -17,6 +17,10 @@ class KeyView:
     display_name: str
     upstream_url: str
     intended_use: str
+    acl_mode: str
+    namespace: str
+    shared_with_principals: tuple[str, ...]
+    shared_with_groups: tuple[str, ...]
     status: str
     active_secret_ref: str | None
     expires_at_epoch: int | None
@@ -50,6 +54,10 @@ class KeyManager:
         display_name: str,
         upstream_url: str = "",
         intended_use: str = "",
+        acl_mode: str = "scope",
+        namespace: str = "tenant:kogwistar",
+        shared_with_principals: list[str] | None = None,
+        shared_with_groups: list[str] | None = None,
         provider_secret: str,
         created_by: str,
         expires_at_epoch: int | None = None,
@@ -58,8 +66,12 @@ class KeyManager:
             raise KeyLifecycleError("key_id_must_start_with_key_colon")
         if not provider_secret:
             raise KeyLifecycleError("provider_secret_required")
+        if acl_mode not in {"private", "shared", "scope", "group", "public"}:
+            raise KeyLifecycleError("unsupported_acl_mode")
         if key_id in self.graph_state.nodes:
             raise KeyLifecycleError("model_key_already_exists")
+        shared_with_principals = shared_with_principals or []
+        shared_with_groups = shared_with_groups or []
         secret_ref = self._create_secret_payload(key_id, provider_secret, created_by, expires_at_epoch)
         self.graph_state.put_node(key_id, "model_key", {
             "provider": provider,
@@ -67,6 +79,10 @@ class KeyManager:
             "display_name": display_name or key_id,
             "upstream_url": upstream_url.strip(),
             "intended_use": intended_use.strip(),
+            "acl_mode": acl_mode,
+            "namespace": namespace.strip() or "tenant:kogwistar",
+            "shared_with_principals": shared_with_principals,
+            "shared_with_groups": shared_with_groups,
             "status": "active",
             "active_secret_ref": secret_ref,
             "created_by": created_by,
@@ -83,6 +99,10 @@ class KeyManager:
                 "created_by": created_by,
                 "intended_use": intended_use.strip(),
                 "upstream_url": upstream_url.strip(),
+                "acl_mode": acl_mode,
+                "namespace": namespace.strip() or "tenant:kogwistar",
+                "shared_with_principals": shared_with_principals,
+                "shared_with_groups": shared_with_groups,
             },
         )
         return self.get_key_view(key_id)  # type: ignore[return-value]
@@ -182,6 +202,10 @@ class KeyManager:
             display_name=str(payload.get("display_name", key_id)),
             upstream_url=str(payload.get("upstream_url", "")),
             intended_use=str(payload.get("intended_use", "")),
+            acl_mode=str(payload.get("acl_mode", "scope")),
+            namespace=str(payload.get("namespace", "tenant:kogwistar")),
+            shared_with_principals=tuple(str(x) for x in payload.get("shared_with_principals", [])),
+            shared_with_groups=tuple(str(x) for x in payload.get("shared_with_groups", [])),
             status=str(payload.get("status", "active")),
             active_secret_ref=secret_ref,
             expires_at_epoch=exp,

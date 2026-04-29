@@ -22,6 +22,7 @@ config, deploy, register application, register key, and first use.
    - The bootstrap step creates `secrets/modelkeyguard_admin_api_secret` for the gateway admin API when running locally or in production rehearsal mode. Docker Compose mounts that file as `MODELKEYGUARD_ADMIN_API_SECRET_FILE`.
    - Provider keys are registered later through `/admin/keys`; bootstrap does not need your OpenAI, Azure OpenAI, Gemini, or Ollama secret.
    - If you want Keycloak-only admin access, keep the file for break-glass migration use or omit it in your deployment and rely on the configured Keycloak admin role instead.
+   - After Keycloak is up, assign the bundled `modelguard-admin` service account the `model.admin` role with `./scripts/bootstrap_keycloak_admin_role.sh`. The production runner and local stack runner do this automatically.
 2. Deploy the stack.
    - One host: `./scripts/production_compose.sh up`
    - Clean one-host rehearsal after stale local data: `./scripts/production_compose.sh fresh-up`
@@ -31,8 +32,14 @@ config, deploy, register application, register key, and first use.
    - If port `8789` is busy: `MODELKEYGUARD_PORT=8791 ./scripts/oidc_protect_everything_smoke.sh`
 4. Register application, principal, quota, and key.
    - Use the admin Keycloak client or, during migration only, the admin secret.
+   - The bundled `modelguard-admin` client now receives the `model.admin` role automatically so the Keycloak admin bearer-token path works out of the box.
 5. Use the gateway from a client.
    - Send a Keycloak bearer token or a safe token as `OPENAI_API_KEY`.
+
+Next step after the stack is up and the smoke passes:
+
+- [Go to Register And Use](#register-and-use)
+- [Open Secure key management pages](#secure-key-management-pages)
 
 The rest of this document explains each step.
 
@@ -85,6 +92,11 @@ http://127.0.0.1:8789/admin/keys
 
 The page can create, rotate, and revoke provider keys. Raw keys are accepted only through password inputs and are never rendered back. The graph stores sealed payloads; the UI only shows `secret_ref` handles.
 
+If you just finished `./scripts/production_compose.sh up`, jump here next:
+
+- [Register And Use](#register-and-use)
+- [Secure key management pages](#secure-key-management-pages)
+
 ## Docker Compose
 
 For local/dev compose only, raw Compose is allowed but it is intentionally not
@@ -109,6 +121,32 @@ For a hardened production-style single-host Compose run, use:
 ```bash
 ./scripts/production_compose.sh up
 ```
+
+The runner starts containers detached. Follow logs explicitly:
+
+```bash
+./scripts/production_compose.sh logs
+```
+
+Stop the stack with:
+
+```bash
+./scripts/production_compose.sh stop
+```
+
+Resume stopped containers without rebuilding or recreating them:
+
+```bash
+./scripts/production_compose.sh start
+```
+
+Remove containers/networks when you need a teardown:
+
+```bash
+./scripts/production_compose.sh down
+```
+
+After the stack is up, go straight to [Register And Use](#register-and-use).
 
 `production_compose.sh` runs `bootstrap_secrets.sh --production`, verifies the
 Docker build context excludes runtime state such as `data/`, `out/`, `secrets/`,
@@ -351,6 +389,33 @@ For a CI/deployment runner, use the variable contract printed by:
 
 ## Register And Use
 
+This workflow creates one usable model route for one application principal:
+
+```text
+agent:doc-ingestor safe token
+        +
+user:alice and agent:doc-ingestor quotas
+        +
+key:openai:prod provider key restricted to agent:doc-ingestor
+        +
+key:openai:prod allows only gpt-4o-mini and gpt-5.3-mini
+        +
+client request with model=gpt-4o-mini
+        =
+gateway may forward using the sealed provider key
+```
+
+The two different "keys" have different jobs:
+
+| Object | Created by | What it means | Who sees it |
+| --- | --- | --- | --- |
+| Safe token | `/admin/policy/tokens` | Client credential for a principal such as `agent:doc-ingestor`. It says who is calling. | The application/client receives this. |
+| Provider key | `/admin/keys` | Server-side provider credential plus allowed model names such as `gpt-4o-mini`. It says what upstream model route exists. | Only the gateway stores and uses this. Clients never see the raw provider secret. |
+
+At request time, the client sends the safe token and a model name. The gateway
+uses the model name to find a registered provider key, then checks the
+principal's namespace, scopes, ACL, and quota before forwarding.
+
 You can add provider keys three ways and they all land on the same backend
 routes:
 
@@ -361,9 +426,10 @@ routes:
 Use whichever is easiest for the current environment. The backend behavior is
 the same.
 
-After the gateway is up, register the application, principal, quota, and key in
-that order. The examples below use a Keycloak admin bearer token. If you are in
-a migration window, the same endpoints also accept the admin secret header.
+After the gateway is up, register the application, end user, principal, quotas,
+and key in that order. The examples below use a Keycloak admin bearer token. If
+you are in a migration window, the same endpoints also accept the admin secret
+header.
 
 ```bash
 export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"
@@ -379,6 +445,16 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/applications' \
   | python -m json.tool
 ```
 
+Register an end user:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/users' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"user_id":"user:alice","display_name":"Alice"}' \
+  | python -m json.tool
+```
+
 Register a principal:
 
 ```bash
@@ -389,7 +465,7 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/principals' \
   | python -m json.tool
 ```
 
-Register quota:
+Register principal quota:
 
 ```bash
 curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
@@ -399,7 +475,20 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
   | python -m json.tool
 ```
 
-Register the provider key:
+Register user quota:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"user","subject_id":"user:alice","quota_name":"hour","period":"hour","max_usd":1,"max_tokens":20000,"max_requests":100}' \
+  | python -m json.tool
+```
+
+Register the provider key. This creates the server-side route for the model
+names in `models`; it does not create a client credential. This example uses
+`acl_mode=shared`, so only `agent:doc-ingestor` can use this key even if other
+principals are in the same namespace:
 
 ```bash
 curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
@@ -408,6 +497,9 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F provider='openai' \
   -F models='gpt-4o-mini,gpt-5.3-mini' \
   -F display_name='OpenAI production key' \
+  -F acl_mode='shared' \
+  -F namespace='tenant:kogwistar' \
+  -F shared_with_principals='agent:doc-ingestor' \
   -F provider_secret='sk-...real-provider-key...' \
   | python -m json.tool
 ```
@@ -436,7 +528,8 @@ The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`
 `/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
 cases once the admin identity is configured.
 
-Issue a safe token for the principal:
+Issue a safe token for the principal. This creates the client credential for
+`agent:doc-ingestor`; it does not name `key:openai:prod`:
 
 ```bash
 SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
@@ -445,6 +538,20 @@ SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
   -d '{"principal_id":"agent:doc-ingestor","namespace":"tenant:kogwistar","on_behalf_of_user_id":"user:alice","application_id":"app:doc-ingestor","scopes":["model.invoke"]}' \
   | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
 ```
+
+This token can use a provider key only when the runtime request joins all three
+pieces:
+
+| Piece | Example in this runbook | Meaning |
+| --- | --- | --- |
+| Safe token | `agent:doc-ingestor`, `user:alice`, `tenant:kogwistar`, `model.invoke` | Who is calling, which end-user quota is charged, and which namespace/scope they have. |
+| Provider key | `key:openai:prod`, `models=gpt-4o-mini,gpt-5.3-mini`, `acl_mode=shared`, `shared_with_principals=agent:doc-ingestor` | Which provider secret and model names are available, and which principal may use this key. |
+| Client request | `OPENAI_MODEL=gpt-4o-mini` | The requested model. The gateway picks the registered key whose `models` list contains this value, then applies ACL/quota. |
+
+So this example token does not point directly at `key:openai:prod`; it becomes
+usable with that key when the request asks for `gpt-4o-mini` or `gpt-5.3-mini`
+inside `tenant:kogwistar`, and because the key is shared with
+`agent:doc-ingestor`.
 
 Use it as an OpenAI-compatible client:
 

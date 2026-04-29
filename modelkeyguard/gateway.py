@@ -112,24 +112,38 @@ def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard
         )
         if node.id in policy_acl_by_key:
             continue
-        scope_edges = [e for e in graph_state.edges_from(node.id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
-        if scope_edges:
-            for edge in scope_edges:
-                guard.grant(
-                    key_id=node.id,
-                    mode=str(edge.payload.get("acl_mode", "scope")),
-                    created_by="graph:rehydrate",
-                    owner_id=None,
-                    namespace=str(edge.target),
-                )
-        else:
+        acl_mode = str(node.payload.get("acl_mode", "") or "")
+        if acl_mode:
             guard.grant(
                 key_id=node.id,
-                mode="scope",
+                mode=acl_mode,
                 created_by="graph:rehydrate",
                 owner_id=None,
-                namespace="tenant:kogwistar",
+                namespace=str(node.payload.get("namespace", "tenant:kogwistar")),
+                shared_with_principals=tuple(str(x) for x in node.payload.get("shared_with_principals", [])),
+                shared_with_groups=tuple(str(x) for x in node.payload.get("shared_with_groups", [])),
             )
+        else:
+            scope_edges = [e for e in graph_state.edges_from(node.id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
+            if scope_edges:
+                for edge in scope_edges:
+                    guard.grant(
+                        key_id=node.id,
+                        mode=str(edge.payload.get("acl_mode", "scope")),
+                        created_by="graph:rehydrate",
+                        owner_id=None,
+                        namespace=str(edge.target),
+                        shared_with_principals=tuple(str(x) for x in edge.payload.get("shared_with_principals", [])),
+                        shared_with_groups=tuple(str(x) for x in edge.payload.get("shared_with_groups", [])),
+                    )
+            else:
+                guard.grant(
+                    key_id=node.id,
+                    mode="scope",
+                    created_by="graph:rehydrate",
+                    owner_id=None,
+                    namespace="tenant:kogwistar",
+                )
     return guard, policy
 
 
@@ -221,24 +235,38 @@ def rehydrate_runtime_key(guard: ModelKeyGuard, key_id: str) -> bool:
         )
     )
 
-    scope_edges = [e for e in graph_state.edges_from(key_id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
-    if scope_edges:
-        for edge in scope_edges:
-            guard.grant(
-                key_id=key_id,
-                mode=str(edge.payload.get("acl_mode", "scope")),
-                created_by="graph:runtime_lookup",
-                owner_id=None,
-                namespace=str(edge.target),
-            )
-    else:
+    acl_mode = str(node.payload.get("acl_mode", "") or "")
+    if acl_mode:
         guard.grant(
             key_id=key_id,
-            mode="scope",
+            mode=acl_mode,
             created_by="graph:runtime_lookup",
             owner_id=None,
-            namespace="tenant:kogwistar",
+            namespace=str(node.payload.get("namespace", "tenant:kogwistar")),
+            shared_with_principals=tuple(str(x) for x in node.payload.get("shared_with_principals", [])),
+            shared_with_groups=tuple(str(x) for x in node.payload.get("shared_with_groups", [])),
         )
+    else:
+        scope_edges = [e for e in graph_state.edges_from(key_id, "AVAILABLE_IN") if str(e.target).startswith("tenant:")]
+        if scope_edges:
+            for edge in scope_edges:
+                guard.grant(
+                    key_id=key_id,
+                    mode=str(edge.payload.get("acl_mode", "scope")),
+                    created_by="graph:runtime_lookup",
+                    owner_id=None,
+                    namespace=str(edge.target),
+                    shared_with_principals=tuple(str(x) for x in edge.payload.get("shared_with_principals", [])),
+                    shared_with_groups=tuple(str(x) for x in edge.payload.get("shared_with_groups", [])),
+                )
+        else:
+            guard.grant(
+                key_id=key_id,
+                mode="scope",
+                created_by="graph:runtime_lookup",
+                owner_id=None,
+                namespace="tenant:kogwistar",
+            )
     return True
 
 

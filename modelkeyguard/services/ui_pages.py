@@ -26,10 +26,17 @@ def render_admin_history_page() -> str:
 def render_admin_keys_page(views: list[Any]) -> str:
     rows = []
     for view in views:
+        acl = view.acl_mode
+        if view.acl_mode == "shared":
+            acl = f"shared: {', '.join(view.shared_with_principals)}"
+        elif view.acl_mode == "group":
+            acl = f"group: {', '.join(view.shared_with_groups)}"
+        elif view.acl_mode == "scope":
+            acl = f"scope: {view.namespace}"
         rows.append(
-            f"<tr><td><code>{html_escape(view.key_id)}</code></td><td>{html_escape(view.provider)}</td><td>{html_escape(', '.join(view.models))}</td><td>{html_escape(view.display_name)}</td><td><code>{html_escape(view.upstream_url or '')}</code></td><td>{html_escape(view.intended_use)}</td><td>{html_escape(view.status)}</td><td><code>{html_escape(view.active_secret_ref or '')}</code></td><td>{html_escape(view.expires_at_epoch or '')}</td><td><form method='post' action='/admin/keys/{html_escape(view.key_id)}/revoke'><input name='reason' placeholder='reason'><button>Revoke</button></form></td></tr>"
+            f"<tr><td><code>{html_escape(view.key_id)}</code></td><td>{html_escape(view.provider)}</td><td>{html_escape(', '.join(view.models))}</td><td>{html_escape(view.display_name)}</td><td><code>{html_escape(view.upstream_url or '')}</code></td><td>{html_escape(acl)}</td><td>{html_escape(view.intended_use)}</td><td>{html_escape(view.status)}</td><td><code>{html_escape(view.active_secret_ref or '')}</code></td><td>{html_escape(view.expires_at_epoch or '')}</td><td><form method='post' action='/admin/keys/{html_escape(view.key_id)}/revoke'><input name='reason' placeholder='reason'><button>Revoke</button></form></td></tr>"
         )
-    table_rows = "".join(rows) or "<tr><td colspan='10'>No managed keys</td></tr>"
+    table_rows = "".join(rows) or "<tr><td colspan='11'>No managed keys</td></tr>"
     template = _load_template("admin_keys.html")
     return template.replace("{{rows}}", table_rows)
 

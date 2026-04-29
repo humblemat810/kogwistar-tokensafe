@@ -635,6 +635,11 @@ single-host production-style Compose run, use the production runner:
 ./scripts/production_compose.sh up
 ```
 
+Next step after the stack is up:
+
+- [Register And Use](docs_production.md#register-and-use)
+- [Secure key management pages](docs_production.md#secure-key-management-pages)
+
 Provider keys are registered after deploy through `/admin/keys`; the production
 bootstrap step does not need your OpenAI, Azure OpenAI, Gemini, or Ollama
 secret.

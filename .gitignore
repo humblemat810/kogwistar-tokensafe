@@ -31,6 +31,8 @@ htmlcov/
 .env
 .env.*
 secrets/
+deploy/deployment-targets.env
+deploy/rendered/
 
 # IDE / OS
 .vscode/

@@ -8,7 +8,8 @@ The most useful bash entrypoints are below.
 | Script | What it does |
 | --- | --- |
 | `bootstrap_secrets.sh` | Creates local secret files under `./secrets` if they do not already exist. Local mode is demo-friendly and may create a placeholder provider key. `--production` generates strong graph/admin/Keycloak secrets, does not create placeholder provider keys, and never overwrites existing files. |
-| `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose with the hardened override. Use `fresh-up` for a clean local rehearsal after stale data; it starts with a new data directory instead of relying on deleting container-owned files. Provider keys are registered later through `/admin/keys`. |
+| `bootstrap_keycloak_admin_role.sh` | Grants the `model.admin` realm role to the bundled `modelguard-admin` service account so the Keycloak admin bearer-token path can actually authorize `/admin/*` requests. Safe to rerun. |
+| `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose detached with the hardened override. Use `stop`/`start` to pause and resume containers without teardown, `down` to remove containers/networks, and `fresh-up` for a clean local rehearsal after stale data. Provider keys are registered later through `/admin/keys`. |
 | `render_deployment_env.sh` | Renders split-target `gateway.env`, `postgres.env`, `keycloak.env`, and `gateway-compose.env` from one filled `deployment-targets.env` file. |
 | `gateway_from_deployment_targets.sh` | Gateway-only split-target runner. It reads one source of truth, renders component env files, and runs `deploy/docker-compose.gateway-only.yml`. |
 | `start_postgres.sh` | Starts the pgvector-backed Postgres container or compose service used by the repo. It also prints the DSN and tells you what to export next. |
@@ -33,7 +34,7 @@ The most useful bash entrypoints are below.
 
 | Script | What it does |
 | --- | --- |
-| `get_agent_token.sh` | Fetches a Keycloak access token for a bundled client. |
+| `get_agent_token.sh` | Fetches a Keycloak access token for a bundled client. If the compose gateway is running, it mints through that container so the token issuer matches the gateway’s Keycloak view. |
 | `langchain_user_openai_compatible.py` | Acts like a LangChain/OpenAI client against the gateway. |
 | `external_langchain_smoke.py` | Separate smoke path for external-style LangChain requests. |
 | `smoke_azure_real_completion.sh` | Checks a real Azure-style completion path. |
@@ -57,6 +58,7 @@ If you are tracing one script from another, this is the order most local flows u
 
 ```text
 bootstrap_secrets.sh
+bootstrap_keycloak_admin_role.sh
 start_postgres.sh or start_stack.sh
 init_graph.sh
 start_gateway.sh

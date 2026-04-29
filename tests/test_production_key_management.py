@@ -205,6 +205,8 @@ def test_admin_page_uses_password_inputs(prod_env):
     assert "type='password'" in html
     assert "provider key" in html
     assert "name=\"upstream_url\"" in html
+    assert "name=\"acl_mode\"" in html
+    assert "name=\"shared_with_principals\"" in html
 
 
 def test_admin_create_key_does_not_return_secret(prod_env):
@@ -248,6 +250,89 @@ def test_admin_keys_json_never_returns_secret(prod_env):
     row = next(item for item in body["data"] if item["key_id"] == "key:test:list")
     assert row["intended_use"] == intended
     assert row["upstream_url"] == upstream
+
+
+def test_admin_create_key_can_limit_model_to_specific_principal(prod_env):
+    app = create_app("config/gateway_policy.json")
+    from fastapi.testclient import TestClient
+    c = TestClient(app)
+    c.post(
+        "/admin/keys",
+        data={
+            "key_id": "key:test:shared",
+            "provider": "openai",
+            "models": "gpt-shared-only",
+            "display_name": "Shared",
+            "acl_mode": "shared",
+            "namespace": "tenant:kogwistar",
+            "shared_with_principals": "agent:doc-ingestor",
+            "provider_secret": "sk-shared-secret",
+        },
+        headers=ADMIN_HEADERS,
+    )
+
+    allowed = c.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-shared-only",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+        },
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    denied = c.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-shared-only",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+        },
+        headers={"Authorization": "Bearer kgw_demo_principal_busy"},
+    )
+
+    assert allowed.status_code == 200
+    assert denied.status_code == 403
+    assert denied.json()["error"]["message"] == "permission_denied"
+
+
+def test_admin_key_acl_survives_gateway_restart(prod_env):
+    app = create_app("config/gateway_policy.json")
+    from fastapi.testclient import TestClient
+    c = TestClient(app)
+    c.post(
+        "/admin/keys",
+        data={
+            "key_id": "key:test:shared-restart",
+            "provider": "openai",
+            "models": "gpt-shared-restart",
+            "display_name": "Shared Restart",
+            "acl_mode": "shared",
+            "namespace": "tenant:kogwistar",
+            "shared_with_principals": "agent:doc-ingestor",
+            "provider_secret": "sk-shared-secret",
+        },
+        headers=ADMIN_HEADERS,
+    )
+
+    restarted = TestClient(create_app("config/gateway_policy.json"))
+    denied = restarted.post(
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-shared-restart",
+            "messages": [
+                {"role": "system", "content": EXPECTED_SYSTEM},
+                {"role": "user", "content": "hello"},
+            ],
+        },
+        headers={"Authorization": "Bearer kgw_demo_principal_busy"},
+    )
+
+    assert denied.status_code == 403
+    assert denied.json()["error"]["message"] == "permission_denied"
 
 
 def test_admin_rotate_key_endpoint_changes_ref(prod_env):

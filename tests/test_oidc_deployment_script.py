@@ -57,6 +57,8 @@ def test_get_agent_token_uses_repo_python_fallback():
     assert 'PYTHON_BIN="${PYTHON:-}"' in text
     assert '.venv/bin/python' in text
     assert 'python3' in text
+    assert 'if "${compose_cmd[@]}" exec -T gateway python3' in text
+    assert 'http://keycloak:8080/realms/modelguard/protocol/openid-connect/token' in text
     assert '| "$PYTHON_BIN" -c' in text
 
 
@@ -117,7 +119,7 @@ def test_production_compose_script_has_valid_bash_syntax():
 
 def test_single_source_gateway_runner_has_valid_bash_syntax():
     repo_root = Path(__file__).resolve().parents[1]
-    for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh"):
+    for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh", "bootstrap_keycloak_admin_role.sh"):
         script = repo_root / "scripts" / name
         result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
@@ -129,11 +131,21 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     text = script.read_text(encoding="utf-8")
 
     assert "./scripts/bootstrap_secrets.sh --production" in text
+    assert "stop|start" in text
+    assert "compose_files=(-f docker-compose.yml -f docker-compose.container-secure.yml)" in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans -v' in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans' in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" up -d --build' in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" stop' in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" start' in text
+    assert '"${compose_cmd[@]}" "${compose_files[@]}" logs -f' in text
     assert "fresh-up" in text
     assert "MODELKEYGUARD_FRESH_ROOT" in text
     assert "out/production_compose_fresh" in text
     assert "./scripts/reset_local_e2e_state.sh" in text
     assert "gateway-secret" in text
+    assert "bootstrap_keycloak_admin_role.sh" in text
+    assert "bootstrap role" in text.lower() or "model.admin" in text
     assert 'require_dockerignore_entry "data"' in text
     assert 'require_dockerignore_entry "out"' in text
     assert 'require_dockerignore_entry "secrets"' in text
@@ -194,10 +206,23 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "deployment-targets.env.example" in deploy_readme
     assert "gateway.env.example" in gateway_compose
     assert "MODELKEYGUARD_GATEWAY_BIND" in gateway_compose
+    assert "bootstrap_keycloak_admin_role.sh" in (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
     for text in (gateway_env, postgres_env, keycloak_env, target_env, deploy_readme):
         assert "keycloak-c.example" not in text
         assert "postgres-b.example" not in text
         assert "ollama-b.example" not in text
+
+
+def test_production_doc_pins_limited_model_key_and_user_quota_flow():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+
+    assert "Register an end user:" in text
+    assert '"lane":"user","subject_id":"user:alice"' in text
+    assert "-F acl_mode='shared'" in text
+    assert "-F shared_with_principals='agent:doc-ingestor'" in text
+    assert "only `agent:doc-ingestor` can use this key" in text
+    assert "which end-user quota is charged" in text
 
 
 def test_render_deployment_env_generates_matching_component_files(tmp_path):
