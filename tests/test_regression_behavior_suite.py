@@ -160,6 +160,7 @@ def test_010_graph_store_seals_node_edge_event_projection_payloads(tmp_path):
         ("day", "2026-04-25"),
         ("week", "2026-04-20"),
         ("month", "2026-04"),
+        ("infinite", "lifetime"),
     ],
 )
 def test_011_period_bucket_supported_periods(period, expected):
@@ -180,6 +181,11 @@ def test_013_period_bucket_10s_middle_rounds_down():
 def test_014_period_bucket_rejects_unknown_period():
     with pytest.raises(ValueError):
         period_bucket(datetime(2026, 4, 25, tzinfo=timezone.utc), "quarter")
+
+
+def test_014b_period_bucket_lifetime_alias_maps_to_infinite():
+    ts = datetime(2026, 4, 25, 12, 34, 56, tzinfo=timezone.utc)
+    assert period_bucket(ts, "lifetime") == "lifetime"
 
 
 # ---------------------------------------------------------------------------

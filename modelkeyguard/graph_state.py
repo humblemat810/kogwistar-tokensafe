@@ -13,6 +13,7 @@ DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeygua
 DEFAULT_APP_KEY = os.getenv("MODELKEYGUARD_GRAPH_KEY", "dev-modelkeyguard-change-me")
 QUOTA_POLICY_PROJECTION_PREFIX = "quota_policy_projection"
 SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres", "kogwistar_postgres"}
+SUPPORTED_QUOTA_PERIODS = {"10s", "hour", "day", "week", "month", "infinite", "lifetime"}
 
 
 def utc_now() -> datetime:
@@ -24,6 +25,7 @@ def iso_now() -> str:
 
 
 def period_bucket(ts: datetime, period: str) -> str:
+    period = normalize_quota_period(period)
     if period == "10s":
         second = (ts.second // 10) * 10
         return ts.replace(second=second, microsecond=0).isoformat()
@@ -36,7 +38,18 @@ def period_bucket(ts: datetime, period: str) -> str:
         return start.replace(hour=0, minute=0, second=0, microsecond=0).date().isoformat()
     if period == "month":
         return f"{ts.year:04d}-{ts.month:02d}"
+    if period == "infinite":
+        return "lifetime"
     raise ValueError(f"unsupported period: {period}")
+
+
+def normalize_quota_period(period: str) -> str:
+    normalized = str(period or "").strip().lower()
+    if normalized == "lifetime":
+        normalized = "infinite"
+    if normalized not in SUPPORTED_QUOTA_PERIODS:
+        raise ValueError(f"unsupported_quota_period:{period}")
+    return normalized
 
 
 def resolve_store_backend(value: str | None = None) -> str:

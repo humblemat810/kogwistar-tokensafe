@@ -67,7 +67,7 @@ QUOTA_UPSERT_BODY_SCHEMA: dict[str, Any] = {
         "lane": {"type": "string", "enum": ["principal", "user", "key"], "example": "principal"},
         "subject_id": {"type": "string", "example": "agent:azure-manual-demo"},
         "quota_name": {"type": "string", "example": "hour"},
-        "period": {"type": "string", "enum": ["10s", "hour", "day", "week", "month"], "example": "hour"},
+        "period": {"type": "string", "enum": ["10s", "hour", "day", "week", "month", "infinite"], "example": "hour"},
         "max_usd": {"type": "number", "example": 20.0},
         "max_tokens": {"type": "integer", "example": 200000},
         "max_requests": {"type": "integer", "example": 1000},

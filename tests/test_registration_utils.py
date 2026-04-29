@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from pathlib import Path
 
@@ -128,6 +129,18 @@ def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     projection2 = store.get_quota_policy_projection("user", "user:test")
     assert projection2 is not None
     assert projection2["items"] == []
+
+
+def test_infinite_quota_does_not_refresh_across_future_usage_windows(tmp_path):
+    store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
+    reg = RegistrationService(store)
+    reg.register_user("user:test", "Test User")
+    reg.set_quota("user", "user:test", "lifetime", period="infinite", max_requests=1)
+
+    now = datetime.now(timezone.utc)
+    store.add_quota_usage("user", "user:test", "infinite", 0.1, 100, when=now)
+    assert store.get_quota_used("user", "user:test", "infinite")["requests"] == 1
+    assert store.get_quota_used("user", "user:test", "infinite", when=now + timedelta(days=3650))["requests"] == 1
 
 
 def test_registration_store_invariant_uses_postgres_when_configured(monkeypatch):

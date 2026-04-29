@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -7,6 +8,7 @@ from modelkeyguard.gateway import build_guard, select_key, sha256_text
 from modelkeyguard.token_auth import TokenVerifier, TokenAuthError
 from modelkeyguard.core import Principal, Request
 from modelkeyguard.graph_state import GraphStateStore
+from modelkeyguard.registration import RegistrationService
 
 
 def test_local_token_verifies_with_on_behalf_user(tmp_path, monkeypatch):
@@ -81,6 +83,28 @@ def test_denied_event_does_not_increment_quota_projection(tmp_path, monkeypatch)
     d = guard.check(Request(Principal("agent:external-scraper", "agent", ()), key_id, "gpt-4o-mini", "tenant:other", estimated_cost_usd=0.01, estimated_tokens=100, token_id="bad"))
     assert not d.allowed
     assert guard.graph_state.get_quota_used("key", key_id, "hour")["tokens"] == 0
+
+
+def test_infinite_quota_remains_capped_forever_for_key_lane(tmp_path, monkeypatch):
+    graph_path = tmp_path / "graph.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    guard, policy = build_guard("config/gateway_policy.json")
+    key_id = select_key(policy, "gpt-4o-mini")
+    assert key_id is not None
+    assert guard.graph_state is not None
+    RegistrationService(guard.graph_state).set_quota("key", key_id, "lifetime", period="infinite", max_requests=1)
+
+    req = Request(Principal("agent:doc-ingestor", "agent", ("agent-dev",)), key_id, "gpt-4o-mini", "tenant:kogwistar", estimated_cost_usd=0.01, estimated_tokens=100, on_behalf_of_user_id="user:alice", token_id="tok-1")
+    first = guard.check(req)
+    assert first.allowed
+    guard.record_usage(first, estimated_cost_usd=0.01, actual_cost_usd=0.01, actual_tokens=100)
+    future = datetime.now(timezone.utc) + timedelta(days=3650)
+    monkeypatch.setattr("modelkeyguard.core.utc_now", lambda: future)
+
+    second = guard.check(Request(Principal("agent:doc-ingestor", "agent", ("agent-dev",)), key_id, "gpt-4o-mini", "tenant:kogwistar", estimated_cost_usd=0.01, estimated_tokens=100, on_behalf_of_user_id="user:alice", token_id="tok-2"))
+    assert not second.allowed
+    assert second.http_status == 429
+    assert second.reason == "key_quota_exceeded"
 
 
 def test_graph_payload_is_sealed_at_rest(tmp_path):

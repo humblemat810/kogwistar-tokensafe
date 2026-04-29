@@ -6,7 +6,7 @@ from typing import Any, Literal
 import uuid
 
 from .kogwistar_acl_adapter import AdapterInfo, load_acl_graph
-from .graph_state import GraphStateStore, utc_now
+from .graph_state import GraphStateStore, normalize_quota_period, utc_now
 
 Action = Literal["model.invoke", "model.invoke.high_cost", "model.read_metadata", "model.admin"]
 
@@ -316,7 +316,7 @@ class ModelKeyGuard:
             return False, "no_graph_quota", {}
         rem_out: dict[str, float] = {}
         for q in self._quota_policies(lane, subject_id):
-            period = q.get("period", "hour")
+            period = normalize_quota_period(q.get("period", "hour"))
             used = self.graph_state.get_quota_used(lane, subject_id, period, utc_now())
             max_usd = q.get("max_usd")
             max_tokens = q.get("max_tokens")

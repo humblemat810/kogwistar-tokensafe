@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 import hashlib
 
-from .graph_state import GraphStateStore, resolve_store_backend
+from .graph_state import GraphStateStore, normalize_quota_period, resolve_store_backend
 
 
 def safe_token_hash(token: str) -> str:
@@ -107,8 +107,10 @@ class RegistrationService:
     ) -> str:
         if lane not in {"principal", "user", "key"}:
             raise RegistrationError("quota_lane_must_be_principal_user_or_key")
-        if period not in {"10s", "hour", "day", "week", "month"}:
-            raise RegistrationError("unsupported_quota_period")
+        try:
+            period = normalize_quota_period(period)
+        except ValueError as exc:
+            raise RegistrationError("unsupported_quota_period") from exc
         if max_usd is None and max_tokens is None and max_requests is None:
             raise RegistrationError("at_least_one_quota_limit_required")
         qid = f"quota:{lane}:{subject_id}:{quota_name}"
@@ -148,8 +150,11 @@ class RegistrationService:
     ) -> str:
         if lane not in {"principal", "user", "key"}:
             raise RegistrationError("quota_lane_must_be_principal_user_or_key")
-        if period is not None and period not in {"10s", "hour", "day", "week", "month"}:
-            raise RegistrationError("unsupported_quota_period")
+        if period is not None:
+            try:
+                period = normalize_quota_period(period)
+            except ValueError as exc:
+                raise RegistrationError("unsupported_quota_period") from exc
         if not revoked and max_usd is None and max_tokens is None and max_requests is None:
             raise RegistrationError("at_least_one_quota_limit_required")
 
@@ -349,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     quota.add_argument("--lane", required=True, choices=["principal", "user", "key"])
     quota.add_argument("--subject-id", required=True)
     quota.add_argument("--quota-name", required=True)
-    quota.add_argument("--period", required=True, choices=["10s", "hour", "day", "week", "month"])
+    quota.add_argument("--period", required=True, choices=["10s", "hour", "day", "week", "month", "infinite", "lifetime"])
     quota.add_argument("--max-usd", type=float)
     quota.add_argument("--max-tokens", type=int)
     quota.add_argument("--max-requests", type=int)

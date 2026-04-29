@@ -221,8 +221,42 @@ def test_production_doc_pins_limited_model_key_and_user_quota_flow():
     assert '"lane":"user","subject_id":"user:alice"' in text
     assert "-F acl_mode='shared'" in text
     assert "-F shared_with_principals='agent:doc-ingestor'" in text
-    assert "only `agent:doc-ingestor` can use this key" in text
+    assert "only `agent:doc-ingestor` can use the key" in text
     assert "which end-user quota is charged" in text
+
+
+def test_production_doc_pins_quota_patterns_and_model_specific_limits():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+
+    assert "Quota patterns and limits" in text
+    assert "infinite` is also supported for a lifetime quota that" in text.lower()
+    assert 'There is still no custom rolling "every N days starting from a chosen day"\nsetting today.' in text
+    assert "`day` resets at `00:00 UTC`" in text
+    assert "`week` resets on Monday `00:00 UTC`" in text
+    assert "`month` resets on the first day of the UTC month" in text
+    assert "`infinite` never refreshes and accumulates forever" in text
+    assert "| Goal | Lane | `subject_id` example |" in text
+    assert "Per-user budget" in text
+    assert "Per-principal budget" in text
+    assert "Per-model budget" in text
+    assert "register one key per model when you want a hard model-level cap" in text
+    assert '"lane":"key","subject_id":"key:openai:prod-gpt4o","quota_name":"month","period":"month"' in text
+    assert '"lane":"user","subject_id":"user:alice","quota_name":"lifetime","period":"infinite"' in text
+
+
+def test_production_doc_shows_explicit_key_examples_for_each_provider():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+
+    for provider in ("openai", "azure_openai", "ollama", "gemini"):
+        assert f"-F provider='{provider}'" in text
+    assert "-F key_id='key:openai:prod'" in text
+    assert "-F key_id='key:azure-openai:prod'" in text
+    assert "-F key_id='key:ollama:gemma4-e2b'" in text
+    assert "-F key_id='key:gemini:prod'" in text
+    assert "host.docker.internal" in text
+    assert "ollama-local-placeholder" in text
 
 
 def test_render_deployment_env_generates_matching_component_files(tmp_path):

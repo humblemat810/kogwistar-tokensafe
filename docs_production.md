@@ -485,10 +485,80 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
   | python -m json.tool
 ```
 
-Register the provider key. This creates the server-side route for the model
-names in `models`; it does not create a client credential. This example uses
-`acl_mode=shared`, so only `agent:doc-ingestor` can use this key even if other
-principals are in the same namespace:
+## Quota patterns and limits
+
+Quota rules are cumulative counters inside the selected period bucket. You can
+keep more than one active quota on the same `lane` and `subject_id` by giving
+each rule a different `quota_name`.
+
+Supported periods today are `10s`, `hour`, `day`, `week`, and `month`. They
+use fixed UTC buckets. `infinite` is also supported for a lifetime quota that
+never refreshes:
+
+- `10s` buckets are 10-second slices inside the current minute
+- `hour` resets on the top of the hour UTC
+- `day` resets at `00:00 UTC`
+- `week` resets on Monday `00:00 UTC`
+- `month` resets on the first day of the UTC month
+- `infinite` never refreshes and accumulates forever
+
+There is still no custom rolling "every N days starting from a chosen day"
+setting today. If you need a rolling cap, that is still a feature change. For
+production today, use the closest fixed period that matches the budget window
+you want, or use `infinite` when you want a hard lifetime cap.
+
+Choose the lane that matches the thing you want to cap:
+
+| Goal | Lane | `subject_id` example | Typical period | What it covers |
+| --- | --- | --- | --- | --- |
+| Per-user budget | `user` | `user:alice` | `day`, `week`, `month`, or `infinite` | All calls made on behalf of that user across every model and every key. |
+| Per-principal budget | `principal` | `agent:doc-ingestor` | `day`, `week`, `month`, or `infinite` | All requests from that agent or service principal. |
+| Per-model budget | `key` | `key:openai:prod-gpt4o` | `day`, `week`, `month`, or `infinite` | One registered provider key. Because each key is tied to a `models` list, this is how you cap a specific model or a small bundle of models. |
+
+A common production pattern is:
+
+1. give each user or principal a coarse `month` quota, or `infinite` if you want a hard lifetime cap
+2. give each key its own `day`, `month`, or `infinite` quota
+3. register one key per model when you want a hard model-level cap
+
+Examples:
+
+```bash
+# user-level monthly cap
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"user","subject_id":"user:alice","quota_name":"month","period":"month","max_usd":20,"max_tokens":200000,"max_requests":1000}' \
+  | python -m json.tool
+
+# principal-level daily cap
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"principal","subject_id":"agent:doc-ingestor","quota_name":"day","period":"day","max_usd":10,"max_tokens":50000,"max_requests":500}' \
+  | python -m json.tool
+
+# model-specific key quota
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"key","subject_id":"key:openai:prod-gpt4o","quota_name":"month","period":"month","max_usd":50,"max_tokens":250000,"max_requests":2000}' \
+  | python -m json.tool
+
+# lifetime cap that never refreshes
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"lane":"user","subject_id":"user:alice","quota_name":"lifetime","period":"infinite","max_usd":100,"max_tokens":1000000,"max_requests":5000}' \
+  | python -m json.tool
+```
+
+Register provider keys. Each key creates a server-side route for the model
+names in `models`; it does not create a client credential. These examples use
+`acl_mode=shared`, so only `agent:doc-ingestor` can use the key even if other
+principals are in the same namespace.
+
+OpenAI:
 
 ```bash
 curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
@@ -501,6 +571,61 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F namespace='tenant:kogwistar' \
   -F shared_with_principals='agent:doc-ingestor' \
   -F provider_secret='sk-...real-provider-key...' \
+  | python -m json.tool
+```
+
+Azure OpenAI:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -F key_id='key:azure-openai:prod' \
+  -F provider='azure_openai' \
+  -F models='gpt-4o-mini-prod' \
+  -F display_name='Azure OpenAI production deployment' \
+  -F upstream_url='https://<resource>.openai.azure.com' \
+  -F acl_mode='shared' \
+  -F namespace='tenant:kogwistar' \
+  -F shared_with_principals='agent:doc-ingestor' \
+  -F provider_secret='<azure-openai-api-key>' \
+  | python -m json.tool
+```
+
+Ollama:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -F key_id='key:ollama:gemma4-e2b' \
+  -F provider='ollama' \
+  -F models='gemma4:e2b' \
+  -F display_name='Local Ollama gemma4:e2b' \
+  -F upstream_url='http://127.0.0.1:11434/api/chat' \
+  -F acl_mode='shared' \
+  -F namespace='tenant:kogwistar' \
+  -F shared_with_principals='agent:doc-ingestor' \
+  -F provider_secret='ollama-local-placeholder' \
+  | python -m json.tool
+```
+
+If the gateway runs in Docker and Ollama runs on the host, replace
+`127.0.0.1` with an address the gateway container can reach, such as a Docker
+service name, host LAN IP, or configured `host.docker.internal` entry.
+
+Gemini:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -F key_id='key:gemini:prod' \
+  -F provider='gemini' \
+  -F models='gemini-2.0-flash' \
+  -F display_name='Gemini production key' \
+  -F upstream_url='https://generativelanguage.googleapis.com' \
+  -F acl_mode='shared' \
+  -F namespace='tenant:kogwistar' \
+  -F shared_with_principals='agent:doc-ingestor' \
+  -F provider_secret='<gemini-api-key>' \
   | python -m json.tool
 ```
 

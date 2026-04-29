@@ -669,3 +669,35 @@ def test_admin_policy_quota_upsert_and_revoke_are_append_only_and_effective(tmp_
         },
     )
     assert allowed.status_code == 200
+
+
+def test_admin_policy_quota_upsert_accepts_infinite_period(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    app = create_app("config/gateway_policy.json")
+    client = TestClient(app)
+
+    user = client.post(
+        "/admin/policy/users",
+        headers=ADMIN_HEADERS,
+        json={"user_id": "user:infinite", "display_name": "Infinite"},
+    )
+    assert user.status_code == 200
+
+    resp = client.post(
+        "/admin/policy/quotas/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "lane": "user",
+            "subject_id": "user:infinite",
+            "quota_name": "lifetime",
+            "period": "infinite",
+            "max_requests": 1,
+        },
+    )
+    assert resp.status_code == 200
+    assert resp.json()["quota_policy_id"].startswith("quota:user:user:infinite:lifetime")
