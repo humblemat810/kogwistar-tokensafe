@@ -282,6 +282,207 @@ def test_modelkeyguard_top_level_registration_forwards_remote_admin_args(monkeyp
     ]
 
 
+def test_registration_main_defaults_to_kogwistar_postgres_for_mixed_register_and_quota(monkeypatch):
+    class FakeKogwistarStore:
+        instances = 0
+        nodes: dict[str, object] = {}
+        edges: dict[str, object] = {}
+        events: list[dict[str, object]] = []
+        projections: dict[str, dict[str, object]] = {}
+
+        def __init__(self, *args, **kwargs):
+            type(self).instances += 1
+            self.nodes = type(self).nodes
+            self.edges = type(self).edges
+            self.events = type(self).events
+            self.projections = type(self).projections
+
+        @classmethod
+        def reset(cls):
+            cls.instances = 0
+            cls.nodes = {}
+            cls.edges = {}
+            cls.events = []
+            cls.projections = {}
+
+        def put_node(self, node_id, kind, payload):
+            self.nodes[node_id] = SimpleNamespace(id=node_id, kind=kind, payload=dict(payload))
+
+        def put_edge(self, edge_id, kind, source, target, payload):
+            self.edges[edge_id] = SimpleNamespace(id=edge_id, kind=kind, source=source, target=target, payload=dict(payload))
+
+        def append_event(self, event_type, subject_id, payload):
+            event_id = f"event:{event_type}:{len(self.events)+1:08d}"
+            event = {"record_type": "event", "id": event_id, "kind": event_type, "subject": subject_id, "payload": dict(payload)}
+            self.events.append(event)
+            return event
+
+        def rebuild_quota_policy_projection(self, lane, subject_id):
+            return {"lane": lane, "subject_id": subject_id, "items": []}
+
+    FakeKogwistarStore.reset()
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    register_rc = registration_main(
+        [
+            "register-user",
+            "--user-id",
+            "user:mixed-default",
+            "--display-name",
+            "Mixed Default",
+        ]
+    )
+    quota_rc = registration_main(
+        [
+            "set-quota",
+            "--lane",
+            "user",
+            "--subject-id",
+            "user:mixed-default",
+            "--quota-name",
+            "month",
+            "--period",
+            "month",
+            "--max-usd",
+            "5",
+            "--max-tokens",
+            "50000",
+            "--max-requests",
+            "200",
+        ]
+    )
+
+    assert register_rc == 0
+    assert quota_rc == 0
+    assert FakeKogwistarStore.instances >= 2
+    assert "user:mixed-default" in FakeKogwistarStore.nodes
+    assert any(str(node_id).startswith("quota:user:user:mixed-default:month") for node_id in FakeKogwistarStore.nodes)
+
+
+def test_registration_main_defaults_to_kogwistar_postgres_for_principal_flow(monkeypatch):
+    class FakeKogwistarStore:
+        instances = 0
+        nodes: dict[str, object] = {}
+        edges: dict[str, object] = {}
+        events: list[dict[str, object]] = []
+        projections: dict[str, dict[str, object]] = {}
+
+        def __init__(self, *args, **kwargs):
+            type(self).instances += 1
+            self.nodes = type(self).nodes
+            self.edges = type(self).edges
+            self.events = type(self).events
+            self.projections = type(self).projections
+
+        @classmethod
+        def reset(cls):
+            cls.instances = 0
+            cls.nodes = {}
+            cls.edges = {}
+            cls.events = []
+            cls.projections = {}
+
+        def put_node(self, node_id, kind, payload):
+            self.nodes[node_id] = SimpleNamespace(id=node_id, kind=kind, payload=dict(payload))
+
+        def put_edge(self, edge_id, kind, source, target, payload):
+            self.edges[edge_id] = SimpleNamespace(id=edge_id, kind=kind, source=source, target=target, payload=dict(payload))
+
+        def append_event(self, event_type, subject_id, payload):
+            event_id = f"event:{event_type}:{len(self.events)+1:08d}"
+            event = {"record_type": "event", "id": event_id, "kind": event_type, "subject": subject_id, "payload": dict(payload)}
+            self.events.append(event)
+            return event
+
+        def rebuild_quota_policy_projection(self, lane, subject_id):
+            return {"lane": lane, "subject_id": subject_id, "items": []}
+
+    FakeKogwistarStore.reset()
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    register_rc = registration_main(
+        [
+            "register-principal",
+            "--principal-id",
+            "agent:principal-default",
+            "--kind",
+            "agent",
+            "--groups",
+            "review-dev",
+            "--namespace",
+            "tenant:kogwistar",
+            "--application-id",
+            "app:principal-default",
+        ]
+    )
+    quota_rc = registration_main(
+        [
+            "set-quota",
+            "--lane",
+            "principal",
+            "--subject-id",
+            "agent:principal-default",
+            "--quota-name",
+            "month",
+            "--period",
+            "month",
+            "--max-usd",
+            "5",
+            "--max-tokens",
+            "50000",
+            "--max-requests",
+            "200",
+        ]
+    )
+
+    assert register_rc == 0
+    assert quota_rc == 0
+    assert FakeKogwistarStore.instances >= 2
+    assert "agent:principal-default" in FakeKogwistarStore.nodes
+    assert "app:principal-default" in FakeKogwistarStore.nodes
+    assert any(str(node_id).startswith("quota:principal:agent:principal-default:month") for node_id in FakeKogwistarStore.nodes)
+
+
+def test_registration_main_explicit_jsonl_demo_mode_still_works(tmp_path, monkeypatch):
+    graph_path = tmp_path / "demo-graph.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-jsonl-key")
+
+    rc_user = registration_main(["register-user", "--user-id", "user:demo-jsonl", "--display-name", "Demo Jsonl"])
+    rc_quota = registration_main(
+        [
+            "set-quota",
+            "--lane",
+            "user",
+            "--subject-id",
+            "user:demo-jsonl",
+            "--quota-name",
+            "hour",
+            "--period",
+            "hour",
+            "--max-requests",
+            "10",
+        ]
+    )
+
+    assert rc_user == 0
+    assert rc_quota == 0
+    contents = graph_path.read_text(encoding="utf-8")
+    assert "user:demo-jsonl" in contents
+    assert "quota:user:user:demo-jsonl:hour" in contents
+
+
 def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
     reg = RegistrationService(store)
@@ -335,6 +536,25 @@ def test_registration_store_invariant_uses_kogwistar_postgres_when_configured(mo
             calls.append("kogwistar_postgres")
 
     monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    store = open_registration_store()
+    assert calls == ["kogwistar_postgres"]
+    assert isinstance(store, FakeKogwistarStore)
+
+
+def test_registration_store_invariant_defaults_to_kogwistar_postgres(monkeypatch):
+    calls: list[str] = []
+
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            calls.append("kogwistar_postgres")
+
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
     monkeypatch.setitem(
         sys.modules,
         "modelkeyguard.kogwistar_postgres_state",

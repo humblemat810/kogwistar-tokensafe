@@ -518,7 +518,7 @@ def open_registration_store():
     was explicitly requested.
     """
     try:
-        store_kind = resolve_store_backend()
+        store_kind = resolve_store_backend(os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres"))
     except ValueError as exc:
         raise RegistrationError(str(exc)) from exc
     if store_kind == "jsonl":

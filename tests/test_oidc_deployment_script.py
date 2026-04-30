@@ -359,11 +359,13 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "creating a Keycloak client does not automatically create a" in tutorial
     assert "safe token issued in step 7" in tutorial
     assert "easiest local case: omit `--admin-base-url` entirely" in tutorial.lower()
+    assert "local kogwistar postgres-backed store" in tutorial.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in tutorial
     assert "--admin-secret \"$MODELKEYGUARD_ADMIN_API_SECRET\"" in tutorial
     assert "bootstrap_secrets.sh" in tutorial
     assert "modelkeyguard_admin_api_secret" in tutorial
     assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in tutorial
+    assert "log in as alice and inspect the quota pages" in tutorial.lower()
     assert "use `--admin-bearer-token \"$admin_token\"` only when the gateway is explicitly" in tutorial.lower()
     assert "modelkeyguard_admin_auth_mode=keycloak" in tutorial.lower()
     assert "secret_or_keycloak" in tutorial.lower()
@@ -374,6 +376,7 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "keycloak_admin_first_setup.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs
     assert "easiest local path is to call `modelkeyguard" in docs.lower()
+    assert "same kogwistar postgres-backed store" in docs.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in docs
     assert "--admin-secret" in docs
     assert "bootstrap_secrets.sh" in docs

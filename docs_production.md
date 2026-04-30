@@ -504,7 +504,7 @@ the same.
 After the gateway is up, register the application, end user, principal, quotas,
 and key in that order. The easiest local path is to call `modelkeyguard
 registration ...` directly with no `--admin-base-url`, which writes to the
-local store.
+same Kogwistar Postgres-backed store the gateway uses.
 
 If you want to write through the running gateway instead of the local store,
 point the CLI at the ModelKeyGuard admin API with `--admin-base-url`. That base

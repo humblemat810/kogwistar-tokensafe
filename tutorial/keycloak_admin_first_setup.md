@@ -159,7 +159,7 @@ ModelKeyGuard gateway. That base URL is the ModelKeyGuard gateway, not
 Keycloak.
 
 Easiest local case: omit `--admin-base-url` entirely and let the command write
-directly to the local store.
+directly to the local Kogwistar Postgres-backed store.
 
 Example:
 
@@ -299,7 +299,10 @@ modelkeyguard registration set-quota \
 Agent quota:
 
 ```bash
-modelkeyguard registration set-quota \
+modelkeyguard \
+  --admin-base-url http://127.0.0.1:8789 \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
+  registration set-quota \
   --lane principal \
   --subject-id agent:doc-ingestor \
   --quota-name month \
@@ -312,7 +315,10 @@ modelkeyguard registration set-quota \
 Bootstrap-operator quota, if you registered the bootstrap admin subject above:
 
 ```bash
-modelkeyguard registration set-quota \
+modelkeyguard \
+  --admin-base-url http://127.0.0.1:8789 \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
+  registration set-quota \
   --lane user \
   --subject-id "user:${KEYCLOAK_BOOTSTRAP_USERNAME}" \
   --quota-name month \
@@ -325,6 +331,25 @@ modelkeyguard registration set-quota \
 If you want the issued safe token itself to have a hard cap, create a `token`
 quota after issuance. That is optional and separate from the user and principal
 limits.
+
+## 5b. Log in as Alice and inspect the quota pages
+
+If Alice has the configured OIDC admin role, she can use the browser OIDC
+login to open the admin pages and see the quota settings you just created.
+
+Open:
+
+```text
+http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage
+```
+
+That path sends the browser to Keycloak, signs in as `alice`, and then returns
+to ModelKeyGuard. Once logged in, Alice can view the quota and usage pages
+under `/admin/usage` and `/admin/usage.json`.
+
+If Alice is only a normal end user, keep her out of the admin browser path and
+use a separate Keycloak account with the configured admin role for the admin
+GUI.
 
 ## 6. Choose one provider flavor with a variable
 
