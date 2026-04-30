@@ -869,6 +869,11 @@ OPENAI_MODEL='gpt-4o-mini' \
 python scripts/langchain_user_openai_compatible.py
 ```
 
+If the gateway is still in dry-run mode, this call proves the auth, ACL, quota,
+and key-selection path but returns a synthetic ModelKeyGuard completion. To
+exercise the real upstream provider, start the gateway with
+`MODELKEYGUARD_DRY_RUN=0` and register a real provider secret.
+
 If you are using Keycloak tokens directly instead of safe tokens, keep
 `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` and set `OPENAI_API_KEY` to a real access
 token from your IdP client.

@@ -1,4 +1,5 @@
 import json
+import urllib.error
 
 import pytest
 
@@ -8,6 +9,11 @@ from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
 ADMIN_SECRET = "dev-modelkeyguard-admin-secret"
+
+
+@pytest.fixture(autouse=True)
+def _force_jsonl_store(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
 
 def _admin_headers():
@@ -65,6 +71,82 @@ def test_forward_provider_joblib_cache_replays_real_mode_response(tmp_path, monk
     assert "super-secret-provider-key" not in cache_files[0].name
 
 
+def test_forward_provider_uses_three_minute_default_timeout(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(req, timeout):
+        calls.append(timeout)
+        return _Resp()
+
+    monkeypatch.delenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.setattr(gateway.urllib.request, "urlopen", fake_urlopen)
+
+    forward_provider("super-secret-provider-key", b"{}", provider="ollama", url="http://ollama.example/api/chat")
+
+    assert calls == [180.0]
+
+
+def test_forward_provider_timeout_can_be_overridden(monkeypatch):
+    calls = []
+
+    class _Resp:
+        status = 200
+        headers = {"content-type": "application/json"}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(req, timeout):
+        calls.append(timeout)
+        return _Resp()
+
+    monkeypatch.setenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", "240")
+    monkeypatch.setattr(gateway.urllib.request, "urlopen", fake_urlopen)
+
+    forward_provider("super-secret-provider-key", b"{}", provider="ollama", url="http://ollama.example/api/chat")
+
+    assert calls == [240.0]
+
+
+def test_forward_provider_maps_unreachable_upstream_to_502(monkeypatch):
+    def fake_urlopen(req, timeout):
+        raise urllib.error.URLError(ConnectionRefusedError(111, "Connection refused"))
+
+    monkeypatch.setattr(gateway.urllib.request, "urlopen", fake_urlopen)
+
+    status, headers, body = forward_provider(
+        "super-secret-provider-key",
+        b"{}",
+        provider="ollama",
+        url="http://127.0.0.1:11434/api/chat",
+    )
+
+    assert status == 502
+    assert headers["content-type"] == "application/json"
+    data = json.loads(body)
+    assert data["error"]["message"] == "provider_upstream_unreachable"
+    assert data["error"]["upstream_url"] == "http://127.0.0.1:11434/api/chat"
+
+
 def test_fastapi_gateway_core_allows_local_token(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
@@ -89,7 +171,7 @@ def test_fastapi_gateway_core_allows_local_token(tmp_path, monkeypatch):
 
 
 def test_gateway_startup_explains_graph_key_mismatch(monkeypatch):
-    def fake_from_policy(policy):
+    def fake_from_policy(policy, **kwargs):
         raise ValueError("sealed graph payload authentication failed")
 
     monkeypatch.setattr(gateway.GraphStateStore, "from_policy", fake_from_policy)
@@ -101,6 +183,30 @@ def test_gateway_startup_explains_graph_key_mismatch(monkeypatch):
     assert "MODELKEYGUARD_GRAPH_KEY" in msg
     assert "restore the original graph key" in msg
     assert "reset the local state" in msg
+
+
+def test_create_app_passes_graph_key_file_value_to_store(monkeypatch, tmp_path):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    graph_key_file = tmp_path / "graph_key"
+    graph_key_file.write_text("file-backed-gateway-key-32-bytes-minimum", encoding="utf-8")
+    captured = []
+    real_from_policy = gateway.GraphStateStore.from_policy.__func__
+
+    def recording_from_policy(cls, policy, path=None, app_key=None):
+        captured.append(app_key)
+        return real_from_policy(cls, policy, path=path, app_key=app_key)
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY_FILE", str(graph_key_file))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setattr(gateway.GraphStateStore, "from_policy", classmethod(recording_from_policy))
+
+    TestClient(create_app("config/gateway_policy.json"))
+
+    assert captured[0] == "file-backed-gateway-key-32-bytes-minimum"
 
 
 def test_fastapi_gateway_core_denies_invalid_token(tmp_path, monkeypatch):
@@ -163,6 +269,101 @@ def test_fastapi_gateway_core_returns_user_quota_429(tmp_path, monkeypatch):
 
     assert status == 429
     assert data["error"]["message"] == "user_quota_exceeded"
+
+
+def test_fastapi_gateway_core_denies_missing_provider_secret_in_real_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    guard, policy = build_guard("config/gateway_policy.json")
+    verifier = TokenVerifier("config/gateway_policy.json")
+
+    status, data, _headers = process_chat_completion(_payload(), "Bearer kgw_demo_doc_ingestor", guard, policy, verifier)
+
+    assert status == 403
+    assert data["error"]["message"] == "provider_secret_missing"
+    assert data["error"]["key_id"] == "key:openai:prod"
+
+
+def test_fastapi_gateway_core_rejects_ambiguous_model_keys(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    guard, policy = build_guard("config/gateway_policy.json")
+    policy = dict(policy)
+    policy["model_keys"] = [
+        {
+            "id": "key:ollama:localhost",
+            "provider": "ollama",
+            "models": ["gemma4:e2b"],
+            "secret_ref": "env://OLLAMA_PLACEHOLDER",
+        },
+        {
+            "id": "key:ollama:forwarded",
+            "provider": "ollama",
+            "models": ["gemma4:e2b"],
+            "secret_ref": "env://OLLAMA_PLACEHOLDER",
+        },
+    ]
+    verifier = TokenVerifier("config/gateway_policy.json")
+
+    status, data, _headers = process_chat_completion(
+        _payload(model="gemma4:e2b"),
+        "Bearer kgw_demo_doc_ingestor",
+        guard,
+        policy,
+        verifier,
+    )
+
+    assert status == 403
+    assert data["error"]["message"] == "model_key_ambiguous"
+
+
+def test_openai_compatible_route_rejects_ambiguous_model_keys(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:ollama:a", "ollama", "gemma4:e2b", upstream_url="http://hardware-a:11434/api/chat")
+    _register_provider_key(client, "key:ollama:b", "ollama", "gemma4:e2b", upstream_url="http://hardware-b:11434/api/chat")
+
+    response = client.post(
+        "/v1/chat/completions",
+        json=_payload(model="gemma4:e2b"),
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+
+    assert response.status_code == 403
+    assert response.json()["error"]["message"] == "model_key_ambiguous"
+
+
+def test_openai_compatible_route_can_select_explicit_duplicate_model_key(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    capture_path = tmp_path / "capture.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.setenv("MODELKEYGUARD_MOCK_UPSTREAM_CAPTURE_PATH", str(capture_path))
+    client = TestClient(create_app("config/gateway_policy.json"))
+    _register_provider_key(client, "key:ollama:a", "ollama", "gemma4:e2b", upstream_url="http://hardware-a:11434/api/chat")
+    _register_provider_key(client, "key:ollama:b", "ollama", "gemma4:e2b", upstream_url="http://hardware-b:11434/api/chat")
+
+    payload = _payload(model="gemma4:e2b")
+    payload["modelkeyguard"] = {"key_id": "key:ollama:b"}
+    response = client.post(
+        "/v1/chat/completions",
+        json=payload,
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+
+    assert response.status_code == 200
+    records = [json.loads(line) for line in capture_path.read_text().splitlines() if line.strip()]
+    assert records[-1]["url"] == "http://hardware-b:11434/api/chat"
+    forwarded = json.loads(records[-1]["body"])
+    assert "modelkeyguard" not in forwarded
 
 
 def _register_provider_key(client, key_id: str, provider: str, model: str, *, upstream_url: str = ""):

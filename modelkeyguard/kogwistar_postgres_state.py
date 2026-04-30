@@ -8,7 +8,7 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Iterable
 
-from .graph_state import GraphEdge, GraphNode, DEFAULT_APP_KEY, iso_now, period_bucket, utc_now
+from .graph_state import GraphEdge, GraphNode, iso_now, period_bucket, resolve_graph_app_key, utc_now
 from .kogwistar_import_guard import enforce_installed_kogwistar_only
 from .sealed_payload import open_json, seal_json
 
@@ -392,7 +392,7 @@ class KogwistarPostgresGraphStateStore:
 
     def __init__(self, dsn: str | None = None, app_key: str | None = None) -> None:
         self.dsn = dsn or os.getenv("MODELKEYGUARD_POSTGRES_DSN", DEFAULT_DSN)
-        self.app_key = app_key or os.getenv("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY)
+        self.app_key = resolve_graph_app_key(app_key)
         self.embed_dim = resolve_kogwistar_embed_dim()
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}

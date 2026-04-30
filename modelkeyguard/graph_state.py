@@ -8,9 +8,10 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from .sealed_payload import open_json, seal_json
+from .settings import read_env_or_file
 
 DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl"))
-DEFAULT_APP_KEY = os.getenv("MODELKEYGUARD_GRAPH_KEY", "dev-modelkeyguard-change-me")
+DEFAULT_APP_KEY = "dev-modelkeyguard-change-me"
 QUOTA_POLICY_PROJECTION_PREFIX = "quota_policy_projection"
 SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres", "kogwistar_postgres"}
 SUPPORTED_QUOTA_PERIODS = {"10s", "hour", "day", "week", "month", "infinite", "lifetime"}
@@ -59,6 +60,10 @@ def resolve_store_backend(value: str | None = None) -> str:
     return store
 
 
+def resolve_graph_app_key(app_key: str | None = None) -> str:
+    return app_key or read_env_or_file("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY) or DEFAULT_APP_KEY
+
+
 @dataclass(frozen=True)
 class GraphNode:
     id: str
@@ -93,7 +98,7 @@ class GraphStateStore:
 
     def __init__(self, path: str | Path | None = None, app_key: str | None = None) -> None:
         self.path = Path(path or os.getenv("MODELKEYGUARD_GRAPH_PATH", str(DEFAULT_GRAPH_PATH)))
-        self.app_key = app_key or os.getenv("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY)
+        self.app_key = resolve_graph_app_key(app_key)
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}
         self.events: list[dict[str, Any]] = []

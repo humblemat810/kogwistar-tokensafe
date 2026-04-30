@@ -33,10 +33,10 @@ def extract_system_prompt(messages: list[dict[str, Any]]) -> str:
     return "\n".join(str(m.get("content", "")) for m in messages if m.get("role") == "system")
 
 
-def build_guard(policy_path: str | Path = DEFAULT_POLICY) -> tuple[ModelKeyGuard, dict[str, Any]]:
+def build_guard(policy_path: str | Path = DEFAULT_POLICY, *, app_key: str | None = None) -> tuple[ModelKeyGuard, dict[str, Any]]:
     policy = load_policy_json(policy_path)
     try:
-        graph_state = GraphStateStore.from_policy(policy)
+        graph_state = GraphStateStore.from_policy(policy, app_key=app_key)
     except ValueError as exc:
         if "sealed graph payload authentication failed" not in str(exc):
             raise
@@ -185,6 +185,59 @@ def select_key(policy: dict[str, Any], model: str, guard: ModelKeyGuard | None =
     return None
 
 
+def select_key_with_error(policy: dict[str, Any], model: str, guard: ModelKeyGuard | None = None) -> tuple[str | None, str | None]:
+    matches = [key_id for key_id, _provider, models in _iter_model_keys(policy, guard) if model in models]
+    if not matches:
+        return None, "model_not_registered"
+    if len(matches) > 1:
+        return None, "model_key_ambiguous"
+    return matches[0], None
+
+
+def _requested_modelkeyguard_key_id(payload: dict[str, Any]) -> str:
+    direct = str(payload.get("modelkeyguard_key_id") or "").strip()
+    if direct:
+        return direct
+    meta = payload.get("modelkeyguard")
+    if isinstance(meta, dict):
+        return str(meta.get("key_id") or "").strip()
+    return ""
+
+
+def _strip_modelkeyguard_control_fields(payload: dict[str, Any]) -> bytes:
+    clean = dict(payload)
+    clean.pop("modelkeyguard_key_id", None)
+    meta = clean.get("modelkeyguard")
+    if isinstance(meta, dict) and "key_id" in meta:
+        remaining = dict(meta)
+        remaining.pop("key_id", None)
+        if remaining:
+            clean["modelkeyguard"] = remaining
+        else:
+            clean.pop("modelkeyguard", None)
+    return json.dumps(clean).encode("utf-8")
+
+
+def select_requested_key(
+    policy: dict[str, Any],
+    model: str,
+    provider: str,
+    requested_key_id: str,
+    *,
+    enforce_provider: bool,
+    guard: ModelKeyGuard | None = None,
+) -> tuple[str | None, str | None]:
+    for key_id, key_provider, models in _iter_model_keys(policy, guard):
+        if key_id != requested_key_id:
+            continue
+        if model not in models:
+            return None, "model_not_allowed_for_key"
+        if enforce_provider and key_provider != provider:
+            return None, "model_key_provider_mismatch"
+        return key_id, None
+    return None, "model_key_not_registered"
+
+
 def select_key_for_provider(
     policy: dict[str, Any],
     model: str,
@@ -192,12 +245,18 @@ def select_key_for_provider(
     guard: ModelKeyGuard | None = None,
 ) -> tuple[str | None, str | None]:
     found_model_mismatch_provider = False
+    matches: list[str] = []
     for key_id, key_provider, models in _iter_model_keys(policy, guard):
         if model not in models:
             continue
         if key_provider == provider:
-            return key_id, None
+            matches.append(key_id)
+            continue
         found_model_mismatch_provider = True
+    if len(matches) > 1:
+        return None, "model_key_ambiguous"
+    if matches:
+        return matches[0], None
     if found_model_mismatch_provider:
         return None, "model_key_provider_mismatch"
     return None, "model_not_registered"
@@ -303,6 +362,16 @@ def _merge_upstream_base(upstream_url: str | None, custom_base: str | None) -> s
     scheme = base_url.scheme or route_url.scheme
     netloc = base_url.netloc or route_url.netloc
     base_path = base_url.path.rstrip("/")
+    full_endpoint_suffixes = (
+        "/api/chat",
+        "/api/generate",
+        "/chat/completions",
+        "/responses",
+        ":generateContent",
+        ":streamGenerateContent",
+    )
+    if any(base_path.endswith(suffix) for suffix in full_endpoint_suffixes):
+        return urllib.parse.urlunsplit((scheme, netloc, base_path, base_url.query, ""))
     route_path = route_url.path or ""
     if base_path and (route_path == base_path or route_path.startswith(f"{base_path}/")):
         merged_path = route_path
@@ -407,6 +476,7 @@ def forward_provider(
     content_type: str = "application/json",
 ) -> tuple[int, dict[str, str], bytes]:
     target_url = url or default_upstream_url(provider)
+    timeout_seconds = float(os.getenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", "180"))
     headers = {"content-type": content_type}
     if provider == "azure_openai":
         headers["api-key"] = secret
@@ -429,10 +499,14 @@ def forward_provider(
 
     req = urllib.request.Request(target_url, data=raw, headers=headers, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=timeout_seconds) as resp:
             result = resp.status, {"content-type": resp.headers.get("content-type", "application/json")}, resp.read()
     except urllib.error.HTTPError as e:
         result = e.code, {"content-type": e.headers.get("content-type", "application/json")}, e.read()
+    except urllib.error.URLError as e:
+        result = 502, {"content-type": "application/json"}, json.dumps(
+            {"error": {"message": "provider_upstream_unreachable", "upstream_url": target_url, "detail": str(e.reason)}}
+        ).encode("utf-8")
 
     _store_provider_joblib_cache(secret, raw, result, provider=provider, target_url=target_url, content_type=content_type)
     return result
@@ -616,7 +690,26 @@ def process_chat_completion(
         )
         return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
 
-    if enforce_provider:
+    requested_key_id = _requested_modelkeyguard_key_id(payload)
+    if requested_key_id:
+        key_id, key_error = select_requested_key(
+            policy,
+            str(model),
+            provider,
+            requested_key_id,
+            enforce_provider=enforce_provider,
+            guard=guard,
+        )
+        if not key_id:
+            _set_meta(
+                model=str(model),
+                ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                decision="BLOCKED",
+                reason=key_error or "model_key_not_registered",
+                http_status=403,
+            )
+            return 403, {"error": {"message": key_error or "model_key_not_registered"}}, {"content-type": "application/json"}
+    elif enforce_provider:
         key_id, key_error = select_key_for_provider(policy, str(model), provider, guard)
         if not key_id:
             _set_meta(
@@ -628,16 +721,16 @@ def process_chat_completion(
             )
             return 403, {"error": {"message": key_error or "model_not_registered"}}, {"content-type": "application/json"}
     else:
-        key_id = select_key(policy, str(model), guard)
+        key_id, key_error = select_key_with_error(policy, str(model), guard)
         if not key_id:
             _set_meta(
                 model=str(model),
                 ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 decision="BLOCKED",
-                reason="model_not_registered",
+                reason=key_error or "model_not_registered",
                 http_status=403,
             )
-            return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
+            return 403, {"error": {"message": key_error or "model_not_registered"}}, {"content-type": "application/json"}
 
     # Runtime fallback: if key is not currently in-memory, try persistent graph
     # rehydrate at request time before guard.check. This keeps restart/eviction
@@ -734,15 +827,38 @@ def process_chat_completion(
         )
         return 403, {"error": {"message": str(e)}}, {"content-type": "application/json"}
 
-    if not secret or os.getenv("MODELKEYGUARD_DRY_RUN", "1") == "1":
+    dry_run_mode = os.getenv("MODELKEYGUARD_DRY_RUN", "1") == "1"
+    if not secret:
+        if dry_run_mode:
+            guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+            _set_meta(http_status=200)
+            return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
+        if guard.graph_state:
+            guard.graph_state.append_access_conversation_event(
+                decision.request_id,
+                "SECRET_RESOLUTION_DENIED",
+                {"reason": "provider_secret_missing", "key_id": decision.key_id},
+            )
+        _set_meta(
+            http_status=403,
+            decision="BLOCKED",
+            reason="provider_secret_missing",
+        )
+        return 403, {"error": {"message": "provider_secret_missing", "key_id": decision.key_id}}, {"content-type": "application/json"}
+
+    if dry_run_mode:
         guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
         _set_meta(http_status=200)
         return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
 
     resolved_upstream_url = _merge_upstream_base(upstream_url, _key_upstream_override(policy, guard, key_id))
+    provider_body = forward_body or raw_body or json.dumps(payload).encode("utf-8")
+    if requested_key_id:
+        provider_body = _strip_modelkeyguard_control_fields(payload)
+
     status, headers, body = forward_provider(
         secret,
-        forward_body or raw_body or json.dumps(payload).encode("utf-8"),
+        provider_body,
         provider=provider,
         url=resolved_upstream_url,
         content_type=forward_content_type,
@@ -779,7 +895,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     errors = settings.validate_for_startup()
     if errors:
         raise RuntimeError("; ".join(errors))
-    guard, policy = build_guard(policy_path)
+    guard, policy = build_guard(policy_path, app_key=settings.graph_key)
     verifier = TokenVerifier(policy_path)
     verifier.graph_state = guard.graph_state
     key_manager = KeyManager(guard.graph_state, guard.graph_state.app_key) if guard.graph_state else None

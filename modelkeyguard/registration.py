@@ -548,10 +548,8 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
         path.unlink()
     import os
     old_path = os.environ.get("MODELKEYGUARD_GRAPH_PATH")
-    old_key = os.environ.get("MODELKEYGUARD_GRAPH_KEY")
     old_store = os.environ.get("MODELKEYGUARD_STORE")
     os.environ["MODELKEYGUARD_GRAPH_PATH"] = str(path)
-    os.environ["MODELKEYGUARD_GRAPH_KEY"] = app_key
     os.environ["MODELKEYGUARD_STORE"] = "jsonl"
     try:
         policy = load_policy_json("config/gateway_policy.json")
@@ -586,10 +584,6 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
             os.environ.pop("MODELKEYGUARD_GRAPH_PATH", None)
         else:
             os.environ["MODELKEYGUARD_GRAPH_PATH"] = old_path
-        if old_key is None:
-            os.environ.pop("MODELKEYGUARD_GRAPH_KEY", None)
-        else:
-            os.environ["MODELKEYGUARD_GRAPH_KEY"] = old_key
         if old_store is None:
             os.environ.pop("MODELKEYGUARD_STORE", None)
         else:

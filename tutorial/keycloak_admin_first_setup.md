@@ -356,6 +356,12 @@ GUI.
 Use one variable so the same tutorial can be repeated for OpenAI, Azure OpenAI,
 Ollama, or Gemini.
 
+This compose walkthrough starts the gateway in dry-run mode by default, so the
+OpenAI-compatible call below will return a ModelKeyGuard synthetic response
+unless you also restart the gateway with `MODELKEYGUARD_DRY_RUN=0` and use real
+provider credentials. The same registration order still applies in real mode;
+only the upstream forwarding changes.
+
 ```bash
 export MODELKEYGUARD_SAMPLE_PROVIDER="${MODELKEYGUARD_SAMPLE_PROVIDER:-openai}"
 export MODELKEYGUARD_SAMPLE_PROVIDER_SECRET="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET:-change-me}"
@@ -408,6 +414,18 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
 That gives you one provider route for the same agent, regardless of the backend
 flavor you pick.
 
+If you want the gateway to forward to the real provider instead of returning
+the synthetic dry-run payload, restart the compose stack with
+`MODELKEYGUARD_DRY_RUN=0` before you run this step. The secure production
+compose path already sets that value to `0`; the default tutorial compose stack
+keeps it at `1` for a no-secret demo path.
+
+For Ollama, `MODELKEYGUARD_SAMPLE_UPSTREAM_URL` must point at an address the
+gateway container can actually reach. If Ollama is running on the host machine,
+`http://127.0.0.1:11434/api/chat` usually points back into the gateway
+container itself. Use a reachable host IP, a Docker service name, or a
+configured `host.docker.internal` entry instead.
+
 ## 7. Issue a safe token for the agent and human pair
 
 ```bash
@@ -420,6 +438,11 @@ SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
 
 If you want the exact token itself to stop after a fixed amount, add a `token`
 lane quota on the issued token ID.
+
+In dry-run mode, the request still exercises auth, ACL, quota, and key
+selection, but the returned completion is synthetic. In real mode, with
+`MODELKEYGUARD_DRY_RUN=0`, the same token is forwarded to the real upstream
+provider.
 
 ## 8. Use the browser admin path
 
@@ -441,12 +464,47 @@ admin GUI on a separate Keycloak account with `model.admin`.
 
 ## 9. Run a request and inspect quota
 
-Use the safe token to make a request:
+Use the safe token to make a request. The same OpenAI-compatible client works
+for all four provider flavors; only the model name changes to match the key you
+registered in step 6.
 
 ```bash
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
 OPENAI_API_KEY="${SAFE_TOKEN}" \
 OPENAI_MODEL='gpt-4o-mini' \
+python scripts/langchain_user_openai_compatible.py
+```
+
+Examples for each provider flavor:
+
+```bash
+# OpenAI
+OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
+OPENAI_API_KEY="${SAFE_TOKEN}" \
+OPENAI_MODEL='gpt-4o-mini' \
+python scripts/langchain_user_openai_compatible.py
+
+# Azure OpenAI
+OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
+OPENAI_API_KEY="${SAFE_TOKEN}" \
+OPENAI_MODEL='gpt-4o-mini-prod' \
+python scripts/langchain_user_openai_compatible.py
+
+# Ollama
+OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
+OPENAI_API_KEY="${SAFE_TOKEN}" \
+OPENAI_MODEL='gemma4:e2b' \
+python scripts/langchain_user_openai_compatible.py
+
+If the Ollama key was registered with `http://127.0.0.1:11434/api/chat`, and
+Ollama is running on the host rather than inside the gateway container, this
+call will fail with `500 Internal Server Error`. Re-register the Ollama key
+with a reachable upstream URL before retrying.
+
+# Gemini
+OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
+OPENAI_API_KEY="${SAFE_TOKEN}" \
+OPENAI_MODEL='gemini-2.0-flash' \
 python scripts/langchain_user_openai_compatible.py
 ```
 
