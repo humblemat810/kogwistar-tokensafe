@@ -5,6 +5,19 @@ PyPI package. The default policy graph is bundled into the package, so the
 registration CLI can still seed the standard demo path without relying on
 `config/gateway_policy.json` being present in the current directory.
 
+If you installed from PyPI and do not want to use any repo scripts, the same
+seed path is available as:
+
+```bash
+modelkeyguard registration seed \
+  --user-id user:customer-123 \
+  --user-display-name "Customer 123" \
+  --principal-id agent:customer-123-doc-agent \
+  --principal-groups agent-dev \
+  --namespace tenant:kogwistar \
+  --application-id app:customer-123
+```
+
 This tutorial registers a SaaS-style model access path in the graph:
 
 ```text

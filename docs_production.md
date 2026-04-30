@@ -21,6 +21,18 @@ default policy graph bundled with the package. You can start the CLI or the
 gateway without a repo checkout, and only override `MODELKEYGUARD_POLICY_PATH`
 when you intentionally want a custom policy file.
 
+The installed commands are the no-bash-script path:
+
+```bash
+python -m pip install kogwistar-modelkeyguard-keycloak
+modelkeyguard registration seed --user-id user:customer-123 --principal-id agent:customer-123-doc-agent --namespace tenant:kogwistar
+modelkeyguard usage-analysis-agent --principal agent:doc-ingestor --key key:openai:prod
+modelkeyguard deploy-remote fresh-up --ssh localhost --shape compose
+```
+
+Use the `scripts/` wrappers only if you prefer the checkout-based entrypoints;
+the PyPI install can drive the same workflows directly.
+
 1. Bootstrap secrets.
    - Local rehearsal: `./scripts/bootstrap_secrets.sh --production`
    - Real production: create the same secret files from your secret manager or CI secrets, then mount them with `_FILE` env vars.

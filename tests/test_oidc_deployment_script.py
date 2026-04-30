@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+from modelkeyguard.__main__ import main as modelkeyguard_main
+
 
 def test_oidc_protect_everything_script_has_valid_bash_syntax():
     repo_root = Path(__file__).resolve().parents[1]
@@ -61,6 +63,28 @@ def test_get_agent_token_uses_repo_python_fallback():
     assert 'if "${compose_cmd[@]}" exec -T gateway python3' in text
     assert 'http://keycloak:8080/realms/modelguard/protocol/openid-connect/token' in text
     assert '| "$PYTHON_BIN" -c' in text
+
+
+def test_deploy_remote_shell_wrapper_execs_installed_module():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "deploy_remote_stack.sh"
+    text = script.read_text(encoding="utf-8")
+
+    assert 'exec "${PYTHON_BIN}" -m modelkeyguard.remote_deploy "$@"' in text
+
+
+def test_modelkeyguard_main_dispatches_remote_deploy(monkeypatch):
+    called: list[list[str]] = []
+
+    def fake_remote_deploy(rest):
+        called.append(list(rest))
+        return 0
+
+    monkeypatch.setattr("modelkeyguard.__main__.deploy_remote_main", fake_remote_deploy)
+    code = modelkeyguard_main(["deploy-remote", "up", "--ssh", "localhost", "--shape", "compose"])
+
+    assert code == 0
+    assert called == [["up", "--ssh", "localhost", "--shape", "compose"]]
 
 
 def test_bootstrap_secrets_local_creates_admin_secret_and_placeholders(tmp_path):

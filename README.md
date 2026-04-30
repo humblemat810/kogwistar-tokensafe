@@ -13,6 +13,25 @@ bundled into the package, so the `modelkeyguard` CLI can still start without a
 repo checkout or a local `config/gateway_policy.json` file. You only need to
 override `MODELKEYGUARD_POLICY_PATH` if you want a custom policy file.
 
+The installed wheel also exposes a few utility commands directly:
+`modelkeyguard-token`, `modelkeyguard-usage-analysis-agent`,
+`modelkeyguard-deploy-remote`, `modelkeyguard deploy-remote`, and
+`modelkeyguard registration seed`.
+
+If you want to use a PyPI install without any repo shell scripts, the installed
+commands are the path:
+
+```bash
+python -m pip install kogwistar-modelkeyguard-keycloak
+modelkeyguard registration seed --user-id user:customer-123 --principal-id agent:customer-123-doc-agent --namespace tenant:kogwistar
+modelkeyguard usage-analysis-agent --principal agent:doc-ingestor --key key:openai:prod
+modelkeyguard deploy-remote fresh-up --ssh localhost --shape compose
+```
+
+The shell scripts in `scripts/` remain available as compatibility wrappers for
+checkout-based workflows, but they are no longer the only way to reach the
+common utility flows.
+
 ## 60-second quickstart
 ### step 0 (for restart only, skip if fresh run)
 turn off existing running resources occupying required resources

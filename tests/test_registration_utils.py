@@ -12,6 +12,7 @@ from modelkeyguard.gateway import build_guard, process_chat_completion
 from modelkeyguard.graph_state import GraphStateStore, resolve_store_backend
 from modelkeyguard.registration import RegistrationService, main as registration_main, open_registration_store, register_usage_demo, safe_token_hash
 from modelkeyguard.policy_loader import load_policy_json
+from modelkeyguard.tools import get_agent_token_main, usage_analysis_agent_main
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
@@ -233,6 +234,46 @@ def test_packaged_default_policy_is_available_without_checkout_config(tmp_path, 
     assert issued.principal_id == "agent:demo-saas-agent"
     assert issued.on_behalf_of_user_id == "user:demo-saas-alice"
     assert (tmp_path / "out" / "registration_demo_token.txt").read_text(encoding="utf-8").strip() == issued.token
+
+
+def test_installed_token_mint_cli_uses_service_account_helper(monkeypatch, capsys):
+    class FakeKeycloakServiceAccount:
+        def __init__(self, *args, **kwargs):
+            self.args = args
+            self.kwargs = kwargs
+
+        def mint_access_token(self):
+            return "minted-token"
+
+    monkeypatch.setattr("modelkeyguard.tools.KeycloakServiceAccount", FakeKeycloakServiceAccount)
+    code = get_agent_token_main(["--client-id", "client-a", "--client-secret", "secret-a", "--keycloak-url", "http://kc", "--realm", "realm-a"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert captured.out.strip() == "minted-token"
+
+
+def test_installed_usage_analysis_cli_runs_from_package_module(monkeypatch, capsys):
+    class FakeAgent:
+        def __init__(self):
+            self.user_subjects = ["user:alice"]
+            self.principal_subjects = ["agent:doc-ingestor"]
+            self.key_subjects = ["key:openai:prod"]
+
+        def render(self):
+            return '{"ok": true}'
+
+    class FakeUsageAnalysisAgent:
+        @classmethod
+        def from_env(cls):
+            return FakeAgent()
+
+    monkeypatch.setattr("modelkeyguard.tools.UsageAnalysisAgent", FakeUsageAnalysisAgent)
+    code = usage_analysis_agent_main(["--base-url", "http://127.0.0.1:8789", "--user", "user:test", "--principal", "agent:test", "--key", "key:test"])
+    captured = capsys.readouterr()
+
+    assert code == 0
+    assert '"ok": true' in captured.out
 
 
 def test_registration_store_invariant_rejects_unknown_serious_backend(monkeypatch, capsys):

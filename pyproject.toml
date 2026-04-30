@@ -27,6 +27,9 @@ dev = ["pytest>=8", "httpx>=0.27", "joblib>=1.4"]
 
 [project.scripts]
 modelkeyguard = "modelkeyguard.__main__:main"
+modelkeyguard-token = "modelkeyguard.tools:get_agent_token_main"
+modelkeyguard-usage-analysis-agent = "modelkeyguard.tools:usage_analysis_agent_main"
+modelkeyguard-deploy-remote = "modelkeyguard.remote_deploy:main"
 
 [tool.setuptools.packages.find]
 where = ["."]

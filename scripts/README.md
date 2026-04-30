@@ -97,3 +97,13 @@ For SSH-based deployment to another user or another machine, use:
 scripts/deploy_remote_stack.sh
 scripts/deployment_smoke.sh
 ```
+
+Installed-package counterparts:
+
+```text
+modelkeyguard-token
+modelkeyguard-usage-analysis-agent
+modelkeyguard-deploy-remote
+modelkeyguard deploy-remote
+modelkeyguard registration seed
+```
