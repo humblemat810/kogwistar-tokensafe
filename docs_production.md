@@ -288,6 +288,15 @@ remote Docker host, and stages secrets into a tmpfs-backed runtime directory on
 the target host for the lifetime of the deployment, rather than leaving
 persistent secret files behind.
 
+For the remote compose path, the wrapper also generates a non-default Keycloak
+bootstrap admin username/password pair unless you override them in the local
+environment. It prints that pair once during deploy so you can use the Keycloak
+admin console without relying on `admin` / `admin`.
+
+To add a new Keycloak user after deploy, log into the Keycloak admin console
+with that bootstrap admin pair, open `Users`, create the user, set a password,
+and assign realm roles such as `model.admin` or `model.usage.read` as needed.
+
 The script renders `gateway.env`, `postgres.env`, `keycloak.env`, and
 `gateway-compose.env` under `out/deployment_targets_rendered/` and passes the
 gateway env files to Compose. Those rendered files are artifacts, not a second
@@ -429,6 +438,9 @@ client request with model=gpt-4o-mini
         =
 gateway may forward using the sealed provider key
 ```
+
+The long-lived semantic decisions behind this workflow are recorded in
+[docs/adr/](docs/adr/README.md).
 
 The two different "keys" have different jobs, and the quota lane for the safe
 token itself is separate from both of them:

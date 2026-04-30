@@ -663,6 +663,15 @@ That wrapper builds the gateway image locally, loads it on the remote Docker
 host, and keeps secrets only in a runtime tmpfs staging area on the target
 while the deployment is active.
 
+For the remote compose path, it also generates a non-default Keycloak
+bootstrap admin username/password pair unless you override them locally. It
+prints that pair during deploy so you can reach the Keycloak admin console
+without using `admin` / `admin`.
+
+To add a new Keycloak user, log into the Keycloak admin console with that
+bootstrap admin pair, create the user under `Users`, set a password, and assign
+realm roles like `model.admin` or `model.usage.read`.
+
 The smoke checks the browser OIDC redirect, CLI token auth, and the reusable
 usage-analysis agent against the deployed surface:
 
