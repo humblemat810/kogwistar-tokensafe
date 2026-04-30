@@ -59,6 +59,9 @@ def test_get_agent_token_uses_repo_python_fallback():
     assert '.venv/bin/python' in text
     assert 'python3' in text
     assert 'if "${compose_cmd[@]}" exec -T gateway python3' in text
+    assert 'label=com.docker.compose.service=gateway' in text
+    assert '--filter "name=gateway"' in text
+    assert 'keycloak_url = os.getenv("KEYCLOAK_URL", "http://keycloak:8080").rstrip("/")' in text
     assert 'http://keycloak:8080/realms/modelguard/protocol/openid-connect/token' in text
     assert '| "$PYTHON_BIN" -c' in text
 
