@@ -358,14 +358,28 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "Do not use the browser client `modelguard-admin-web` for machines" in tutorial
     assert "creating a Keycloak client does not automatically create a" in tutorial
     assert "safe token issued in step 7" in tutorial
+    assert "easiest local case: omit `--admin-base-url` entirely" in tutorial.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in tutorial
-    assert "For a true remote deployment, use the remote gateway URL" in tutorial
+    assert "--admin-secret \"$MODELKEYGUARD_ADMIN_API_SECRET\"" in tutorial
+    assert "bootstrap_secrets.sh" in tutorial
+    assert "modelkeyguard_admin_api_secret" in tutorial
+    assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in tutorial
+    assert "use `--admin-bearer-token \"$admin_token\"` only when the gateway is explicitly" in tutorial.lower()
+    assert "modelkeyguard_admin_auth_mode=keycloak" in tutorial.lower()
+    assert "secret_or_keycloak" in tutorial.lower()
+    assert "for a true remote deployment, replace `http://127.0.0.1:8789` with the remote" in tutorial.lower()
     assert "MODELKEYGUARD_SAMPLE_PROVIDER" in tutorial
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial
     assert "keycloak_admin_first_setup.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs
+    assert "easiest local path is to call `modelkeyguard" in docs.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in docs
+    assert "--admin-secret" in docs
+    assert "bootstrap_secrets.sh" in docs
+    assert "modelkeyguard_admin_api_secret" in docs
+    assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in docs
+    assert "--admin-bearer-token" in docs
     assert "replace `http://127.0.0.1:8789` with the remote" in docs
 
 

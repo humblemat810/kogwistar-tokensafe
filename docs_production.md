@@ -502,26 +502,36 @@ Use whichever is easiest for the current environment. The backend behavior is
 the same.
 
 After the gateway is up, register the application, end user, principal, quotas,
-and key in that order. The examples below use a Keycloak admin bearer token. If
-you are in a migration window, the same endpoints also accept the admin secret
-header.
+and key in that order. The easiest local path is to call `modelkeyguard
+registration ...` directly with no `--admin-base-url`, which writes to the
+local store.
 
 If you want to write through the running gateway instead of the local store,
-point the CLI at the ModelKeyGuard admin API with `--admin-base-url` and
-either `--admin-bearer-token` or `--admin-secret`. That base URL is the
-ModelKeyGuard gateway, not Keycloak.
+point the CLI at the ModelKeyGuard admin API with `--admin-base-url`. That base
+URL is the ModelKeyGuard gateway, not Keycloak. The default admin auth mode for
+the gateway is secret-based, so the local gateway example uses
+`--admin-secret`. Use `--admin-bearer-token` only when the gateway is
+explicitly configured with `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak` or
+`secret_or_keycloak`, and the token comes from a Keycloak service account with
+the required admin role.
+
+The secret used by `--admin-secret` comes from
+`./scripts/bootstrap_secrets.sh`, which creates
+`./secrets/modelkeyguard_admin_api_secret` by default. You can point
+`MODELKEYGUARD_ADMIN_API_SECRET_FILE` at that file, or export the value into
+`MODELKEYGUARD_ADMIN_API_SECRET` if you want a plain shell variable.
 
 ```bash
 modelkeyguard \
   --admin-base-url http://127.0.0.1:8789 \
-  --admin-bearer-token "$ADMIN_TOKEN" \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
   registration register-user \
   --user-id user:alice \
   --display-name "Alice"
 ```
 
-For a remote gateway, replace `http://127.0.0.1:8789` with the remote
-gateway URL.
+For a remote gateway, replace `http://127.0.0.1:8789` with the remote gateway
+URL and keep the same auth mode the remote gateway is configured for.
 
 ```bash
 export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"

@@ -158,19 +158,43 @@ directly to the local store, add `--admin-base-url` and point it at the
 ModelKeyGuard gateway. That base URL is the ModelKeyGuard gateway, not
 Keycloak.
 
+Easiest local case: omit `--admin-base-url` entirely and let the command write
+directly to the local store.
+
 Example:
 
 ```bash
+modelkeyguard registration register-user \
+  --user-id user:alice \
+  --display-name "Alice"
+```
+
+If you want to go through the running local gateway at
+`http://127.0.0.1:8789`, use the admin secret by default:
+
+```bash
+export MODELKEYGUARD_ADMIN_API_SECRET_FILE='./secrets/modelkeyguard_admin_api_secret'
+
 modelkeyguard \
   --admin-base-url http://127.0.0.1:8789 \
-  --admin-bearer-token "$ADMIN_TOKEN" \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
   registration register-user \
   --user-id user:alice \
   --display-name "Alice"
 ```
 
-For a true remote deployment, use the remote gateway URL in place of
-`http://127.0.0.1:8789`.
+That secret file is created by `./scripts/bootstrap_secrets.sh` and is the
+source of `MODELKEYGUARD_ADMIN_API_SECRET` in local and deploy flows. If you
+prefer a shell variable, you can also export it from that file with
+`export MODELKEYGUARD_ADMIN_API_SECRET="$(< ./secrets/modelkeyguard_admin_api_secret)"`.
+
+Use `--admin-bearer-token "$ADMIN_TOKEN"` only when the gateway is explicitly
+configured with `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak` or
+`secret_or_keycloak`, and the token comes from a Keycloak service account with
+the required admin role.
+
+For a true remote deployment, replace `http://127.0.0.1:8789` with the remote
+gateway URL and use the same auth mode the remote gateway is configured for.
 
 If Alice will be paired with a specific application principal, register that
 too:
