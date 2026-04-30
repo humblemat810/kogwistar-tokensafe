@@ -668,6 +668,11 @@ bootstrap admin username/password pair unless you override them locally. It
 prints that pair during deploy so you can reach the Keycloak admin console
 without using `admin` / `admin`.
 
+Warning: copy that pair when the deploy finishes. The wrapper does not keep a
+recoverable copy for you. Losing that bootstrap console login does not erase
+the persisted gateway data, but it can leave you without a Keycloak admin
+console until you provision another admin path.
+
 To add a new Keycloak user, log into the Keycloak admin console with that
 bootstrap admin pair, create the user under `Users`, set a password, and assign
 realm roles like `model.admin` or `model.usage.read`.

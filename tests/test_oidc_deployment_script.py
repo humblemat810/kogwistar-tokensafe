@@ -302,6 +302,8 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "--shape MODE" in deploy
     assert "compose | gateway-only" in deploy
     assert "tmpfs-backed runtime directory" in deploy
+    assert "rm -rf '$remote_root_expanded/secrets'" in deploy
+    assert "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" in deploy
     assert "browser OIDC redirect" in smoke
     assert "CLI/service-account token path" in smoke
     assert "usage-analysis agent" in smoke

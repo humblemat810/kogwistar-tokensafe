@@ -204,7 +204,7 @@ stage_runtime_secrets() {
     fi
     ssh "$remote" "printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
   fi
-  ssh "$remote" "rm -f '$remote_root_expanded/secrets' && ln -s '$runtime_secret_dir' '$remote_root_expanded/secrets' && printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
+  ssh "$remote" "rm -rf '$remote_root_expanded/secrets' && ln -s '$runtime_secret_dir' '$remote_root_expanded/secrets' && printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
 }
 
 build_local_image() {
@@ -222,7 +222,7 @@ cleanup_runtime_secrets() {
   if [[ -z "$dir" ]]; then
     return 0
   fi
-  ssh "$remote" "rm -f '$remote_root_expanded/secrets' '$runtime_state_file' && rm -rf '$dir'" >/dev/null 2>&1 || true
+  ssh "$remote" "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" >/dev/null 2>&1 || true
 }
 
 if [[ "$shape" != "compose" && "$shape" != "gateway-only" ]]; then
