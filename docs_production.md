@@ -16,6 +16,11 @@ The gateway verifies the token, checks Kogwistar graph ACL/quota state, resolves
 This is the single production deployment document. Follow it in order for
 config, deploy, register application, register key, and first use.
 
+If you are using an installed wheel or PyPI package, the gateway still has a
+default policy graph bundled with the package. You can start the CLI or the
+gateway without a repo checkout, and only override `MODELKEYGUARD_POLICY_PATH`
+when you intentionally want a custom policy file.
+
 1. Bootstrap secrets.
    - Local rehearsal: `./scripts/bootstrap_secrets.sh --production`
    - Real production: create the same secret files from your secret manager or CI secrets, then mount them with `_FILE` env vars.

@@ -8,7 +8,9 @@ version = "0.4.0"
 description = "Kogwistar ACL model-key gateway with Keycloak token verification"
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{name = "Kogwistar ModelKeyGuard"}]
+
+authors = [{ name = "Peter Chan", email = "humblemat@gmail.com" }]
+
 dependencies = [
   "kogwistar>=0.2.4",
   "fastapi>=0.115",
@@ -31,7 +33,7 @@ where = ["."]
 include = ["modelkeyguard*"]
 
 [tool.setuptools.package-data]
-modelkeyguard = ["web/templates/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*.js"]
+modelkeyguard = ["data/*.json", "web/templates/*.html", "web/static/*.js", "web/static/*.css", "web/static/vendor/*.js"]
 
 [tool.pytest.ini_options]
 addopts = "--ignore=data/postgres --ignore=postgres"

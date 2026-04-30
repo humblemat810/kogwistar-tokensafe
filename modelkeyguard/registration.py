@@ -11,6 +11,7 @@ from typing import Any
 import hashlib
 
 from .graph_state import GraphStateStore, normalize_quota_period, resolve_store_backend
+from .policy_loader import load_policy_json
 
 
 def safe_token_hash(token: str) -> str:
@@ -367,8 +368,7 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
     os.environ["MODELKEYGUARD_GRAPH_PATH"] = str(path)
     os.environ["MODELKEYGUARD_GRAPH_KEY"] = app_key
     try:
-        policy_path = Path("config/gateway_policy.json")
-        policy = json.loads(policy_path.read_text()) if policy_path.exists() else {}
+        policy = load_policy_json("config/gateway_policy.json")
         store = GraphStateStore.from_policy(policy, path=path, app_key=app_key)
         reg = RegistrationService(store)
         reg.register_user("user:demo-saas-alice", "Demo SaaS Alice")

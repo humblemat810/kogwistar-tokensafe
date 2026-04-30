@@ -8,6 +8,11 @@ Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANT
 For a plain-English explanation of the runnable shell entrypoints, see
 [`scripts/README.md`](scripts/README.md).
 
+If you install the package from PyPI or a wheel, the default policy graph is
+bundled into the package, so the `modelkeyguard` CLI can still start without a
+repo checkout or a local `config/gateway_policy.json` file. You only need to
+override `MODELKEYGUARD_POLICY_PATH` if you want a custom policy file.
+
 ## 60-second quickstart
 ### step 0 (for restart only, skip if fresh run)
 turn off existing running resources occupying required resources

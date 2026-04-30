@@ -1,5 +1,10 @@
 # Usage registration tutorial: user + principal + safe token
 
+This tutorial works both from a repo checkout and from an installed wheel or
+PyPI package. The default policy graph is bundled into the package, so the
+registration CLI can still seed the standard demo path without relying on
+`config/gateway_policy.json` being present in the current directory.
+
 This tutorial registers a SaaS-style model access path in the graph:
 
 ```text

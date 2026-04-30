@@ -11,6 +11,7 @@ import pytest
 from modelkeyguard.gateway import build_guard, process_chat_completion
 from modelkeyguard.graph_state import GraphStateStore, resolve_store_backend
 from modelkeyguard.registration import RegistrationService, main as registration_main, open_registration_store, register_usage_demo, safe_token_hash
+from modelkeyguard.policy_loader import load_policy_json
 from modelkeyguard.token_auth import TokenVerifier
 
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
@@ -218,6 +219,20 @@ def test_registration_store_invariant_uses_kogwistar_postgres_when_configured(mo
     store = open_registration_store()
     assert calls == ["kogwistar_postgres"]
     assert isinstance(store, FakeKogwistarStore)
+
+
+def test_packaged_default_policy_is_available_without_checkout_config(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    policy = load_policy_json("config/gateway_policy.json")
+    assert policy["issuer"] == "keycloak:modelguard"
+    assert policy["users"]["user:alice"]["display_name"] == "Alice Example"
+    assert policy["model_keys"][0]["id"] == "key:openai:prod"
+
+    issued = register_usage_demo(tmp_path / "graph.jsonl", "packaged-policy-test-key")
+    assert issued.principal_id == "agent:demo-saas-agent"
+    assert issued.on_behalf_of_user_id == "user:demo-saas-alice"
+    assert (tmp_path / "out" / "registration_demo_token.txt").read_text(encoding="utf-8").strip() == issued.token
 
 
 def test_registration_store_invariant_rejects_unknown_serious_backend(monkeypatch, capsys):
