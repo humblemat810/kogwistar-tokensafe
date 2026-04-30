@@ -242,6 +242,46 @@ def test_registration_seed_cli_uses_remote_admin_api_when_configured(tmp_path, m
     assert any(call["headers"].get("authorization") == "Bearer bearer-123" for call in calls)
 
 
+def test_modelkeyguard_top_level_registration_forwards_remote_admin_args(monkeypatch):
+    import modelkeyguard.__main__ as cli_main
+
+    captured: dict[str, list[str]] = {}
+
+    def fake_registration_main(argv):
+        captured["argv"] = list(argv)
+        return 0
+
+    monkeypatch.setattr(cli_main, "registration_main", fake_registration_main)
+
+    rc = cli_main.main(
+        [
+            "--admin-base-url",
+            "http://127.0.0.1:8789",
+            "--admin-bearer-token",
+            "token-123",
+            "registration",
+            "register-user",
+            "--user-id",
+            "user:alice",
+            "--display-name",
+            "Alice",
+        ]
+    )
+
+    assert rc == 0
+    assert captured["argv"] == [
+        "--admin-base-url",
+        "http://127.0.0.1:8789",
+        "--admin-bearer-token",
+        "token-123",
+        "register-user",
+        "--user-id",
+        "user:alice",
+        "--display-name",
+        "Alice",
+    ]
+
+
 def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
     reg = RegistrationService(store)
