@@ -3,6 +3,7 @@ set -euo pipefail
 export MODELKEYGUARD_GRAPH_PATH=${MODELKEYGUARD_GRAPH_PATH:-out/registration_demo_graph.jsonl}
 export MODELKEYGUARD_GRAPH_KEY=${MODELKEYGUARD_GRAPH_KEY:-dev-registration-demo-key-change-me}
 export MODELKEYGUARD_DRY_RUN=${MODELKEYGUARD_DRY_RUN:-1}
+export MODELKEYGUARD_STORE="${MODELKEYGUARD_STORE:-jsonl}"
 export MODELKEYGUARD_HOST=${MODELKEYGUARD_HOST:-127.0.0.1}
 export MODELKEYGUARD_PORT=${MODELKEYGUARD_PORT:-8789}
 ./scripts/register_usage_example.sh >/dev/null

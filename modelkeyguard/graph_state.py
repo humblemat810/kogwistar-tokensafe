@@ -53,7 +53,7 @@ def normalize_quota_period(period: str) -> str:
 
 
 def resolve_store_backend(value: str | None = None) -> str:
-    store = (value if value is not None else os.getenv("MODELKEYGUARD_STORE", "jsonl")).strip().lower() or "jsonl"
+    store = (value if value is not None else os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres")).strip().lower() or "kogwistar_postgres"
     if store not in SUPPORTED_STORE_BACKENDS:
         raise ValueError(f"unsupported_store_backend:{store}")
     return store

@@ -51,6 +51,7 @@ def test_safe_token_verifier_infers_principal_user_and_application(tmp_path, mon
     token = register_usage_demo(graph_path, "demo-test-key").token
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
     verified = TokenVerifier("config/gateway_policy.json").verify_token(token)
 
@@ -67,6 +68,7 @@ def test_registered_safe_token_end_to_end_openai_compatible_call(tmp_path, monke
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
     monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
     guard, policy = build_guard("config/gateway_policy.json")
     verifier = TokenVerifier("config/gateway_policy.json")
@@ -101,6 +103,7 @@ def test_registered_user_quota_can_return_user_429(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "demo-test-key")
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
     # Tighten registered user's hour quota after demo registration.
     store = GraphStateStore(graph_path, app_key="demo-test-key")
@@ -566,6 +569,11 @@ def test_registration_store_invariant_defaults_to_kogwistar_postgres(monkeypatch
     assert isinstance(store, FakeKogwistarStore)
 
 
+def test_store_backend_resolver_defaults_to_kogwistar_postgres(monkeypatch):
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    assert resolve_store_backend() == "kogwistar_postgres"
+
+
 def test_packaged_default_policy_is_available_without_checkout_config(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 
@@ -619,3 +627,50 @@ def test_graph_state_from_policy_dispatches_kogwistar_postgres(monkeypatch):
     out = GraphStateStore.from_policy({})
     assert calls == ["dispatch"]
     assert isinstance(out, FakeKogwistarStore)
+
+
+def test_graph_state_from_policy_defaults_to_kogwistar_postgres_without_store_env(monkeypatch):
+    calls: list[str] = []
+
+    class FakeKogwistarStore:
+        @classmethod
+        def from_policy(cls, policy, dsn=None, app_key=None):
+            calls.append("dispatch")
+            return cls()
+
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    out = GraphStateStore.from_policy({})
+    assert calls == ["dispatch"]
+    assert isinstance(out, FakeKogwistarStore)
+
+
+def test_token_verifier_empty_policy_defaults_to_kogwistar_postgres_without_store_env(tmp_path, monkeypatch):
+    policy_path = tmp_path / "empty-policy.json"
+    policy_path.write_text("{}", encoding="utf-8")
+    calls: list[str] = []
+
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            calls.append("kogwistar_postgres")
+            self.nodes = {}
+            self.edges = {}
+            self.events = []
+            self.projections = {}
+
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    verifier = TokenVerifier(policy_path)
+
+    assert calls == ["kogwistar_postgres"]
+    assert isinstance(verifier.graph_state, FakeKogwistarStore)

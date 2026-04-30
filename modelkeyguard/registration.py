@@ -518,7 +518,7 @@ def open_registration_store():
     was explicitly requested.
     """
     try:
-        store_kind = resolve_store_backend(os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres"))
+        store_kind = resolve_store_backend()
     except ValueError as exc:
         raise RegistrationError(str(exc)) from exc
     if store_kind == "jsonl":
@@ -549,8 +549,10 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
     import os
     old_path = os.environ.get("MODELKEYGUARD_GRAPH_PATH")
     old_key = os.environ.get("MODELKEYGUARD_GRAPH_KEY")
+    old_store = os.environ.get("MODELKEYGUARD_STORE")
     os.environ["MODELKEYGUARD_GRAPH_PATH"] = str(path)
     os.environ["MODELKEYGUARD_GRAPH_KEY"] = app_key
+    os.environ["MODELKEYGUARD_STORE"] = "jsonl"
     try:
         policy = load_policy_json("config/gateway_policy.json")
         store = GraphStateStore.from_policy(policy, path=path, app_key=app_key)
@@ -588,6 +590,10 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
             os.environ.pop("MODELKEYGUARD_GRAPH_KEY", None)
         else:
             os.environ["MODELKEYGUARD_GRAPH_KEY"] = old_key
+        if old_store is None:
+            os.environ.pop("MODELKEYGUARD_STORE", None)
+        else:
+            os.environ["MODELKEYGUARD_STORE"] = old_store
 
 
 def main(argv: list[str] | None = None) -> int:
