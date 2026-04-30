@@ -48,6 +48,7 @@ keep_remote=0
 local_image="${MODELKEYGUARD_IMAGE:-token-safe-gateway:latest}"
 keycloak_bootstrap_admin_username="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-}"
 keycloak_bootstrap_admin_password="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-}"
+keycloak_realm_import_file="${MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE:-}"
 
 if [[ $# -eq 0 ]]; then
   usage >&2
@@ -133,6 +134,11 @@ if [[ -z "$keycloak_bootstrap_admin_username" ]]; then
 fi
 if [[ -z "$keycloak_bootstrap_admin_password" ]]; then
   keycloak_bootstrap_admin_password="$(random_secret)"
+fi
+
+compose_env_prefix="MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'"
+if [[ -n "$keycloak_realm_import_file" ]]; then
+  compose_env_prefix="$compose_env_prefix MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE='$keycloak_realm_import_file'"
 fi
 
 resolve_remote_root() {
@@ -243,35 +249,35 @@ fi
 case "$command_name" in
   up)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml up -d --no-build"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml up -d --no-build"
     else
       remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   fresh-up)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "rm -rf data/postgres data/keycloak; mkdir -p data/postgres data/keycloak; export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml down --remove-orphans -v >/dev/null 2>&1 || true; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml up -d --no-build"
+      remote_exec "$ssh_target" "rm -rf data/postgres data/keycloak; mkdir -p data/postgres data/keycloak; export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml down --remove-orphans -v >/dev/null 2>&1 || true; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml up -d --no-build"
     else
       remote_exec "$ssh_target" "rm -rf out/production_compose_fresh; export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   start)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml start"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml start"
     else
       remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   stop)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml stop"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml stop"
     else
       remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env stop"
     fi
     ;;
   down)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml down --remove-orphans"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml down --remove-orphans"
     else
       remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down --remove-orphans"
     fi
@@ -282,14 +288,14 @@ case "$command_name" in
     ;;
   logs)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml logs -f"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml logs -f"
     else
       remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env logs -f"
     fi
     ;;
   config)
     if [[ "$shape" == "compose" ]]; then
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME='$keycloak_bootstrap_admin_username' MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD='$keycloak_bootstrap_admin_password'; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml config"
+      remote_exec "$ssh_target" "export $compose_env_prefix; docker compose -f docker-compose.yml -f docker-compose.container-secure.yml config"
     else
       remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh config --env-file '${targets_file}'"
     fi

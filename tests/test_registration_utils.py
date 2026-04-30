@@ -113,6 +113,49 @@ def test_registered_user_quota_can_return_user_429(tmp_path, monkeypatch):
     assert data["error"]["message"] == "user_quota_exceeded"
 
 
+def test_registration_seed_cli_creates_user_principal_and_token(tmp_path, monkeypatch, capsys):
+    graph_path = tmp_path / "seed-graph.jsonl"
+    token_file = tmp_path / "seed.token"
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "seed-test-key")
+
+    code = registration_main(
+        [
+            "seed",
+            "--user-id",
+            "user:cli-seed",
+            "--user-display-name",
+            "CLI Seed User",
+            "--principal-id",
+            "agent:cli-seed",
+            "--principal-groups",
+            "agent-dev",
+            "--namespace",
+            "tenant:kogwistar",
+            "--application-id",
+            "app:cli-seed",
+            "--token-output-file",
+            str(token_file),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload["user_id"] == "user:cli-seed"
+    assert payload["principal_id"] == "agent:cli-seed"
+    assert payload["application_id"] == "app:cli-seed"
+    assert payload["safe_token"]
+    assert token_file.read_text(encoding="utf-8").strip() == payload["safe_token"]
+
+    store = GraphStateStore(graph_path, app_key="seed-test-key")
+    assert "user:cli-seed" in store.nodes
+    assert "agent:cli-seed" in store.nodes
+    assert "app:cli-seed" in store.nodes
+    assert any(edge.kind == "ON_BEHALF_OF" and edge.target == "user:cli-seed" for edge in store.edges.values())
+
+
 def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
     reg = RegistrationService(store)

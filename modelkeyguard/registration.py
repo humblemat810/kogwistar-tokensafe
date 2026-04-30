@@ -262,6 +262,77 @@ class RegistrationService:
             raise RegistrationError(f"id_must_start_with_{prefix}")
 
 
+def seed_registration(
+    reg: RegistrationService,
+    *,
+    user_id: str,
+    user_display_name: str,
+    principal_id: str,
+    principal_kind: str = "agent",
+    principal_groups: list[str] | None = None,
+    namespace: str = "tenant:kogwistar",
+    application_id: str | None = None,
+    principal_description: str = "",
+    user_quota_name: str = "hour",
+    user_period: str = "hour",
+    user_max_usd: float = 1.0,
+    user_max_tokens: int = 20000,
+    user_max_requests: int = 100,
+    principal_quota_name: str = "hour",
+    principal_period: str = "hour",
+    principal_max_usd: float = 2.0,
+    principal_max_tokens: int = 50000,
+    principal_max_requests: int = 500,
+    issue_token: bool = True,
+    token_scopes: list[str] | None = None,
+) -> dict[str, Any]:
+    reg.register_user(user_id, user_display_name)
+    if application_id:
+        reg.register_application(application_id, application_id)
+    reg.register_principal(
+        principal_id,
+        kind=principal_kind,
+        groups=principal_groups or [],
+        namespace=namespace,
+        application_id=application_id,
+        description=principal_description,
+    )
+    reg.set_quota(
+        "principal",
+        principal_id,
+        principal_quota_name,
+        period=principal_period,
+        max_usd=principal_max_usd,
+        max_tokens=principal_max_tokens,
+        max_requests=principal_max_requests,
+    )
+    reg.set_quota(
+        "user",
+        user_id,
+        user_quota_name,
+        period=user_period,
+        max_usd=user_max_usd,
+        max_tokens=user_max_tokens,
+        max_requests=user_max_requests,
+    )
+    issued: IssuedToken | None = None
+    if issue_token:
+        issued = reg.issue_safe_token(
+            principal_id=principal_id,
+            namespace=namespace,
+            on_behalf_of_user_id=user_id,
+            application_id=application_id,
+            scopes=token_scopes or ["model.invoke"],
+        )
+    return {
+        "user_id": user_id,
+        "principal_id": principal_id,
+        "application_id": application_id,
+        "token_node_id": issued.token_node_id if issued else "",
+        "safe_token": issued.token if issued else "",
+    }
+
+
 def open_registration_store():
     """Open the registration store using the configured backend.
 
@@ -358,6 +429,28 @@ def main(argv: list[str] | None = None) -> int:
     quota.add_argument("--max-usd", type=float)
     quota.add_argument("--max-tokens", type=int)
     quota.add_argument("--max-requests", type=int)
+    seed = sub.add_parser("seed", help="seed the common user/principal/on-behalf-of-user registration path")
+    seed.add_argument("--user-id", default="user:demo-saas-alice")
+    seed.add_argument("--user-display-name", default="Demo SaaS Alice")
+    seed.add_argument("--principal-id", default="agent:demo-saas-agent")
+    seed.add_argument("--principal-kind", default="agent")
+    seed.add_argument("--principal-groups", default="agent-dev")
+    seed.add_argument("--namespace", default="tenant:kogwistar")
+    seed.add_argument("--application-id", default="app:demo-saas")
+    seed.add_argument("--principal-description", default="OpenAI-compatible client principal for registration tutorial")
+    seed.add_argument("--user-quota-name", default="hour")
+    seed.add_argument("--user-period", default="hour", choices=["10s", "hour", "day", "week", "month", "infinite", "lifetime"])
+    seed.add_argument("--user-max-usd", type=float, default=1.0)
+    seed.add_argument("--user-max-tokens", type=int, default=20000)
+    seed.add_argument("--user-max-requests", type=int, default=100)
+    seed.add_argument("--principal-quota-name", default="hour")
+    seed.add_argument("--principal-period", default="hour", choices=["10s", "hour", "day", "week", "month", "infinite", "lifetime"])
+    seed.add_argument("--principal-max-usd", type=float, default=2.0)
+    seed.add_argument("--principal-max-tokens", type=int, default=50000)
+    seed.add_argument("--principal-max-requests", type=int, default=500)
+    seed.add_argument("--scopes", default="model.invoke")
+    seed.add_argument("--no-token", action="store_true", help="seed user/principal/quota state without issuing a safe token")
+    seed.add_argument("--token-output-file", default="", help="optional file to write the raw safe token to")
     token = sub.add_parser("issue-token")
     token.add_argument("--principal-id", required=True)
     token.add_argument("--namespace", default="tenant:kogwistar")
@@ -387,6 +480,33 @@ def main(argv: list[str] | None = None) -> int:
         print(args.principal_id)
     elif args.cmd == "set-quota":
         print(reg.set_quota(args.lane, args.subject_id, args.quota_name, period=args.period, max_usd=args.max_usd, max_tokens=args.max_tokens, max_requests=args.max_requests))
+    elif args.cmd == "seed":
+        result = seed_registration(
+            reg,
+            user_id=args.user_id,
+            user_display_name=args.user_display_name,
+            principal_id=args.principal_id,
+            principal_kind=args.principal_kind,
+            principal_groups=[g.strip() for g in args.principal_groups.split(",") if g.strip()],
+            namespace=args.namespace,
+            application_id=args.application_id or None,
+            principal_description=args.principal_description,
+            user_quota_name=args.user_quota_name,
+            user_period=args.user_period,
+            user_max_usd=args.user_max_usd,
+            user_max_tokens=args.user_max_tokens,
+            user_max_requests=args.user_max_requests,
+            principal_quota_name=args.principal_quota_name,
+            principal_period=args.principal_period,
+            principal_max_usd=args.principal_max_usd,
+            principal_max_tokens=args.principal_max_tokens,
+            principal_max_requests=args.principal_max_requests,
+            issue_token=not args.no_token,
+            token_scopes=[s.strip() for s in args.scopes.split(",") if s.strip()],
+        )
+        if args.token_output_file and result["safe_token"]:
+            Path(args.token_output_file).write_text(result["safe_token"], encoding="utf-8")
+        print(json.dumps(result, sort_keys=True))
     elif args.cmd == "issue-token":
         issued = reg.issue_safe_token(principal_id=args.principal_id, namespace=args.namespace, on_behalf_of_user_id=args.on_behalf_of_user_id, application_id=args.application_id, scopes=[s.strip() for s in args.scopes.split(",") if s.strip()])
         print(issued.token)

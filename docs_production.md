@@ -152,8 +152,13 @@ After the stack is up, go straight to [Register And Use](#register-and-use).
 Docker build context excludes runtime state such as `data/`, `out/`, `secrets/`,
 and `kogwistar_reference_only/`, then runs Compose with
 `docker-compose.container-secure.yml`. This runner uses the bundled local
-Keycloak realm, so `secrets/keycloak_client_secret` must match that realm's
-`modelguard-gateway` client secret: `gateway-secret`.
+Keycloak realm import, so `secrets/keycloak_client_secret` must match that
+realm's `modelguard-gateway` client secret: `gateway-secret`.
+
+By default, the realm import contains no end-user demo accounts. If you want
+the beginner/test seed data, point
+`MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE` at
+`./keycloak/modelguard-realm.beginner.json` before starting the stack.
 
 Use `fresh-up` only when you want a clean local rehearsal database. It stops the
 local Compose stack and starts with a new data directory under
@@ -717,8 +722,9 @@ Admin browser login has two working paths:
    - open `http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage`
    - the browser is redirected to the browser-reachable Keycloak URL from
      `MODELKEYGUARD_KEYCLOAK_PUBLIC_URL`
-   - sign in with the bundled `admin` user in the `modelguard-admin-web`
-     client, or your own Keycloak user that has `model.admin`
+   - use a Keycloak user that has `model.admin`
+   - if you opted into the beginner realm import file, it seeds a demo user
+     for this path; the default deploy does not seed any end-user accounts
 
 3. Keycloak machine agent for usage analysis:
    - mint a client-credentials token for the bundled `modelguard-usage-agent`
@@ -775,6 +781,11 @@ Admin access itself has two setup paths:
 The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,
 `/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
 cases once the admin identity is configured.
+
+Even with no demo accounts seeded, you can still create policy data through
+the CLI/API endpoints above or through the GUI after logging in with the
+admin-secret session at `/admin/session`. If you want to create Keycloak users
+for browser login, use the Keycloak admin console and add them there.
 
 Issue a safe token for the principal. This creates the client credential for
 `agent:doc-ingestor`; it does not name `key:openai:prod`:

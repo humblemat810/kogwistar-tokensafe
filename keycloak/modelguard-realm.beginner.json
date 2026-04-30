@@ -13,5 +13,8 @@
     {"clientId": "modelguard-usage-agent", "enabled": true, "protocol": "openid-connect", "publicClient": false, "secret": "usage-agent-secret", "serviceAccountsEnabled": true, "standardFlowEnabled": false, "directAccessGrantsEnabled": false},
     {"clientId": "modelguard-admin-web", "enabled": true, "protocol": "openid-connect", "publicClient": true, "serviceAccountsEnabled": false, "standardFlowEnabled": true, "directAccessGrantsEnabled": false, "redirectUris": ["http://localhost:8789/admin/oidc/callback", "http://127.0.0.1:8789/admin/oidc/callback"], "webOrigins": ["+"], "rootUrl": "http://127.0.0.1:8789", "baseUrl": "/"}
   ],
-  "users": []
+  "users": [
+    {"username": "alice", "enabled": true, "emailVerified": true, "credentials": [{"type": "password", "value": "alice", "temporary": false}]},
+    {"username": "admin", "enabled": true, "emailVerified": true, "realmRoles": ["model.admin"], "credentials": [{"type": "password", "value": "admin", "temporary": false}]}
+  ]
 }

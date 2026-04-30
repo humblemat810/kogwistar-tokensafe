@@ -48,3 +48,7 @@ token-safe-chatgpt.zip
 
 # Reference-only vendored clone (runtime must use pip-installed package)
 kogwistar_reference_only/
+
+# secret
+secret
+secrets

@@ -31,7 +31,7 @@ services:
     ports:
       - "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080"
     volumes:
-      - ./keycloak/modelguard-realm.json:/opt/keycloak/data/import/modelguard-realm.json:ro
+      - ${MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE:-./keycloak/modelguard-realm.json}:/opt/keycloak/data/import/modelguard-realm.json:ro
       - ${MODELKEYGUARD_KEYCLOAK_DATA_DIR:-./data/keycloak}:/opt/keycloak/data/h2
 
   gateway:

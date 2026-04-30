@@ -138,6 +138,11 @@ preflight() {
     echo "missing secrets/keycloak_client_secret" >&2
     exit 1
   fi
+  local keycloak_realm_import_file="${MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE:-./keycloak/modelguard-realm.json}"
+  if [[ ! -f "${keycloak_realm_import_file}" ]]; then
+    echo "missing Keycloak realm import file: ${keycloak_realm_import_file}" >&2
+    exit 1
+  fi
   local keycloak_secret
   keycloak_secret="$(tr -d '\r\n' < secrets/keycloak_client_secret)"
   if [[ "${keycloak_secret}" != "gateway-secret" ]]; then

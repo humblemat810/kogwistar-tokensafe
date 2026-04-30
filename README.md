@@ -673,6 +673,11 @@ recoverable copy for you. Losing that bootstrap console login does not erase
 the persisted gateway data, but it can leave you without a Keycloak admin
 console until you provision another admin path.
 
+The default compose realm import does not seed end-user demo accounts. If you
+want the beginner/test seed data, point
+`MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE` at
+`./keycloak/modelguard-realm.beginner.json` before starting the stack.
+
 To add a new Keycloak user, log into the Keycloak admin console with that
 bootstrap admin pair, create the user under `Users`, set a password, and assign
 realm roles like `model.admin` or `model.usage.read`.

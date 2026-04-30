@@ -76,3 +76,20 @@ modelkeyguard registration set-quota --lane principal --subject-id agent:custome
 modelkeyguard registration set-quota --lane user --subject-id user:customer-123 --quota-name hour --period hour --max-usd 1.0 --max-tokens 20000 --max-requests 100
 modelkeyguard registration issue-token --principal-id agent:customer-123-doc-agent --namespace tenant:kogwistar --on-behalf-of-user-id user:customer-123 --application-id app:customer-123
 ```
+
+If you want the same path as a single beginner-friendly CLI call, use the new
+seed command. It creates the user, principal, quotas, and on-behalf-of safe
+token in one go while still making the subject semantics explicit:
+
+```bash
+modelkeyguard registration seed \
+  --user-id user:customer-123 \
+  --user-display-name "Customer 123" \
+  --principal-id agent:customer-123-doc-agent \
+  --principal-groups agent-dev \
+  --namespace tenant:kogwistar \
+  --application-id app:customer-123
+```
+
+The returned JSON includes the raw safe token. If you want to write it to a
+file, add `--token-output-file out/customer-123.token`.

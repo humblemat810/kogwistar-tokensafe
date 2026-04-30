@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -143,6 +144,7 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert "MODELKEYGUARD_FRESH_ROOT" in text
     assert "out/production_compose_fresh" in text
     assert "./scripts/reset_local_e2e_state.sh" in text
+    assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in text
     assert "gateway-secret" in text
     assert "bootstrap_keycloak_admin_role.sh" in text
     assert "bootstrap role" in text.lower() or "model.admin" in text
@@ -164,6 +166,7 @@ def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
     assert "MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH" in secure
     assert "MODELKEYGUARD_PROVIDER_KEY_OPENAI_FILE" not in compose
     assert "openai_provider_key" not in compose
+    assert "${MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE:-./keycloak/modelguard-realm.json}" in compose
     assert "${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:8789}:8789" in compose
     assert "${MODELKEYGUARD_POSTGRES_BIND:-127.0.0.1:5432}:5432" in compose
     assert "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080" in compose
@@ -214,6 +217,18 @@ def test_split_target_deploy_templates_document_required_contract():
         assert "keycloak-c.example" not in text
         assert "postgres-b.example" not in text
         assert "ollama-b.example" not in text
+
+
+def test_keycloak_realm_default_is_empty_and_beginner_profile_is_opt_in():
+    repo_root = Path(__file__).resolve().parents[1]
+    default_realm = json.loads((repo_root / "keycloak" / "modelguard-realm.json").read_text(encoding="utf-8"))
+    beginner_realm = json.loads((repo_root / "keycloak" / "modelguard-realm.beginner.json").read_text(encoding="utf-8"))
+
+    assert default_realm.get("users", []) == []
+    beginner_users = {user["username"] for user in beginner_realm.get("users", [])}
+    assert {"alice", "admin"} <= beginner_users
+    assert beginner_realm["clients"][0]["clientId"] == "modelguard-gateway"
+    assert beginner_realm["roles"]["realm"]
 
 
 def test_production_doc_pins_limited_model_key_and_user_quota_flow():
@@ -304,6 +319,7 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "tmpfs-backed runtime directory" in deploy
     assert "rm -rf '$remote_root_expanded/secrets'" in deploy
     assert "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" in deploy
+    assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in deploy
     assert "browser OIDC redirect" in smoke
     assert "CLI/service-account token path" in smoke
     assert "usage-analysis agent" in smoke
@@ -314,6 +330,19 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "For the remote compose path, the wrapper also generates a non-default Keycloak" in docs
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
+
+
+def test_remote_deploy_bootstrap_admin_pair_is_printed_not_persisted():
+    repo_root = Path(__file__).resolve().parents[1]
+    deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
+
+    assert "Keycloak bootstrap admin for this deployment" in deploy
+    for line in deploy.splitlines():
+        if "keycloak_bootstrap_admin_" in line:
+            assert "runtime_state_file" not in line
+            assert "write_secret" not in line
+            assert "secrets/" not in line
+            assert "mktemp" not in line
 
 
 def test_render_deployment_env_generates_matching_component_files(tmp_path):
