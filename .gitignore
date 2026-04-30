@@ -29,7 +29,6 @@ htmlcov/
 
 # Local environment / secrets
 .env
-.env.*
 secrets/
 deploy/deployment-targets.env
 deploy/rendered/
