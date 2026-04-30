@@ -139,6 +139,7 @@ def admin_oidc_callback_response(
     keycloak_url: str,
     realm: str,
     client_id: str,
+    required_role: str,
     ttl_seconds: int,
 ) -> Response:
     state_cookie = request.cookies.get(ADMIN_OIDC_COOKIE_NAME)
@@ -161,8 +162,8 @@ def admin_oidc_callback_response(
     )
     access_token = str(payload.get("access_token") or "")
     claims = decode_access_token_claims(access_token)
-    if not _has_admin_role(claims):
-        return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required"}})
+    if not _has_required_role(claims, required_role):
+        return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required", "required_role": required_role}})
     session_cookie, _ = issue_admin_session(
         secret,
         ttl_seconds,
@@ -196,15 +197,15 @@ def _fetch_json(url: str) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _has_admin_role(claims: dict[str, Any]) -> bool:
+def _has_required_role(claims: dict[str, Any], required_role: str) -> bool:
     realm_roles = claims.get("realm_access", {}).get("roles", [])
-    if isinstance(realm_roles, list) and "model.admin" in [str(r) for r in realm_roles]:
+    if isinstance(realm_roles, list) and required_role in [str(r) for r in realm_roles]:
         return True
     resource_access = claims.get("resource_access", {})
     if isinstance(resource_access, dict):
         for value in resource_access.values():
             roles = value.get("roles", []) if isinstance(value, dict) else []
-            if "model.admin" in [str(r) for r in roles]:
+            if required_role in [str(r) for r in roles]:
                 return True
     return False
 

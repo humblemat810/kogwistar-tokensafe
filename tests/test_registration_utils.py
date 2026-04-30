@@ -157,6 +157,91 @@ def test_registration_seed_cli_creates_user_principal_and_token(tmp_path, monkey
     assert any(edge.kind == "ON_BEHALF_OF" and edge.target == "user:cli-seed" for edge in store.edges.values())
 
 
+def test_registration_seed_cli_uses_remote_admin_api_when_configured(tmp_path, monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+
+    class FakeResponse:
+        def __init__(self, payload: dict[str, object]):
+            self.payload = json.dumps(payload).encode("utf-8")
+
+        def read(self):
+            return self.payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout=10):
+        body = json.loads(req.data.decode("utf-8")) if req.data else {}
+        headers = {str(k).lower(): str(v) for k, v in req.header_items()}
+        calls.append({"url": req.full_url, "method": req.get_method(), "headers": headers, "body": body})
+        if req.full_url.endswith("/admin/policy/users"):
+            return FakeResponse({"ok": True, "user_id": body["user_id"]})
+        if req.full_url.endswith("/admin/policy/applications"):
+            return FakeResponse({"ok": True, "application_id": body["application_id"]})
+        if req.full_url.endswith("/admin/policy/principals"):
+            return FakeResponse({"ok": True, "principal_id": body["principal_id"]})
+        if req.full_url.endswith("/admin/policy/quotas/upsert"):
+            return FakeResponse({"ok": True, "quota_policy_id": f"quota:{body['lane']}:{body['subject_id']}:{body['quota_name']}"})
+        if req.full_url.endswith("/admin/policy/tokens"):
+            return FakeResponse(
+                {
+                    "ok": True,
+                    "one_time_reveal": True,
+                    "safe_token": "kgw_sk_remote_test",
+                    "token_id": "remote-token-id",
+                    "principal_id": body["principal_id"],
+                    "namespace": body["namespace"],
+                    "on_behalf_of_user_id": body.get("on_behalf_of_user_id"),
+                    "application_id": body.get("application_id"),
+                    "scopes": body.get("scopes", ["model.invoke"]),
+                    "safe_token_hash": "sha256:remote",
+                }
+            )
+        raise AssertionError(f"unexpected remote url: {req.full_url}")
+
+    monkeypatch.setattr("modelkeyguard.registration.urllib.request.urlopen", fake_urlopen)
+
+    token_file = tmp_path / "remote.token"
+    code = registration_main(
+        [
+            "--admin-base-url",
+            "https://remote.example",
+            "--admin-bearer-token",
+            "bearer-123",
+            "seed",
+            "--user-id",
+            "user:remote-cli",
+            "--user-display-name",
+            "Remote CLI User",
+            "--principal-id",
+            "agent:remote-cli",
+            "--principal-groups",
+            "review-dev",
+            "--namespace",
+            "tenant:kogwistar",
+            "--application-id",
+            "app:remote-cli",
+            "--token-output-file",
+            str(token_file),
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert code == 0
+    payload = json.loads(captured.out)
+    assert payload["user_id"] == "user:remote-cli"
+    assert payload["principal_id"] == "agent:remote-cli"
+    assert payload["application_id"] == "app:remote-cli"
+    assert payload["safe_token"] == "kgw_sk_remote_test"
+    assert token_file.read_text(encoding="utf-8").strip() == "kgw_sk_remote_test"
+    assert any(call["url"].endswith("/admin/policy/users") for call in calls)
+    assert any(call["url"].endswith("/admin/policy/quotas/upsert") for call in calls)
+    assert any(call["headers"].get("authorization") == "Bearer bearer-123" for call in calls)
+
+
 def test_append_only_quota_revision_updates_projection_latest_only(tmp_path):
     store = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-key")
     reg = RegistrationService(store)

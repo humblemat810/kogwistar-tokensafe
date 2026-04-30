@@ -506,6 +506,23 @@ and key in that order. The examples below use a Keycloak admin bearer token. If
 you are in a migration window, the same endpoints also accept the admin secret
 header.
 
+If you want to write through the running gateway instead of the local store,
+point the CLI at the ModelKeyGuard admin API with `--admin-base-url` and
+either `--admin-bearer-token` or `--admin-secret`. That base URL is the
+ModelKeyGuard gateway, not Keycloak.
+
+```bash
+modelkeyguard \
+  --admin-base-url http://127.0.0.1:8789 \
+  --admin-bearer-token "$ADMIN_TOKEN" \
+  registration register-user \
+  --user-id user:alice \
+  --display-name "Alice"
+```
+
+For a remote gateway, replace `http://127.0.0.1:8789` with the remote
+gateway URL.
+
 ```bash
 export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"
 ```
@@ -785,6 +802,11 @@ Admin access itself has two setup paths:
      `model.usage.read`
    - set `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
 
+The role name is configurable. `model.admin` and `model.usage.read` are the
+defaults we ship in the bundled Keycloak realm, but the browser OIDC gate only
+requires an OIDC token carrying whatever role/claim you set in
+`MODELKEYGUARD_ADMIN_REQUIRED_ROLE` and `MODELKEYGUARD_USAGE_REQUIRED_ROLE`.
+
 The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,
 `/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
 cases once the admin identity is configured.
@@ -793,6 +815,11 @@ Even with no demo accounts seeded, you can still create policy data through
 the CLI/API endpoints above or through the GUI after logging in with the
 admin-secret session at `/admin/session`. If you want to create Keycloak users
 for browser login, use the Keycloak admin console and add them there.
+
+For a first-time setup that includes the Keycloak user, the matching
+ModelKeyGuard user/principal, the quota step in the middle, provider selection,
+and a reviewer account, follow
+[tutorial/keycloak_admin_first_setup.md](tutorial/keycloak_admin_first_setup.md).
 
 Issue a safe token for the principal. This creates the client credential for
 `agent:doc-ingestor`; it does not name `key:openai:prod`:

@@ -36,6 +36,7 @@ def create_router() -> APIRouter:
             keycloak_url=settings.keycloak_url,
             realm=settings.keycloak_realm,
             client_id=settings.browser_oidc_client_id,
+            required_role=settings.admin_required_role,
             ttl_seconds=int(settings.admin_session_ttl_seconds),
         )
         if isinstance(response, JSONResponse) and response.status_code >= 400:

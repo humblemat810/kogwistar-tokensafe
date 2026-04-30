@@ -329,8 +329,44 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "deploy_remote_stack.sh" in docs
     assert "deployment_smoke.sh" in docs
     assert "For the remote compose path, the wrapper also generates a non-default Keycloak" in docs
+    assert "keycloak_admin_first_setup.md" in docs
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
+    assert "keycloak_admin_first_setup.md" in readme
+
+
+def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
+    repo_root = Path(__file__).resolve().parents[1]
+    tutorial = (repo_root / "tutorial" / "keycloak_admin_first_setup.md").read_text(encoding="utf-8")
+    tutorial_index = (repo_root / "tutorial" / "README.md").read_text(encoding="utf-8")
+    docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+
+    assert "create Keycloak alice" in tutorial
+    assert "register user:alice" in tutorial
+    assert "user:admin" in tutorial
+    assert "take the keycloak username and prefix it with" in tutorial.lower()
+    assert "register agent:doc-ingestor" in tutorial
+    assert "Give the agent and reviewer OIDC machine credentials" in tutorial
+    assert "modelguard-usage-agent" in tutorial
+    assert "set up quotas for alice and agent:doc-ingestor" in tutorial.lower()
+    assert "bootstrap-operator quota" in tutorial.lower()
+    assert "OIDC admin role" in tutorial
+    assert "For Alice to be a backend admin, all of these must be true:" in tutorial
+    assert "modelkeyguard has the matching policy subject `user:alice`" in tutorial.lower()
+    assert "Client authentication` to `On" in tutorial
+    assert "Turn `Service accounts roles` `On" in tutorial
+    assert "Do not use the browser client `modelguard-admin-web` for machines" in tutorial
+    assert "creating a Keycloak client does not automatically create a" in tutorial
+    assert "safe token issued in step 7" in tutorial
+    assert "--admin-base-url http://127.0.0.1:8789" in tutorial
+    assert "For a true remote deployment, use the remote gateway URL" in tutorial
+    assert "MODELKEYGUARD_SAMPLE_PROVIDER" in tutorial
+    assert "model.usage.read" in tutorial
+    assert "usage_analysis_agent.py" in tutorial
+    assert "keycloak_admin_first_setup.md" in tutorial_index
+    assert "keycloak_admin_first_setup.md" in docs
+    assert "--admin-base-url http://127.0.0.1:8789" in docs
+    assert "replace `http://127.0.0.1:8789` with the remote" in docs
 
 
 def test_remote_deploy_bootstrap_admin_pair_is_printed_not_persisted():

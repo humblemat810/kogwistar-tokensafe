@@ -5,6 +5,8 @@ import json
 import os
 import secrets
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +14,7 @@ import hashlib
 
 from .graph_state import GraphStateStore, normalize_quota_period, resolve_store_backend
 from .policy_loader import load_policy_json
+from .settings import read_env_or_file
 
 
 def safe_token_hash(token: str) -> str:
@@ -34,6 +37,180 @@ class IssuedToken:
 
 class RegistrationError(ValueError):
     pass
+
+
+class RemoteRegistrationService:
+    def __init__(
+        self,
+        base_url: str,
+        *,
+        bearer_token: str = "",
+        admin_secret: str = "",
+        timeout_seconds: int = 10,
+    ) -> None:
+        self.base_url = base_url.rstrip("/")
+        self.bearer_token = bearer_token.strip()
+        self.admin_secret = admin_secret.strip()
+        self.timeout_seconds = max(1, int(timeout_seconds))
+        if not self.bearer_token and not self.admin_secret:
+            raise RegistrationError("remote_admin_auth_required")
+
+    def register_user(self, user_id: str, display_name: str = "", metadata: dict[str, Any] | None = None) -> None:
+        self._request_json("POST", "/admin/policy/users", {"user_id": user_id, "display_name": display_name, "metadata": metadata})
+
+    def register_application(self, application_id: str, display_name: str = "", metadata: dict[str, Any] | None = None) -> None:
+        self._request_json("POST", "/admin/policy/applications", {"application_id": application_id, "display_name": display_name, "metadata": metadata})
+
+    def register_principal(
+        self,
+        principal_id: str,
+        *,
+        kind: str = "agent",
+        groups: list[str] | None = None,
+        namespace: str = "tenant:kogwistar",
+        application_id: str | None = None,
+        description: str = "",
+    ) -> None:
+        self._request_json(
+            "POST",
+            "/admin/policy/principals",
+            {
+                "principal_id": principal_id,
+                "kind": kind,
+                "groups": groups or [],
+                "namespace": namespace,
+                "application_id": application_id,
+                "description": description,
+            },
+        )
+
+    def set_quota(
+        self,
+        lane: str,
+        subject_id: str,
+        quota_name: str,
+        *,
+        period: str,
+        max_usd: float | None = None,
+        max_tokens: int | None = None,
+        max_requests: int | None = None,
+    ) -> str:
+        result = self._request_json(
+            "POST",
+            "/admin/policy/quotas/upsert",
+            {
+                "lane": lane,
+                "subject_id": subject_id,
+                "quota_name": quota_name,
+                "period": period,
+                "max_usd": max_usd,
+                "max_tokens": max_tokens,
+                "max_requests": max_requests,
+            },
+        )
+        return str(result.get("quota_policy_id") or "")
+
+    def append_quota_revision(
+        self,
+        lane: str,
+        subject_id: str,
+        quota_name: str,
+        *,
+        period: str | None = None,
+        max_usd: float | None = None,
+        max_tokens: int | None = None,
+        max_requests: int | None = None,
+        revoked: bool = False,
+        reason: str = "",
+    ) -> str:
+        if revoked:
+            return self.revoke_quota(lane, subject_id, quota_name, reason=reason)
+        return self.set_quota(
+            lane,
+            subject_id,
+            quota_name,
+            period=period or "hour",
+            max_usd=max_usd,
+            max_tokens=max_tokens,
+            max_requests=max_requests,
+        )
+
+    def revoke_quota(self, lane: str, subject_id: str, quota_name: str, *, reason: str = "") -> str:
+        result = self._request_json(
+            "POST",
+            "/admin/policy/quotas/revoke",
+            {
+                "lane": lane,
+                "subject_id": subject_id,
+                "quota_name": quota_name,
+                "reason": reason,
+            },
+        )
+        return str(result.get("quota_policy_id") or "")
+
+    def issue_safe_token(
+        self,
+        *,
+        principal_id: str,
+        namespace: str,
+        on_behalf_of_user_id: str | None = None,
+        application_id: str | None = None,
+        scopes: list[str] | None = None,
+        expires_at_epoch: int | None = None,
+        token: str | None = None,
+        token_id: str | None = None,
+    ) -> IssuedToken:
+        result = self._request_json(
+            "POST",
+            "/admin/policy/tokens",
+            {
+                "principal_id": principal_id,
+                "namespace": namespace,
+                "on_behalf_of_user_id": on_behalf_of_user_id,
+                "application_id": application_id,
+                "scopes": scopes or ["model.invoke"],
+                "expires_at_epoch": expires_at_epoch,
+            },
+        )
+        raw = str(result.get("safe_token") or token or "")
+        remote_token_id = str(result.get("token_id") or token_id or "")
+        node_id = f"token:{remote_token_id}" if remote_token_id else "token:remote"
+        return IssuedToken(
+            raw,
+            node_id,
+            str(result.get("principal_id") or principal_id),
+            str(result.get("on_behalf_of_user_id") or on_behalf_of_user_id or "") or None,
+            str(result.get("application_id") or application_id or "") or None,
+            str(result.get("namespace") or namespace),
+        )
+
+    def _request_json(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        url = f"{self.base_url}{path}"
+        headers = {"content-type": "application/json"}
+        if self.bearer_token:
+            headers["authorization"] = f"Bearer {self.bearer_token}"
+        else:
+            headers["x-modelkeyguard-admin-secret"] = self.admin_secret
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                text = resp.read().decode("utf-8")
+                return json.loads(text) if text else {}
+        except urllib.error.HTTPError as exc:
+            try:
+                text = exc.read().decode("utf-8")
+                payload = json.loads(text) if text else {}
+                message = payload.get("error", {}).get("message") if isinstance(payload, dict) else None
+                if message:
+                    raise RegistrationError(str(message))
+            except RegistrationError:
+                raise
+            except Exception:
+                pass
+            raise RegistrationError(f"remote_admin_request_failed:{exc.code}") from exc
+        except Exception as exc:
+            raise RegistrationError(f"remote_admin_request_failed:{exc}") from exc
 
 
 class RegistrationService:
@@ -357,6 +534,13 @@ def open_registration_store():
     raise RegistrationError(f"unsupported_store_backend:{store_kind}")
 
 
+def open_registration_service(*, remote_base_url: str = "", bearer_token: str = "", admin_secret: str = ""):
+    remote_base_url = remote_base_url.strip()
+    if remote_base_url:
+        return RemoteRegistrationService(remote_base_url, bearer_token=bearer_token, admin_secret=admin_secret)
+    return open_registration_store()
+
+
 def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.jsonl", app_key: str = "dev-registration-demo-key-change-me") -> IssuedToken:
     # Rebuild the demo graph from the default policy and then append registration records.
     path = Path(graph_path)
@@ -408,6 +592,9 @@ def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.js
 
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(prog="modelkeyguard registration")
+    p.add_argument("--admin-base-url", default=os.getenv("MODELKEYGUARD_ADMIN_BASE_URL", ""))
+    p.add_argument("--admin-bearer-token", default=read_env_or_file("MODELKEYGUARD_ADMIN_BEARER_TOKEN", "") or "")
+    p.add_argument("--admin-secret", default=read_env_or_file("MODELKEYGUARD_ADMIN_API_SECRET", "") or "")
     sub = p.add_subparsers(dest="cmd", required=True)
     demo = sub.add_parser("demo", help="create a SaaS user/principal/quota/safe-token registration graph")
     demo.add_argument("--graph-path", default="out/registration_demo_graph.jsonl")
@@ -467,11 +654,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     try:
-        store = open_registration_store()
+        store = open_registration_service(
+            remote_base_url=args.admin_base_url,
+            bearer_token=args.admin_bearer_token,
+            admin_secret=args.admin_secret,
+        )
     except RegistrationError as exc:
         print(str(exc))
         return 2
-    reg = RegistrationService(store)
+    reg = store if isinstance(store, RemoteRegistrationService) else RegistrationService(store)
     if args.cmd == "register-user":
         reg.register_user(args.user_id, args.display_name)
         print(args.user_id)
