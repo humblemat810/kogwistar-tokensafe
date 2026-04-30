@@ -210,6 +210,8 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_USAGE_REQUIRED_ROLE" in keycloak_env
     assert "docker-compose.gateway-only.yml" in deploy_readme
     assert "deployment-targets.env.example" in deploy_readme
+    assert "out/deployment_targets_rendered/gateway.env" in deploy_readme
+    assert "out/deployment_targets_rendered/gateway-compose.env" in deploy_readme
     assert "gateway.env.example" in gateway_compose
     assert "MODELKEYGUARD_GATEWAY_BIND" in gateway_compose
     assert "bootstrap_keycloak_admin_role.sh" in (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
@@ -320,6 +322,8 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "tmpfs-backed runtime directory" in deploy
     assert "rm -rf '$remote_root_expanded/secrets'" in deploy
     assert "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" in deploy
+    assert 'cleanup_runtime_secrets "$ssh_target"' in deploy
+    assert 'local remote="${1:-}"' in deploy
     assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in deploy
     assert "browser OIDC redirect" in smoke
     assert "CLI/service-account token path" in smoke
@@ -330,6 +334,7 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "deployment_smoke.sh" in docs
     assert "For the remote compose path, the wrapper also generates a non-default Keycloak" in docs
     assert "keycloak_admin_first_setup.md" in docs
+    assert "gateway-only deploy cannot bind" in deploy
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
     assert "keycloak_admin_first_setup.md" in readme
@@ -439,7 +444,7 @@ def test_render_deployment_env_generates_matching_component_files(tmp_path):
     assert "MODELKEYGUARD_PORT=8789" in gateway_env
     assert "MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:<postgres-password>@postgres-b.internal:5432/modelguard" in postgres_env
     assert "KEYCLOAK_URL=https://keycloak.example" in keycloak_env
-    assert f"MODELKEYGUARD_GATEWAY_ENV_FILE={out_dir}/gateway.env" in compose_env
+    assert f"MODELKEYGUARD_GATEWAY_ENV_FILE={out_dir.resolve()}/gateway.env" in compose_env
     assert "MODELKEYGUARD_GATEWAY_BIND=127.0.0.1:8789" in compose_env
 
 

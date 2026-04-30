@@ -213,6 +213,35 @@ stage_runtime_secrets() {
   ssh "$remote" "rm -rf '$remote_root_expanded/secrets' && ln -s '$runtime_secret_dir' '$remote_root_expanded/secrets' && printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
 }
 
+gateway_bind_from_targets() {
+  local source_file="$1"
+  local bind="127.0.0.1:8789"
+  if [[ -f "$source_file" ]]; then
+    # shellcheck disable=SC1090
+    set -a
+    . "$source_file"
+    set +a
+    bind="${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:${MODELKEYGUARD_GATEWAY_PORT:-8789}}"
+  fi
+  echo "$bind"
+}
+
+remote_port_in_use() {
+  local remote="$1"
+  local bind="$2"
+  local port="${bind##*:}"
+  ssh "$remote" "python3 - <<'PY'
+import socket
+port = int('${port}')
+with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        s.bind(('127.0.0.1', port))
+    except OSError:
+        raise SystemExit(1)
+PY"
+}
+
 build_local_image() {
   docker build -t "$local_image" "$repo_root"
 }
@@ -222,7 +251,8 @@ load_remote_image() {
 }
 
 cleanup_runtime_secrets() {
-  local remote="$1"
+  local remote="${1:-}"
+  [[ -n "$remote" ]] || return 0
   local dir
   dir="$(ssh "$remote" "if [[ -f '$runtime_state_file' ]]; then cat '$runtime_state_file'; fi" | tr -d '\r\n')"
   if [[ -z "$dir" ]]; then
@@ -250,6 +280,26 @@ if [[ "$needs_stack_assets" -eq 1 ]]; then
 
   if [[ "$shape" == "gateway-only" ]]; then
     remote_env_export "${repo_root}/${targets_file}" "$ssh_target"
+  fi
+fi
+
+if [[ "$shape" == "gateway-only" && "$command_name" == "up" ]]; then
+  gateway_bind="$(gateway_bind_from_targets "${repo_root}/${targets_file}")"
+  if ! remote_port_in_use "$ssh_target" "$gateway_bind"; then
+    gateway_port="${gateway_bind##*:}"
+    port_owner_report="$(ssh "$ssh_target" "docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep '${gateway_port}' || true")"
+    cat <<TXT >&2
+gateway-only deploy cannot bind ${gateway_bind} on the remote target because that port is already in use.
+This usually means another gateway container is still running, often from the
+main compose stack, not the gateway-only stack you just stopped.
+${port_owner_report:+Currently visible container(s) publishing that port:
+${port_owner_report}
+}
+If this is the previous gateway stack on the same machine, stop it first:
+  ./scripts/deploy_remote_stack.sh down --ssh ${ssh_target} --shape gateway-only
+Or change MODELKEYGUARD_GATEWAY_BIND in ${targets_file} and render again.
+TXT
+    exit 1
   fi
 fi
 
@@ -288,7 +338,7 @@ case "$command_name" in
     else
       remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down --remove-orphans"
     fi
-    cleanup_runtime_secrets
+    cleanup_runtime_secrets "$ssh_target"
     if [[ "$keep_remote" -eq 0 ]]; then
       remote_exec "$ssh_target" "rm -rf out/deployment_targets_rendered"
     fi

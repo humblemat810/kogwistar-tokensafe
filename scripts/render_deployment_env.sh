@@ -107,6 +107,7 @@ postgres_password_placeholder="${MODELKEYGUARD_POSTGRES_PASSWORD_PLACEHOLDER:-<p
 postgres_dsn="postgresql://${MODELKEYGUARD_POSTGRES_USER}:${postgres_password_placeholder}@${MODELKEYGUARD_POSTGRES_HOST}:${MODELKEYGUARD_POSTGRES_PORT}/${MODELKEYGUARD_POSTGRES_DB}"
 
 mkdir -p "$output_dir"
+output_dir_abs="$(cd "$output_dir" && pwd)"
 
 cat >"${output_dir}/gateway.env" <<EOF
 # Rendered from ${input_label}. Do not edit by hand; edit the source target values.
@@ -187,7 +188,7 @@ EOF
 cat >"${output_dir}/gateway-compose.env" <<EOF
 # Rendered from ${input_label}. Use with deploy/docker-compose.gateway-only.yml.
 MODELKEYGUARD_IMAGE=${MODELKEYGUARD_IMAGE:-token-safe-gateway:latest}
-MODELKEYGUARD_GATEWAY_ENV_FILE=${output_dir}/gateway.env
+MODELKEYGUARD_GATEWAY_ENV_FILE=${output_dir_abs}/gateway.env
 MODELKEYGUARD_GATEWAY_BIND=${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:${MODELKEYGUARD_GATEWAY_PORT}}
 MODELKEYGUARD_GRAPH_KEY_SOURCE=${MODELKEYGUARD_GRAPH_KEY_SOURCE:-../secrets/modelkeyguard_graph_key}
 MODELKEYGUARD_ADMIN_API_SECRET_SOURCE=${MODELKEYGUARD_ADMIN_API_SECRET_SOURCE:-../secrets/modelkeyguard_admin_api_secret}

@@ -64,8 +64,8 @@ Example gateway-only config check after rendering:
 ```bash
 docker compose \
   -f deploy/docker-compose.gateway-only.yml \
-  --env-file deploy/rendered/gateway.env \
-  --env-file deploy/rendered/gateway-compose.env \
+  --env-file out/deployment_targets_rendered/gateway.env \
+  --env-file out/deployment_targets_rendered/gateway-compose.env \
   config
 ```
 
