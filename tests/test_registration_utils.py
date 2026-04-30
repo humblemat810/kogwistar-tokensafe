@@ -3,13 +3,14 @@ from __future__ import annotations
 import json
 import sys
 from datetime import datetime, timedelta, timezone
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from pathlib import Path
 
 import pytest
 
 from modelkeyguard.gateway import build_guard, process_chat_completion
 from modelkeyguard.graph_state import GraphStateStore, resolve_store_backend
+from modelkeyguard import kogwistar_postgres_state as kog_state
 from modelkeyguard.registration import RegistrationService, main as registration_main, open_registration_store, register_usage_demo, safe_token_hash
 from modelkeyguard.policy_loader import load_policy_json
 from modelkeyguard.token_auth import TokenVerifier
@@ -674,3 +675,114 @@ def test_token_verifier_empty_policy_defaults_to_kogwistar_postgres_without_stor
 
     assert calls == ["kogwistar_postgres"]
     assert isinstance(verifier.graph_state, FakeKogwistarStore)
+
+
+def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypatch):
+    calls: dict[str, object] = {}
+
+    class ExplodingSearchIndex:
+        def __init__(self, engine, index_db_path):
+            raise AssertionError(f"sqlite search index must not initialize: {index_db_path}")
+
+    fake_engine_core_module = ModuleType("kogwistar.engine_core")
+    fake_engine_module = ModuleType("kogwistar.engine_core.engine")
+    fake_engine_module.SearchIndexService = ExplodingSearchIndex
+
+    class FakeGraphKnowledgeEngine:
+        def __init__(self, *, persist_directory, embedding_function, backend):
+            calls["persist_directory"] = persist_directory
+            calls["backend"] = backend
+            calls["search_index_class"] = fake_engine_module.SearchIndexService
+            self.search_index = "postgres-search-index"
+            self.meta_sqlite = object()
+
+    fake_engine_module.GraphKnowledgeEngine = FakeGraphKnowledgeEngine
+
+    class FakePostgresConfig:
+        def __init__(self, *, dsn, embedding_dim):
+            calls["dsn"] = dsn
+            calls["embedding_dim"] = embedding_dim
+
+    fake_postgres_module = ModuleType("kogwistar.engine_core.engine_postgres")
+    fake_postgres_module.EnginePostgresConfig = FakePostgresConfig
+    fake_postgres_module.build_postgres_backend = lambda cfg: ("postgres-backend", "postgres-uow")
+
+    monkeypatch.setattr(kog_state, "enforce_installed_kogwistar_only", lambda: None)
+    monkeypatch.setitem(sys.modules, "kogwistar.engine_core", fake_engine_core_module)
+    monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine", fake_engine_module)
+    monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine_postgres", fake_postgres_module)
+
+    store = kog_state.KogwistarPostgresGraphStateStore.__new__(kog_state.KogwistarPostgresGraphStateStore)
+    store.dsn = "postgresql://example/modelguard"
+    store.embed_dim = 2
+
+    runtime = store._build_runtime()
+
+    assert calls["persist_directory"] is None
+    assert calls["backend"] == "postgres-backend"
+    assert calls["search_index_class"] is kog_state._PostgresKogwistarSearchIndexService
+    assert runtime.engine._backend_uow == "postgres-uow"
+    assert fake_engine_module.SearchIndexService is ExplodingSearchIndex
+
+
+def test_postgres_search_index_uses_postgres_table_not_sqlite(monkeypatch):
+    statements: list[str] = []
+    params_seen: list[dict[str, object]] = []
+
+    class FakeResult:
+        returns_rows = False
+
+        def mappings(self):
+            return []
+
+    class FakeConnection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def execute(self, sql, params=None):
+            statements.append(str(sql))
+            params_seen.append(dict(params or {}))
+            return FakeResult()
+
+    class FakeEngine:
+        def begin(self):
+            return FakeConnection()
+
+    class FakeBackend:
+        schema = "public"
+        engine = FakeEngine()
+
+    events: list[tuple[str, str]] = []
+
+    fake_engine = SimpleNamespace(
+        backend=FakeBackend(),
+        meta_sqlite=SimpleNamespace(engine=FakeEngine()),
+        namespace="default",
+        kg_graph_type="knowledge",
+        _append_event_for_entity=lambda **kwargs: events.append(("append", kwargs["entity_id"])),
+        _emit_change=lambda **kwargs: events.append(("emit", kwargs["entity"].id)),
+    )
+    service = kog_state._PostgresKogwistarSearchIndexService(fake_engine, index_db_path="/must/not/use.sqlite")
+
+    class Item:
+        node_id = "node:alpha"
+        canonical_title = "Alpha"
+        keywords = ["security", "quota"]
+        aliases = ["A"]
+        provision = "review"
+        doc_id = "doc:1"
+
+    service.upsert_entries([Item()])
+
+    all_sql = "\n".join(statements).lower()
+    assert "create table if not exists public.semantic_index" in all_sql
+    assert "tsvector" in all_sql
+    assert "using gin(search_text)" in all_sql
+    assert "insert into public.semantic_index" in all_sql
+    assert "sqlite" not in all_sql
+    assert params_seen[-1]["index_key"] == "node:alpha|Alpha|review"
+    assert ("append", "node:alpha|Alpha|review") in events
+    assert ("emit", "node:alpha|Alpha|review") in events
