@@ -313,6 +313,7 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "another unprivileged user on the same machine" in deploy
     assert "Build the gateway image locally" in deploy
     assert "load it onto a remote SSH target" in deploy
+    assert "Default: ~/token-safe-deploy" in deploy
     assert "Keycloak bootstrap admin for this deployment" in deploy
     assert "--shape MODE" in deploy
     assert "compose | gateway-only" in deploy

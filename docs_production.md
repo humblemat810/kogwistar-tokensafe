@@ -297,6 +297,8 @@ The remote wrapper builds the gateway image locally, loads that image onto the
 remote Docker host, and stages secrets into a tmpfs-backed runtime directory on
 the target host for the lifetime of the deployment, rather than leaving
 persistent secret files behind.
+By default it uses a separate remote checkout root at `~/token-safe-deploy`, so
+deploying to `localhost` does not write into your local development tree.
 
 For the remote compose path, the wrapper also generates a non-default Keycloak
 bootstrap admin username/password pair unless you override them in the local

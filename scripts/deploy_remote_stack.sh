@@ -25,7 +25,7 @@ Usage:
 
 Options:
   --ssh TARGET          SSH target such as user@host. Default: localhost
-  --remote-root PATH    Remote checkout root. Default: ~/token-safe
+  --remote-root PATH    Remote checkout root. Default: ~/token-safe-deploy
   --shape MODE          compose | gateway-only. Default: compose
   --targets-file PATH   Source deployment-targets.env for gateway-only mode.
                         Default: deploy/deployment-targets.env
@@ -41,7 +41,7 @@ TXT
 
 command_name=""
 ssh_target="${MODELKEYGUARD_DEPLOY_TARGET:-localhost}"
-remote_root="${MODELKEYGUARD_DEPLOY_ROOT:-~/token-safe}"
+remote_root="${MODELKEYGUARD_DEPLOY_ROOT:-~/token-safe-deploy}"
 shape="${MODELKEYGUARD_DEPLOY_SHAPE:-compose}"
 targets_file="${MODELKEYGUARD_DEPLOYMENT_TARGETS_FILE:-deploy/deployment-targets.env}"
 keep_remote=0
@@ -236,14 +236,21 @@ if [[ "$shape" != "compose" && "$shape" != "gateway-only" ]]; then
   exit 2
 fi
 
-build_local_image
-load_remote_image
+needs_stack_assets=1
+if [[ "$command_name" == "down" || "$command_name" == "stop" ]]; then
+  needs_stack_assets=0
+fi
 
-sync_repo "$ssh_target" "$repo_root"
-stage_runtime_secrets "$ssh_target"
+if [[ "$needs_stack_assets" -eq 1 ]]; then
+  build_local_image
+  load_remote_image
 
-if [[ "$shape" == "gateway-only" ]]; then
-  remote_env_export "${repo_root}/${targets_file}" "$ssh_target"
+  sync_repo "$ssh_target" "$repo_root"
+  stage_runtime_secrets "$ssh_target"
+
+  if [[ "$shape" == "gateway-only" ]]; then
+    remote_env_export "${repo_root}/${targets_file}" "$ssh_target"
+  fi
 fi
 
 case "$command_name" in
