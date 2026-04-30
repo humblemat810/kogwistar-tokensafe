@@ -671,13 +671,16 @@ while the deployment is active.
 
 For the remote compose path, it also generates a non-default Keycloak
 bootstrap admin username/password pair unless you override them locally. It
-prints that pair during deploy so you can reach the Keycloak admin console
-without using `admin` / `admin`.
+prints that pair during deploy only when Keycloak is starting from a fresh
+data directory. If the realm already exists, keep using the older admin that
+already works for that realm.
 
 Warning: copy that pair when the deploy finishes. The wrapper does not keep a
 recoverable copy for you. Losing that bootstrap console login does not erase
 the persisted gateway data, but it can leave you without a Keycloak admin
-console until you provision another admin path.
+console until you provision another admin path. If you need a truly fresh
+Keycloak admin after losing the existing one in a dev deployment, use
+`fresh-up` so Keycloak starts from an empty data directory.
 
 The default compose realm import does not seed end-user demo accounts. If you
 want the beginner/test seed data, point

@@ -302,13 +302,19 @@ deploying to `localhost` does not write into your local development tree.
 
 For the remote compose path, the wrapper also generates a non-default Keycloak
 bootstrap admin username/password pair unless you override them in the local
-environment. It prints that pair once during deploy so you can use the Keycloak
-admin console without relying on `admin` / `admin`.
+environment. If Keycloak starts from a fresh data directory, it prints that
+pair during deploy so you can use the Keycloak admin console without relying
+on `admin` / `admin`. If the realm already exists, keep using the older admin
+that already works for that realm.
 
 Warning: copy that pair when the deploy finishes. The wrapper does not keep a
 recoverable copy for you. If you lose that bootstrap console login, the
 persisted gateway data is still there, but you may need another admin path to
 reach the Keycloak console and manage IdP settings.
+
+If you need a truly fresh Keycloak admin after losing the existing one in a
+dev deployment, use `fresh-up` so Keycloak starts from an empty data
+directory.
 
 To add a new Keycloak user after deploy, log into the Keycloak admin console
 with that bootstrap admin pair, open `Users`, create the user, set a password,

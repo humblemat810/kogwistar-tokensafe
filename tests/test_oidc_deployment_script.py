@@ -121,6 +121,25 @@ def test_production_compose_script_has_valid_bash_syntax():
     assert result.returncode == 0, result.stderr
 
 
+def test_fresh_up_parity_smoke_has_valid_bash_syntax_and_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "fresh_up_parity_smoke.sh"
+
+    result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    text = script.read_text(encoding="utf-8")
+    assert "./scripts/deploy_remote_stack.sh fresh-up --ssh" in text
+    assert "./scripts/deploy_remote_stack.sh up --ssh" in text
+    assert "./scripts/deploy_remote_stack.sh down --ssh" in text
+    assert "docker inspect token-safe-deploy-postgres-1" in text
+    assert "assert_fresh_mount" in text
+    assert "expected up to keep the active fresh mount path" in text
+    assert "fresh-up reused the same Postgres bind mount path twice" in text
+    assert "expected up after down to keep the most recent fresh mount path" in text
+    assert "fresh-up vs up smoke passed" in text
+
+
 def test_single_source_gateway_runner_has_valid_bash_syntax():
     repo_root = Path(__file__).resolve().parents[1]
     for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh", "bootstrap_keycloak_admin_role.sh"):
@@ -132,7 +151,9 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
 def test_production_compose_script_pins_build_context_and_secrets_contract():
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "production_compose.sh"
+    remote_script = repo_root / "scripts" / "deploy_remote_stack.sh"
     text = script.read_text(encoding="utf-8")
+    remote_text = remote_script.read_text(encoding="utf-8")
 
     assert "./scripts/bootstrap_secrets.sh --production" in text
     assert "stop|start" in text
@@ -147,6 +168,8 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert "MODELKEYGUARD_FRESH_ROOT" in text
     assert "out/production_compose_fresh" in text
     assert "./scripts/reset_local_e2e_state.sh" in text
+    assert "MODELKEYGUARD_POSTGRES_DATA_DIR" in text
+    assert "MODELKEYGUARD_KEYCLOAK_DATA_DIR" in text
     assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in text
     assert "gateway-secret" in text
     assert "bootstrap_keycloak_admin_role.sh" in text
@@ -157,6 +180,13 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert 'require_dockerignore_entry "kogwistar_reference_only"' in text
     assert "secrets/modelkeyguard_admin_api_secret" in text
     assert "Provider keys" in text
+    assert "./scripts/production_compose.sh up" in remote_text
+    assert "./scripts/production_compose.sh fresh-up" in remote_text
+    assert "./scripts/production_compose.sh start" in remote_text
+    assert "./scripts/production_compose.sh stop" in remote_text
+    assert "./scripts/production_compose.sh down" in remote_text
+    assert "./scripts/production_compose.sh logs" in remote_text
+    assert "./scripts/production_compose.sh config" in remote_text
 
 
 def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
@@ -311,7 +341,9 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     repo_root = Path(__file__).resolve().parents[1]
     deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
     smoke = (repo_root / "scripts" / "deployment_smoke.sh").read_text(encoding="utf-8")
+    fresh_smoke = (repo_root / "scripts" / "fresh_up_parity_smoke.sh").read_text(encoding="utf-8")
     scripts_readme = (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
+    adr_readme = (repo_root / "docs" / "adr" / "README.md").read_text(encoding="utf-8")
     docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
@@ -331,10 +363,28 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "browser OIDC redirect" in smoke
     assert "CLI/service-account token path" in smoke
     assert "usage-analysis agent" in smoke
+    assert "fresh-up vs up smoke passed" in fresh_smoke
+    assert "docker inspect token-safe-deploy-postgres-1" in fresh_smoke
     assert "deploy_remote_stack.sh" in scripts_readme
     assert "deployment_smoke.sh" in scripts_readme
+    assert "fresh_up_parity_smoke.sh" in scripts_readme
+    assert "Lifecycle parity notes" in scripts_readme
+    assert "`fresh-up` creates a new timestamped rehearsal data root and records it" in scripts_readme
+    assert "0007-fresh-up-and-up-bind-mount-parity.md" in adr_readme
+    assert "Fresh-up and up bind-mount parity" in adr_readme
+    assert "0008-graph-key-resolution-and-sealed-payload-contract.md" in adr_readme
+    assert "Graph key resolution and sealed payload contract" in adr_readme
+    assert "0009-explicit-model-key-selection-and-ambiguity-failure.md" in adr_readme
+    assert "Explicit model key selection and ambiguity failure" in adr_readme
     assert "deploy_remote_stack.sh" in docs
     assert "deployment_smoke.sh" in docs
+    assert "./scripts/production_compose.sh up" in deploy
+    assert "./scripts/production_compose.sh fresh-up" in deploy
+    assert "./scripts/production_compose.sh start" in deploy
+    assert "./scripts/production_compose.sh stop" in deploy
+    assert "./scripts/production_compose.sh down" in deploy
+    assert "./scripts/production_compose.sh logs" in deploy
+    assert "./scripts/production_compose.sh config" in deploy
     assert "For the remote compose path, the wrapper also generates a non-default Keycloak" in docs
     assert "keycloak_admin_first_setup.md" in docs
     assert "gateway-only deploy cannot bind" in deploy

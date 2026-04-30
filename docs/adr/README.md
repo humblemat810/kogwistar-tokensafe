@@ -11,3 +11,6 @@ Start here:
 - [0004 Policy rules and enforcement order](0004-policy-rules-and-enforcement-order.md)
 - [0005 Backend modes and fallback boundaries](0005-backend-modes-and-fallback-boundaries.md)
 - [0006 Documentation layers and audience split](0006-documentation-layers-and-audience-split.md)
+- [0007 Fresh-up and up bind-mount parity](0007-fresh-up-and-up-bind-mount-parity.md)
+- [0008 Graph key resolution and sealed payload contract](0008-graph-key-resolution-and-sealed-payload-contract.md)
+- [0009 Explicit model key selection and ambiguity failure](0009-explicit-model-key-selection-and-ambiguity-failure.md)

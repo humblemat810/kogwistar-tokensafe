@@ -14,6 +14,7 @@ The most useful bash entrypoints are below.
 | `gateway_from_deployment_targets.sh` | Gateway-only split-target runner. It reads one source of truth, renders component env files, and runs `deploy/docker-compose.gateway-only.yml`. |
 | `deploy_remote_stack.sh` | SSH-based deploy wrapper for a same-machine lower-privilege user or another host. It builds the gateway image locally, loads it on the remote Docker host, stages secrets into remote tmpfs for the lifetime of the run, and then runs the local production or gateway-only workflow remotely in a separate remote checkout root (`~/token-safe-deploy` by default). The compose path prints a one-time Keycloak bootstrap admin pair during deploy; copy it when the run finishes. |
 | `deployment_smoke.sh` | Shared smoke that checks browser OIDC redirect, CLI token auth, and the usage-analysis agent against a running deployment. |
+| `fresh_up_parity_smoke.sh` | Lifecycle smoke that checks `up`, `fresh-up`, and `down` against the expected Postgres bind mount path so stale rehearsal state does not silently come back. |
 | `start_postgres.sh` | Starts the pgvector-backed Postgres container or compose service used by the repo. It also prints the DSN and tells you what to export next. |
 | `start_keycloak.sh` | Starts only the Keycloak container from the compose stack and waits for the realm discovery endpoint to answer. |
 | `start_stack.sh` | Starts the local Postgres + Keycloak compose services together. It is the quick “local infrastructure” launcher. |
@@ -57,6 +58,13 @@ The most useful bash entrypoints are below.
 | `host_admin_login_watcher.py` | Watches host security events and forwards them into the admin security intake. |
 | `bundle_for_chatgpt.sh` | Bundles a working tree snapshot for offline ChatGPT-style review or handoff. |
 | `setup_langchain_smoke_env.sh` | Prepares environment variables for LangChain smoke tests. |
+
+## Lifecycle parity notes
+
+- `up` and `start` keep the currently active bind mounts.
+- `fresh-up` creates a new timestamped rehearsal data root and records it.
+- after `fresh-up`, later `down` and `up` should keep using that same fresh root until the operator intentionally clears it.
+- `fresh-up` is not a search-for-the-newest-folder workflow; it is an explicit “set the active fresh root now” workflow.
 
 If you are tracing one script from another, this is the order most local flows use:
 
