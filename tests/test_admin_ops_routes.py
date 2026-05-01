@@ -627,6 +627,7 @@ def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, 
     monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "oidc-admin")
     monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789")
     monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.example")
     monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "http://127.0.0.1:8080")
@@ -655,7 +656,7 @@ def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, 
             "sub": "user:admin",
             "preferred_username": "admin",
             "iss": "http://keycloak.example/realms/modelguard",
-            "realm_access": {"roles": ["model.admin"]},
+            "realm_access": {"roles": ["oidc-admin"]},
         }
         header = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
         body = base64.urlsafe_b64encode(json.dumps(claims).encode("utf-8")).decode("ascii").rstrip("=")

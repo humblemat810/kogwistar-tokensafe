@@ -8,12 +8,11 @@ from datetime import datetime
 from types import SimpleNamespace
 from typing import Any, Iterable
 
-from .graph_state import GraphEdge, GraphNode, DEFAULT_APP_KEY, iso_now, period_bucket, utc_now
+from .graph_state import GraphEdge, GraphNode, iso_now, period_bucket, resolve_graph_app_key, utc_now
 from .kogwistar_import_guard import enforce_installed_kogwistar_only
 from .sealed_payload import open_json, seal_json
 
 DEFAULT_DSN = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
-DEFAULT_PERSIST_DIR = os.getenv("MODELKEYGUARD_KOGWISTAR_PERSIST_DIRECTORY", "out/kogwistar_runtime")
 DEFAULT_EMBED_DIM = 2
 MIN_EMBED_DIM = 1
 MAX_EMBED_DIM = 8
@@ -106,6 +105,284 @@ class _KogwistarRuntime:
     meta: Any
 
 
+class _PostgresKogwistarSearchIndexService:
+    """Postgres-backed replacement for Kogwistar's SQLite FTS search index."""
+
+    def __init__(self, engine: Any, index_db_path: str) -> None:
+        self._e = engine
+        self.index_db_path = ""
+        self.schema = str(getattr(getattr(engine, "backend", None), "schema", "public") or "public")
+        if not self.schema.replace("_", "").isalnum():
+            raise ValueError(f"invalid postgres search-index schema: {self.schema!r}")
+        self.ensure_initialized()
+
+    @property
+    def _sa_engine(self) -> Any:
+        meta = getattr(self._e, "meta_sqlite", None)
+        engine = getattr(meta, "engine", None) or getattr(getattr(self._e, "backend", None), "engine", None)
+        if engine is None:
+            raise RuntimeError("Postgres search index requires a Kogwistar Postgres engine")
+        return engine
+
+    def _execute(self, sql: str, params: dict[str, Any] | None = None) -> list[Any]:
+        import sqlalchemy as sa  # type: ignore
+
+        with self._sa_engine.begin() as conn:
+            result = conn.execute(sa.text(sql), params or {})
+            if result.returns_rows:
+                return list(result.mappings())
+            return []
+
+    def ensure_initialized(self) -> None:
+        schema = self.schema
+        for statement in (
+            f"CREATE SCHEMA IF NOT EXISTS {schema}",
+            f"""
+            CREATE TABLE IF NOT EXISTS {schema}.semantic_index (
+                id BIGSERIAL PRIMARY KEY,
+                index_key TEXT NOT NULL UNIQUE,
+                node_id TEXT NOT NULL,
+                canonical_title TEXT NOT NULL,
+                keywords TEXT NOT NULL DEFAULT '',
+                aliases TEXT NOT NULL DEFAULT '',
+                provision TEXT NOT NULL,
+                document_id TEXT NULL,
+                search_text TSVECTOR GENERATED ALWAYS AS (
+                    to_tsvector(
+                        'simple',
+                        coalesce(canonical_title, '') || ' ' ||
+                        coalesce(keywords, '') || ' ' ||
+                        coalesce(aliases, '') || ' ' ||
+                        coalesce(provision, '') || ' ' ||
+                        coalesce(document_id, '')
+                    )
+                ) STORED,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            )
+            """,
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_semantic_index_search_text
+                ON {schema}.semantic_index USING GIN(search_text)
+            """,
+            f"""
+            CREATE INDEX IF NOT EXISTS idx_semantic_index_node_id
+                ON {schema}.semantic_index(node_id)
+            """,
+        ):
+            self._execute(statement)
+
+    def upsert_entries(self, items: list[Any]) -> None:
+        from kogwistar.cdc.change_event import EntityRefModel
+        from kogwistar.engine_core.search_index.models import build_embedding_text, make_index_key_for_item
+
+        for item in items:
+            index_key = make_index_key_for_item(item)
+            keywords = " ".join(item.keywords or [])
+            aliases = " ".join(item.aliases or [])
+            self._execute(
+                f"""
+                INSERT INTO {self.schema}.semantic_index
+                    (index_key, node_id, canonical_title, keywords, aliases, provision, document_id)
+                VALUES
+                    (:index_key, :node_id, :canonical_title, :keywords, :aliases, :provision, :document_id)
+                ON CONFLICT(index_key) DO UPDATE SET
+                    node_id = EXCLUDED.node_id,
+                    canonical_title = EXCLUDED.canonical_title,
+                    keywords = EXCLUDED.keywords,
+                    aliases = EXCLUDED.aliases,
+                    provision = EXCLUDED.provision,
+                    document_id = EXCLUDED.document_id,
+                    updated_at = NOW()
+                """,
+                {
+                    "index_key": index_key,
+                    "node_id": item.node_id,
+                    "canonical_title": item.canonical_title,
+                    "keywords": keywords,
+                    "aliases": aliases,
+                    "provision": item.provision,
+                    "document_id": item.doc_id,
+                },
+            )
+
+            node_index_upsert = getattr(getattr(self._e, "backend", None), "node_index_upsert", None)
+            if callable(node_index_upsert):
+                node_index_upsert(
+                    ids=[f"idx:{index_key}"],
+                    metadatas=[
+                        {
+                            "index_key": index_key,
+                            "target_node_id": item.node_id,
+                            "canonical_title": item.canonical_title,
+                            "provision": item.provision,
+                            "keywords": json.dumps(item.keywords),
+                            "aliases": json.dumps(item.aliases),
+                            "doc_id": item.doc_id,
+                        }
+                    ],
+                    documents=[build_embedding_text(item)],
+                )
+
+            payload = {
+                "node_id": item.node_id,
+                "canonical_title": item.canonical_title,
+                "keywords": item.keywords,
+                "aliases": item.aliases,
+                "provision": item.provision,
+                "doc_id": item.doc_id,
+            }
+            self._e._append_event_for_entity(
+                namespace=self._e.namespace,
+                entity_kind="search_index",
+                entity_id=index_key,
+                op="search_index.upsert",
+                payload=payload,
+            )
+            self._e._emit_change(
+                op="search_index.upsert",
+                entity=EntityRefModel(
+                    kind="search_index",
+                    id=index_key,
+                    kg_graph_type=self._e.kg_graph_type,
+                    url=None,
+                ),
+                payload=payload,
+            )
+
+    def search_hybrid(self, q: str, limit: int = 10, resolve_node: bool = False) -> dict[str, Any]:
+        from kogwistar.engine_core.search_index.models import make_index_key
+
+        rows = self._execute(
+            f"""
+            SELECT
+                index_key,
+                node_id,
+                canonical_title,
+                provision,
+                document_id,
+                ts_rank_cd(search_text, plainto_tsquery('simple', :query)) AS fts_score
+            FROM {self.schema}.semantic_index
+            WHERE search_text @@ plainto_tsquery('simple', :query)
+            ORDER BY fts_score DESC, updated_at DESC
+            LIMIT :limit
+            """,
+            {"query": q, "limit": int(limit)},
+        )
+        fts_norm = self._normalize_rank_rows(rows)
+        combined: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            key = str(row["index_key"])
+            combined[key] = {
+                "index_key": key,
+                "node_id": str(row["node_id"]),
+                "canonical_title": str(row["canonical_title"]),
+                "provision": str(row["provision"]),
+                "document_id": row["document_id"],
+                "fts_score": fts_norm.get(key, 0.0),
+                "vec_score": 0.0,
+            }
+
+        vector_results = self._query_vector_index(q, limit)
+        vec_norm = self._normalize_vector_results(vector_results)
+        vec_ids = vector_results.get("ids") or [[]]
+        vec_metas = vector_results.get("metadatas") or [[]]
+        if vec_ids and vec_ids[0] and vec_metas and vec_metas[0]:
+            for idx, _ in enumerate(vec_ids[0]):
+                meta = vec_metas[0][idx] or {}
+                key = str(meta.get("index_key") or "")
+                if not key:
+                    node_id = str(meta.get("target_node_id") or "")
+                    canonical_title = str(meta.get("canonical_title") or "")
+                    provision = str(meta.get("provision") or "")
+                    if not node_id or not canonical_title:
+                        continue
+                    key = make_index_key(node_id, canonical_title, provision)
+                if key not in combined:
+                    combined[key] = {
+                        "index_key": key,
+                        "node_id": str(meta.get("target_node_id") or ""),
+                        "canonical_title": str(meta.get("canonical_title") or ""),
+                        "provision": str(meta.get("provision") or ""),
+                        "document_id": meta.get("doc_id"),
+                        "fts_score": 0.0,
+                        "vec_score": vec_norm.get(key, 0.0),
+                    }
+                else:
+                    combined[key]["vec_score"] = vec_norm.get(key, 0.0)
+
+        for row in combined.values():
+            row["hybrid_score"] = 0.6 * row["fts_score"] + 0.4 * row["vec_score"]
+        ranked = sorted(combined.values(), key=lambda x: x["hybrid_score"], reverse=True)
+        if resolve_node:
+            return self._resolve_nodes(ranked[:limit], q)
+        return {"query": q, "results": ranked[:limit]}
+
+    def _query_vector_index(self, q: str, limit: int) -> dict[str, Any]:
+        node_index_query = getattr(getattr(self._e, "backend", None), "node_index_query", None)
+        if not callable(node_index_query):
+            return {}
+        return node_index_query(query_texts=[q], n_results=limit) or {}
+
+    @staticmethod
+    def _normalize_rank_rows(rows: list[Any]) -> dict[str, float]:
+        if not rows:
+            return {}
+        raw = [float(r["fts_score"] or 0.0) for r in rows]
+        min_s = min(raw)
+        max_s = max(raw)
+        out: dict[str, float] = {}
+        for row, score in zip(rows, raw):
+            key = str(row["index_key"])
+            if max_s == min_s:
+                out[key] = 1.0 if score > 0 else 0.0
+            else:
+                out[key] = max(0.0, min(1.0, (score - min_s) / (max_s - min_s)))
+        return out
+
+    @staticmethod
+    def _normalize_vector_results(vr: dict[str, Any]) -> dict[str, float]:
+        ids = vr.get("ids") or [[]]
+        metas = vr.get("metadatas") or [[]]
+        distances = vr.get("distances") or [[]]
+        if not ids or not ids[0] or not metas or not metas[0] or not distances or not distances[0]:
+            return {}
+        raw = [float(d) for d in distances[0]]
+        min_d = min(raw)
+        max_d = max(raw)
+        out: dict[str, float] = {}
+        for idx, _ in enumerate(ids[0]):
+            meta = metas[0][idx] or {}
+            key = str(meta.get("index_key") or "")
+            if not key:
+                continue
+            dist = float(distances[0][idx])
+            out[key] = 1.0 if max_d == min_d else max(0.0, min(1.0, (max_d - dist) / (max_d - min_d)))
+        return out
+
+    def _resolve_nodes(self, ranked_rows: list[dict[str, Any]], q: str) -> dict[str, Any]:
+        unique_node_ids: list[str] = []
+        seen: set[str] = set()
+        for row in ranked_rows:
+            node_id = row["node_id"]
+            if node_id and node_id not in seen:
+                seen.add(node_id)
+                unique_node_ids.append(node_id)
+        res = self._e.backend.node_get(ids=unique_node_ids, include=["documents", "metadatas"]) or {}
+        rows_by_node_id: dict[str, dict[str, Any]] = {}
+        for i, node_id in enumerate(res.get("ids") or []):
+            rows_by_node_id[str(node_id)] = {
+                "documents": (res.get("documents") or [None])[i] if i < len(res.get("documents") or []) else None,
+                "metadatas": (res.get("metadatas") or [None])[i] if i < len(res.get("metadatas") or []) else None,
+            }
+        output = []
+        for row in ranked_rows:
+            enriched = dict(row)
+            enriched.update(rows_by_node_id.get(row["node_id"], {}))
+            output.append(enriched)
+        return {"query": q, "results": output}
+
+
 class KogwistarPostgresGraphStateStore:
     """Delegated ModelKeyGuard store backed by installed Kogwistar Postgres primitives.
 
@@ -115,7 +392,7 @@ class KogwistarPostgresGraphStateStore:
 
     def __init__(self, dsn: str | None = None, app_key: str | None = None) -> None:
         self.dsn = dsn or os.getenv("MODELKEYGUARD_POSTGRES_DSN", DEFAULT_DSN)
-        self.app_key = app_key or os.getenv("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY)
+        self.app_key = resolve_graph_app_key(app_key)
         self.embed_dim = resolve_kogwistar_embed_dim()
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}
@@ -127,7 +404,7 @@ class KogwistarPostgresGraphStateStore:
     def _build_runtime(self) -> _KogwistarRuntime:
         enforce_installed_kogwistar_only()
         try:
-            from kogwistar.engine_core.engine import GraphKnowledgeEngine
+            import kogwistar.engine_core.engine as engine_module
             from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
         except Exception as exc:
             raise RuntimeError(
@@ -141,11 +418,17 @@ class KogwistarPostgresGraphStateStore:
         def _default_embed(texts: list[str]) -> list[list[float]]:
             return [_stable_embedding(t, dim=self.embed_dim, space="policy") for t in texts]
 
-        engine = GraphKnowledgeEngine(
-            persist_directory=DEFAULT_PERSIST_DIR,
-            embedding_function=_default_embed,
-            backend=backend,
-        )
+        original_search_index = getattr(engine_module, "SearchIndexService", None)
+        engine_module.SearchIndexService = _PostgresKogwistarSearchIndexService
+        try:
+            engine = engine_module.GraphKnowledgeEngine(
+                persist_directory=None,
+                embedding_function=_default_embed,
+                backend=backend,
+            )
+        finally:
+            if original_search_index is not None:
+                engine_module.SearchIndexService = original_search_index
         # Explicitly share the backend transaction boundary used in Kogwistar pg tests.
         engine._backend_uow = uow
         return _KogwistarRuntime(engine=engine, meta=engine.meta_sqlite)

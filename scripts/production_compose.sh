@@ -78,6 +78,8 @@ else
 fi
 
 compose_files=(-f docker-compose.yml -f docker-compose.container-secure.yml)
+runtime_state_dir="${MODELKEYGUARD_RUNTIME_STATE_DIR:-./out}"
+runtime_compose_data_file="${MODELKEYGUARD_RUNTIME_COMPOSE_DATA_FILE:-${runtime_state_dir%/}/.runtime-compose-data-dir}"
 
 require_dockerignore_entry() {
   local pattern="$1"
@@ -98,6 +100,21 @@ wait_http() {
   done
   echo "${label} did not become ready: ${url}" >&2
   return 1
+}
+
+load_runtime_compose_data_dir() {
+  if [[ ! -f "$runtime_compose_data_file" ]]; then
+    return 0
+  fi
+  local fresh_root
+  fresh_root="$(tr -d '\r\n' < "$runtime_compose_data_file")"
+  if [[ -z "$fresh_root" ]]; then
+    return 0
+  fi
+  if [[ -d "${fresh_root%/}/postgres" && -d "${fresh_root%/}/keycloak" ]]; then
+    export MODELKEYGUARD_POSTGRES_DATA_DIR="${fresh_root%/}/postgres"
+    export MODELKEYGUARD_KEYCLOAK_DATA_DIR="${fresh_root%/}/keycloak"
+  fi
 }
 
 bootstrap_keycloak_admin_role() {
@@ -167,6 +184,8 @@ if [[ "$command_name" == "fresh-up" ]]; then
   export MODELKEYGUARD_POSTGRES_DATA_DIR="${fresh_root%/}/postgres"
   export MODELKEYGUARD_KEYCLOAK_DATA_DIR="${fresh_root%/}/keycloak"
   mkdir -p "$MODELKEYGUARD_POSTGRES_DATA_DIR" "$MODELKEYGUARD_KEYCLOAK_DATA_DIR"
+  mkdir -p "$(dirname "$runtime_compose_data_file")"
+  printf '%s\n' "$fresh_root" > "$runtime_compose_data_file"
 
   echo "stopping production compose stack, including secure override services"
   "${compose_cmd[@]}" "${compose_files[@]}" down --remove-orphans -v >/dev/null 2>&1 || true
@@ -185,6 +204,10 @@ Note: old local data directories are left in place if the current user cannot
 delete container-owned files. This run will not reuse them.
 TXT
   command_name="up"
+fi
+
+if [[ "$command_name" == "up" || "$command_name" == "start" || "$command_name" == "config" ]]; then
+  load_runtime_compose_data_dir
 fi
 
 case "$command_name" in

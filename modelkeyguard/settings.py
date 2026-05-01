@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -21,6 +22,18 @@ def bool_env(name: str, default: bool = False) -> bool:
     if v is None:
         return default
     return v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_dev_graph_key() -> bool:
+    return os.getenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _warn_dev_graph_key() -> None:
+    print(
+        "WARNING: using dev fallback MODELKEYGUARD_GRAPH_KEY. "
+        "Set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY for real state.",
+        file=sys.stderr,
+    )
 
 
 @dataclass(frozen=True)
@@ -57,8 +70,11 @@ class AppSettings:
         env = read_env_or_file("MODELKEYGUARD_ENV", "local") or "local"
         graph_key = read_env_or_file("MODELKEYGUARD_GRAPH_KEY")
         if not graph_key:
-            # local-only fallback; production validation rejects it below.
-            graph_key = "dev-modelkeyguard-change-me"
+            if _allow_dev_graph_key():
+                _warn_dev_graph_key()
+                graph_key = "dev-modelkeyguard-change-me"
+            else:
+                graph_key = ""
         return cls(
             env=env,
             host=read_env_or_file("MODELKEYGUARD_HOST", "127.0.0.1") or "127.0.0.1",
@@ -91,7 +107,9 @@ class AppSettings:
     def validate_for_startup(self) -> list[str]:
         errors: list[str] = []
         if self.env.lower() in {"prod", "production"}:
-            if self.graph_key == "dev-modelkeyguard-change-me":
+            if not self.graph_key:
+                errors.append("MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY must be configured for production")
+            elif self.graph_key == "dev-modelkeyguard-change-me":
                 errors.append("MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY must be configured for production")
             if len(self.graph_key) < 32:
                 errors.append("MODELKEYGUARD_GRAPH_KEY must be at least 32 characters")

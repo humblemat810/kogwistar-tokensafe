@@ -59,6 +59,9 @@ def test_get_agent_token_uses_repo_python_fallback():
     assert '.venv/bin/python' in text
     assert 'python3' in text
     assert 'if "${compose_cmd[@]}" exec -T gateway python3' in text
+    assert 'label=com.docker.compose.service=gateway' in text
+    assert '--filter "name=gateway"' in text
+    assert 'keycloak_url = os.getenv("KEYCLOAK_URL", "http://keycloak:8080").rstrip("/")' in text
     assert 'http://keycloak:8080/realms/modelguard/protocol/openid-connect/token' in text
     assert '| "$PYTHON_BIN" -c' in text
 
@@ -118,6 +121,25 @@ def test_production_compose_script_has_valid_bash_syntax():
     assert result.returncode == 0, result.stderr
 
 
+def test_fresh_up_parity_smoke_has_valid_bash_syntax_and_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "fresh_up_parity_smoke.sh"
+
+    result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
+
+    assert result.returncode == 0, result.stderr
+    text = script.read_text(encoding="utf-8")
+    assert "./scripts/deploy_remote_stack.sh fresh-up --ssh" in text
+    assert "./scripts/deploy_remote_stack.sh up --ssh" in text
+    assert "./scripts/deploy_remote_stack.sh down --ssh" in text
+    assert "docker inspect token-safe-deploy-postgres-1" in text
+    assert "assert_fresh_mount" in text
+    assert "expected up to keep the active fresh mount path" in text
+    assert "fresh-up reused the same Postgres bind mount path twice" in text
+    assert "expected up after down to keep the most recent fresh mount path" in text
+    assert "fresh-up vs up smoke passed" in text
+
+
 def test_single_source_gateway_runner_has_valid_bash_syntax():
     repo_root = Path(__file__).resolve().parents[1]
     for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh", "bootstrap_keycloak_admin_role.sh"):
@@ -129,7 +151,9 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
 def test_production_compose_script_pins_build_context_and_secrets_contract():
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "production_compose.sh"
+    remote_script = repo_root / "scripts" / "deploy_remote_stack.sh"
     text = script.read_text(encoding="utf-8")
+    remote_text = remote_script.read_text(encoding="utf-8")
 
     assert "./scripts/bootstrap_secrets.sh --production" in text
     assert "stop|start" in text
@@ -144,6 +168,8 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert "MODELKEYGUARD_FRESH_ROOT" in text
     assert "out/production_compose_fresh" in text
     assert "./scripts/reset_local_e2e_state.sh" in text
+    assert "MODELKEYGUARD_POSTGRES_DATA_DIR" in text
+    assert "MODELKEYGUARD_KEYCLOAK_DATA_DIR" in text
     assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in text
     assert "gateway-secret" in text
     assert "bootstrap_keycloak_admin_role.sh" in text
@@ -154,6 +180,13 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert 'require_dockerignore_entry "kogwistar_reference_only"' in text
     assert "secrets/modelkeyguard_admin_api_secret" in text
     assert "Provider keys" in text
+    assert "./scripts/production_compose.sh up" in remote_text
+    assert "./scripts/production_compose.sh fresh-up" in remote_text
+    assert "./scripts/production_compose.sh start" in remote_text
+    assert "./scripts/production_compose.sh stop" in remote_text
+    assert "./scripts/production_compose.sh down" in remote_text
+    assert "./scripts/production_compose.sh logs" in remote_text
+    assert "./scripts/production_compose.sh config" in remote_text
 
 
 def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
@@ -170,6 +203,33 @@ def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
     assert "${MODELKEYGUARD_GATEWAY_BIND:-127.0.0.1:8789}:8789" in compose
     assert "${MODELKEYGUARD_POSTGRES_BIND:-127.0.0.1:5432}:5432" in compose
     assert "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080" in compose
+
+
+def test_glossary_pins_oauth_oidc_bridge_language():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "glossary.md").read_text(encoding="utf-8")
+
+    assert "If you come from OAuth / OIDC" in text
+    assert "Troubleshooting by category" in text
+    assert "Authentication and login" in text
+    assert "Graph state and secrets" in text
+    assert "Provider keys and model routing" in text
+    assert "Quick Q&A" in text
+    assert "Provider endpoint map" in text
+    assert "/api/tags" in text
+    assert "gateway’s Ollama-shaped `/api/chat`" in text
+    assert "/openai/deployments/{deployment}/chat/completions" in text
+    assert "/v1beta/models/{model}:generateContent" in text
+    assert "Gemini" in text
+    assert "Azure OpenAI" in text
+    assert "I ran `deploy_remote_stack.sh up --ssh localhost --shape compose`" in text
+    assert "I used `fresh-up`, then `down`, then `up`" in text
+    assert "The local repo and the remote localhost deploy both show the same secrets" in text
+    assert "Why does `gateway-only` behave differently from `compose`?" in text
+    assert "authorization server" in text
+    assert "service account" in text
+    assert "OIDC login" in text
+    assert "Rule of thumb: if you are in the OAuth world" in text
 
 
 def test_root_dockerignore_excludes_runtime_state_and_reference_clone():
@@ -210,6 +270,8 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_USAGE_REQUIRED_ROLE" in keycloak_env
     assert "docker-compose.gateway-only.yml" in deploy_readme
     assert "deployment-targets.env.example" in deploy_readme
+    assert "out/deployment_targets_rendered/gateway.env" in deploy_readme
+    assert "out/deployment_targets_rendered/gateway-compose.env" in deploy_readme
     assert "gateway.env.example" in gateway_compose
     assert "MODELKEYGUARD_GATEWAY_BIND" in gateway_compose
     assert "bootstrap_keycloak_admin_role.sh" in (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
@@ -306,30 +368,133 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     repo_root = Path(__file__).resolve().parents[1]
     deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
     smoke = (repo_root / "scripts" / "deployment_smoke.sh").read_text(encoding="utf-8")
+    fresh_smoke = (repo_root / "scripts" / "fresh_up_parity_smoke.sh").read_text(encoding="utf-8")
     scripts_readme = (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
+    adr_readme = (repo_root / "docs" / "adr" / "README.md").read_text(encoding="utf-8")
     docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
     readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
     assert "another unprivileged user on the same machine" in deploy
     assert "Build the gateway image locally" in deploy
     assert "load it onto a remote SSH target" in deploy
+    assert "Default: ~/token-safe-deploy" in deploy
     assert "Keycloak bootstrap admin for this deployment" in deploy
     assert "--shape MODE" in deploy
     assert "compose | gateway-only" in deploy
     assert "tmpfs-backed runtime directory" in deploy
     assert "rm -rf '$remote_root_expanded/secrets'" in deploy
     assert "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" in deploy
+    assert 'cleanup_runtime_secrets "$ssh_target"' in deploy
+    assert 'local remote="${1:-}"' in deploy
     assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in deploy
     assert "browser OIDC redirect" in smoke
     assert "CLI/service-account token path" in smoke
     assert "usage-analysis agent" in smoke
+    assert "fresh-up vs up smoke passed" in fresh_smoke
+    assert "docker inspect token-safe-deploy-postgres-1" in fresh_smoke
     assert "deploy_remote_stack.sh" in scripts_readme
     assert "deployment_smoke.sh" in scripts_readme
+    assert "fresh_up_parity_smoke.sh" in scripts_readme
+    assert "Lifecycle parity notes" in scripts_readme
+    assert "`fresh-up` creates a new timestamped rehearsal data root and records it" in scripts_readme
+    assert "0007-fresh-up-and-up-bind-mount-parity.md" in adr_readme
+    assert "Fresh-up and up bind-mount parity" in adr_readme
+    assert "0008-graph-key-resolution-and-sealed-payload-contract.md" in adr_readme
+    assert "Graph key resolution and sealed payload contract" in adr_readme
+    assert "0009-explicit-model-key-selection-and-ambiguity-failure.md" in adr_readme
+    assert "Explicit model key selection and ambiguity failure" in adr_readme
     assert "deploy_remote_stack.sh" in docs
     assert "deployment_smoke.sh" in docs
+    assert "./scripts/production_compose.sh up" in deploy
+    assert "./scripts/production_compose.sh fresh-up" in deploy
+    assert "./scripts/production_compose.sh start" in deploy
+    assert "./scripts/production_compose.sh stop" in deploy
+    assert "./scripts/production_compose.sh down" in deploy
+    assert "./scripts/production_compose.sh logs" in deploy
+    assert "./scripts/production_compose.sh config" in deploy
     assert "For the remote compose path, the wrapper also generates a non-default Keycloak" in docs
+    assert "keycloak_admin_first_setup.md" in docs
+    assert "gateway-only deploy cannot bind" in deploy
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
+    assert "keycloak_admin_first_setup.md" in readme
+
+
+def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
+    repo_root = Path(__file__).resolve().parents[1]
+    tutorial = (repo_root / "tutorial" / "keycloak_admin_first_setup.md").read_text(encoding="utf-8")
+    tutorial_index = (repo_root / "tutorial" / "README.md").read_text(encoding="utf-8")
+    docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+
+    assert "create Keycloak alice" in tutorial
+    assert "register user:alice" in tutorial
+    assert "user:admin" in tutorial
+    assert "take the keycloak username and prefix it with" in tutorial.lower()
+    assert "register agent:doc-ingestor" in tutorial
+    assert "Give the agent and reviewer OIDC machine credentials" in tutorial
+    assert "The tutorial flow requires a real reviewer identity in both systems:" in tutorial
+    assert "modelguard-usage-agent" in tutorial
+    assert "agent:usage-reviewer" in tutorial
+    assert "registration set-quota" in tutorial
+    assert "--subject-id agent:usage-reviewer" in tutorial
+    assert "set up quotas for alice and agent:doc-ingestor" in tutorial.lower()
+    assert "bootstrap-operator quota" in tutorial.lower()
+    assert "OIDC admin role" in tutorial
+    assert "For Alice to be a backend admin, all of these must be true:" in tutorial
+    assert "modelkeyguard has the matching policy subject `user:alice`" in tutorial.lower()
+    assert "Client authentication` to `On" in tutorial
+    assert "Turn `Service accounts roles` `On" in tutorial
+    assert "Do not use the browser client `modelguard-admin-web` for machines" in tutorial
+    assert "creating a Keycloak client does not automatically create a" in tutorial
+    assert "safe token issued in step 7" in tutorial
+    assert "easiest local case: omit `--admin-base-url` entirely" in tutorial.lower()
+    assert "local kogwistar postgres-backed store" in tutorial.lower()
+    assert "--admin-base-url http://127.0.0.1:8789" in tutorial
+    assert "--admin-secret \"$MODELKEYGUARD_ADMIN_API_SECRET\"" in tutorial
+    assert "/admin/keys.json" in tutorial
+    assert "The JSON response from `/admin/keys.json` lists the active provider keys" in tutorial
+    assert "If you prefer the browser, open `http://127.0.0.1:8789/admin/keys`" in tutorial
+    assert "bootstrap_secrets.sh" in tutorial
+    assert "modelkeyguard_admin_api_secret" in tutorial
+    assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in tutorial
+    assert "log in as alice and inspect the quota pages" in tutorial.lower()
+    assert "use `--admin-bearer-token \"$admin_token\"` only when the gateway is explicitly" in tutorial.lower()
+    assert "modelkeyguard_admin_auth_mode=keycloak" in tutorial.lower()
+    assert "secret_or_keycloak" in tutorial.lower()
+    assert "for a true remote deployment, replace `http://127.0.0.1:8789` with the remote" in tutorial.lower()
+    assert "TOKEN_RESPONSE=" in tutorial
+    assert "SAFE_TOKEN_ID=" in tutorial
+    assert '\\"subject_id\\":\\"${SAFE_TOKEN_ID}\\"' in tutorial
+    assert "MODELKEYGUARD_SAMPLE_PROVIDER" in tutorial
+    assert "Issue a safe token for the registered model route and cap it" in tutorial
+    assert "After step 6, ModelKeyGuard has a registered provider key/model route" in tutorial
+    assert "This helper speaks the OpenAI-compatible" in tutorial
+    assert "external_langchain_smoke.py" in tutorial
+    assert "external_langchain_ollama.py" in tutorial
+    assert "Ollama-shaped gateway route" in tutorial
+    assert "KGW_BASE_URL='http://127.0.0.1:8789'" in tutorial
+    assert 'KGW_TOKEN="${SAFE_TOKEN}"' in tutorial
+    assert "same doc-ingestor system prompt as the gateway smoke" in tutorial
+    assert "model.usage.read" in tutorial
+    assert "usage_analysis_agent.py" in tutorial
+    assert "lane quota using the returned token ID" in tutorial
+    assert "Review the conversation history" in tutorial
+    assert "/admin/history" in tutorial
+    assert "/admin/history.json" in tutorial
+    assert "/admin/history/${REQUEST_ID}.json" in tutorial
+    assert "keycloak_admin_first_setup.md" in tutorial_index
+    assert "keycloak_admin_first_setup.md" in docs
+    assert "glossary.md" in readme
+    assert "easiest local path is to call `modelkeyguard" in docs.lower()
+    assert "same kogwistar postgres-backed store" in docs.lower()
+    assert "--admin-base-url http://127.0.0.1:8789" in docs
+    assert "--admin-secret" in docs
+    assert "bootstrap_secrets.sh" in docs
+    assert "modelkeyguard_admin_api_secret" in docs
+    assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in docs
+    assert "--admin-bearer-token" in docs
+    assert "replace `http://127.0.0.1:8789` with the remote" in docs
 
 
 def test_remote_deploy_bootstrap_admin_pair_is_printed_not_persisted():
@@ -385,7 +550,7 @@ def test_render_deployment_env_generates_matching_component_files(tmp_path):
     assert "MODELKEYGUARD_PORT=8789" in gateway_env
     assert "MODELKEYGUARD_POSTGRES_DSN=postgresql://modelguard:<postgres-password>@postgres-b.internal:5432/modelguard" in postgres_env
     assert "KEYCLOAK_URL=https://keycloak.example" in keycloak_env
-    assert f"MODELKEYGUARD_GATEWAY_ENV_FILE={out_dir}/gateway.env" in compose_env
+    assert f"MODELKEYGUARD_GATEWAY_ENV_FILE={out_dir.resolve()}/gateway.env" in compose_env
     assert "MODELKEYGUARD_GATEWAY_BIND=127.0.0.1:8789" in compose_env
 
 

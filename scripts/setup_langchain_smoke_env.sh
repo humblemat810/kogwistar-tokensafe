@@ -16,7 +16,7 @@ echo "[3/4] install smoke requirements"
 
 echo "[4/4] verify imports"
 "$VENV_PATH/bin/python" - <<'PY'
-import importlib
+import importlib.util
 mods = [
     "langchain_core",
     "langchain_openai",

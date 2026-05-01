@@ -7,6 +7,8 @@ The client never receives the real OpenAI/Azure/Anthropic key. It receives a sho
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
 For a plain-English explanation of the runnable shell entrypoints, see
 [`scripts/README.md`](scripts/README.md).
+For a plain-English glossary of the terms, tokens, and env vars that keep
+coming up in tutorials, see [`glossary.md`](glossary.md).
 
 If you install the package from PyPI or a wheel, the default policy graph is
 bundled into the package, so the `modelkeyguard` CLI can still start without a
@@ -82,6 +84,7 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 6. production deployment notes.
 
 See [`tutorial/slow_quickstart_cli_gui_parity.md`](tutorial/slow_quickstart_cli_gui_parity.md) for a slower, retry-safe CLI and GUI parity walkthrough.
+See [`tutorial/keycloak_admin_first_setup.md`](tutorial/keycloak_admin_first_setup.md) for the first real Keycloak-admin setup path: create `alice`, register `user:alice` and `agent:doc-ingestor`, set quotas, choose a provider key, and add a reviewer account.
 See [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md) for the copy-paste installed-Kogwistar managed Postgres setup, including no-JSONL graph artifact verification.
 See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_azure_real_setup.md) for final-dev guard setup with real Azure token pathway, PostgreSQL-backed state, and real smoke tests (completion + LangChain structured output).
 
@@ -670,13 +673,16 @@ while the deployment is active.
 
 For the remote compose path, it also generates a non-default Keycloak
 bootstrap admin username/password pair unless you override them locally. It
-prints that pair during deploy so you can reach the Keycloak admin console
-without using `admin` / `admin`.
+prints that pair during deploy only when Keycloak is starting from a fresh
+data directory. If the realm already exists, keep using the older admin that
+already works for that realm.
 
 Warning: copy that pair when the deploy finishes. The wrapper does not keep a
 recoverable copy for you. Losing that bootstrap console login does not erase
 the persisted gateway data, but it can leave you without a Keycloak admin
-console until you provision another admin path.
+console until you provision another admin path. If you need a truly fresh
+Keycloak admin after losing the existing one in a dev deployment, use
+`fresh-up` so Keycloak starts from an empty data directory.
 
 The default compose realm import does not seed end-user demo accounts. If you
 want the beginner/test seed data, point

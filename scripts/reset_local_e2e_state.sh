@@ -74,7 +74,7 @@ for env_name, default in (
 ):
     _remove_file(os.getenv(env_name, default))
 
-store = os.getenv("MODELKEYGUARD_STORE", "jsonl").strip().lower()
+store = os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres").strip().lower()
 dsn = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "").strip()
 if store == "postgres" or dsn:
     try:

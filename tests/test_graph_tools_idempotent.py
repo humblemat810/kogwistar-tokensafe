@@ -165,7 +165,7 @@ def test_tutorial_rerun_safe_invariant(tmp_path, monkeypatch):
         serious_namespaces.clear()
 
     def fake_from_policy(cls, policy, path=None, app_key=None):
-        store_kind = os.getenv("MODELKEYGUARD_STORE", "jsonl").lower()
+        store_kind = os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres").lower()
         if store_kind not in {"postgres", "kogwistar_postgres"}:
             return real_from_policy(cls, policy, path=path, app_key=app_key)
 
@@ -198,3 +198,66 @@ def test_tutorial_rerun_safe_invariant(tmp_path, monkeypatch):
 
     serious_case_runs = sum(1 for c in cases if c.store in {"postgres", "kogwistar_postgres"}) * 2
     assert len(reset_calls) >= serious_case_runs
+
+
+def test_init_graph_defaults_to_kogwistar_postgres_without_store_env(tmp_path, monkeypatch):
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text("{}", encoding="utf-8")
+    graph_path = tmp_path / "graph.jsonl"
+    graph_path.write_text("stale", encoding="utf-8")
+
+    reset_calls: list[str] = []
+
+    def fake_reset(dsn: str | None = None) -> None:
+        reset_calls.append(dsn or "")
+
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            self.nodes = {}
+            self.edges = {}
+            self.events = []
+            self.projections = {}
+
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_INIT_RESET_EXISTING", "1")
+    monkeypatch.setattr(graph_tools, "_reset_postgres_graph_state", fake_reset)
+    monkeypatch.setattr(
+        graph_tools.GraphStateStore,
+        "from_policy",
+        classmethod(lambda cls, policy, path=None, app_key=None: FakeKogwistarStore()),
+    )
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    rc = graph_tools.init_graph(str(policy_path), str(graph_path))
+
+    assert rc == 0
+    assert reset_calls == [""]
+    assert graph_path.exists()
+
+
+def test_inspect_graph_defaults_to_kogwistar_postgres_without_store_env(tmp_path, monkeypatch, capsys):
+    graph_path = tmp_path / "graph.jsonl"
+
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            self.nodes = {}
+            self.edges = {}
+            self.events = []
+            self.projections = {}
+
+    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    rc = graph_tools.inspect_graph(str(graph_path))
+    out = capsys.readouterr().out
+
+    assert rc == 0
+    assert '"store": "kogwistar_postgres"' in out

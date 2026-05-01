@@ -297,16 +297,24 @@ The remote wrapper builds the gateway image locally, loads that image onto the
 remote Docker host, and stages secrets into a tmpfs-backed runtime directory on
 the target host for the lifetime of the deployment, rather than leaving
 persistent secret files behind.
+By default it uses a separate remote checkout root at `~/token-safe-deploy`, so
+deploying to `localhost` does not write into your local development tree.
 
 For the remote compose path, the wrapper also generates a non-default Keycloak
 bootstrap admin username/password pair unless you override them in the local
-environment. It prints that pair once during deploy so you can use the Keycloak
-admin console without relying on `admin` / `admin`.
+environment. If Keycloak starts from a fresh data directory, it prints that
+pair during deploy so you can use the Keycloak admin console without relying
+on `admin` / `admin`. If the realm already exists, keep using the older admin
+that already works for that realm.
 
 Warning: copy that pair when the deploy finishes. The wrapper does not keep a
 recoverable copy for you. If you lose that bootstrap console login, the
 persisted gateway data is still there, but you may need another admin path to
 reach the Keycloak console and manage IdP settings.
+
+If you need a truly fresh Keycloak admin after losing the existing one in a
+dev deployment, use `fresh-up` so Keycloak starts from an empty data
+directory.
 
 To add a new Keycloak user after deploy, log into the Keycloak admin console
 with that bootstrap admin pair, open `Users`, create the user, set a password,
@@ -500,15 +508,44 @@ Use whichever is easiest for the current environment. The backend behavior is
 the same.
 
 After the gateway is up, register the application, end user, principal, quotas,
-and key in that order. The examples below use a Keycloak admin bearer token. If
-you are in a migration window, the same endpoints also accept the admin secret
-header.
+and key in that order. The easiest local path is to call `modelkeyguard
+registration ...` directly with no `--admin-base-url`, which writes to the
+same Kogwistar Postgres-backed store the gateway uses.
+
+If you want to write through the running gateway instead of the local store,
+point the CLI at the ModelKeyGuard admin API with `--admin-base-url`. That base
+URL is the ModelKeyGuard gateway, not Keycloak. The default admin auth mode for
+the gateway is secret-based, so the local gateway example uses
+`--admin-secret`. Use `--admin-bearer-token` only when the gateway is
+explicitly configured with `MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak` or
+`secret_or_keycloak`, and the token comes from a Keycloak service account with
+the required admin role.
+
+The secret used by `--admin-secret` comes from
+`./scripts/bootstrap_secrets.sh`, which creates
+`./secrets/modelkeyguard_admin_api_secret` by default. You can point
+`MODELKEYGUARD_ADMIN_API_SECRET_FILE` at that file, or export the value into
+`MODELKEYGUARD_ADMIN_API_SECRET` if you want a plain shell variable.
+
+```bash
+modelkeyguard \
+  --admin-base-url http://127.0.0.1:8789 \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
+  registration register-user \
+  --user-id user:alice \
+  --display-name "Alice"
+```
+
+For a remote gateway, replace `http://127.0.0.1:8789` with the remote gateway
+URL and keep the same auth mode the remote gateway is configured for.
 
 ```bash
 export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"
 ```
 
-Register an application:
+The above assumes you have hosting machine access. You can also register via OIDC.
+
+Register an application all via OIDC now:
 
 ```bash
 curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/applications' \
@@ -783,6 +820,11 @@ Admin access itself has two setup paths:
      `model.usage.read`
    - set `MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak`
 
+The role name is configurable. `model.admin` and `model.usage.read` are the
+defaults we ship in the bundled Keycloak realm, but the browser OIDC gate only
+requires an OIDC token carrying whatever role/claim you set in
+`MODELKEYGUARD_ADMIN_REQUIRED_ROLE` and `MODELKEYGUARD_USAGE_REQUIRED_ROLE`.
+
 The same `/admin/keys`, `/admin/policy/applications`, `/admin/policy/principals`,
 `/admin/policy/quotas/upsert`, and `/admin/policy/tokens` routes work in both
 cases once the admin identity is configured.
@@ -791,6 +833,11 @@ Even with no demo accounts seeded, you can still create policy data through
 the CLI/API endpoints above or through the GUI after logging in with the
 admin-secret session at `/admin/session`. If you want to create Keycloak users
 for browser login, use the Keycloak admin console and add them there.
+
+For a first-time setup that includes the Keycloak user, the matching
+ModelKeyGuard user/principal, the quota step in the middle, provider selection,
+and a reviewer account, follow
+[tutorial/keycloak_admin_first_setup.md](tutorial/keycloak_admin_first_setup.md).
 
 Issue a safe token for the principal. This creates the client credential for
 `agent:doc-ingestor`; it does not name `key:openai:prod`:
@@ -829,6 +876,15 @@ OPENAI_API_KEY="${SAFE_TOKEN}" \
 OPENAI_MODEL='gpt-4o-mini' \
 python scripts/langchain_user_openai_compatible.py
 ```
+
+This helper is a plain OpenAI-compatible HTTP client, not a LangChain wrapper.
+For a real LangChain example, use `scripts/external_langchain_smoke.py`, which
+calls `ChatOpenAI`, `ChatOllama`, or `ChatGoogleGenerativeAI` directly.
+
+If the gateway is still in dry-run mode, this call proves the auth, ACL, quota,
+and key-selection path but returns a synthetic ModelKeyGuard completion. To
+exercise the real upstream provider, start the gateway with
+`MODELKEYGUARD_DRY_RUN=0` and register a real provider secret.
 
 If you are using Keycloak tokens directly instead of safe tokens, keep
 `MODELKEYGUARD_REQUIRE_KEYCLOAK=1` and set `OPENAI_API_KEY` to a real access

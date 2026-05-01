@@ -4,13 +4,15 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
 from .sealed_payload import open_json, seal_json
+from .settings import read_env_or_file
 
 DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl"))
-DEFAULT_APP_KEY = os.getenv("MODELKEYGUARD_GRAPH_KEY", "dev-modelkeyguard-change-me")
+DEFAULT_APP_KEY = "dev-modelkeyguard-change-me"
 QUOTA_POLICY_PROJECTION_PREFIX = "quota_policy_projection"
 SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres", "kogwistar_postgres"}
 SUPPORTED_QUOTA_PERIODS = {"10s", "hour", "day", "week", "month", "infinite", "lifetime"}
@@ -53,10 +55,29 @@ def normalize_quota_period(period: str) -> str:
 
 
 def resolve_store_backend(value: str | None = None) -> str:
-    store = (value if value is not None else os.getenv("MODELKEYGUARD_STORE", "jsonl")).strip().lower() or "jsonl"
+    store = (value if value is not None else os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres")).strip().lower() or "kogwistar_postgres"
     if store not in SUPPORTED_STORE_BACKENDS:
         raise ValueError(f"unsupported_store_backend:{store}")
     return store
+
+
+def resolve_graph_app_key(app_key: str | None = None) -> str:
+    if app_key:
+        return app_key
+    configured = read_env_or_file("MODELKEYGUARD_GRAPH_KEY")
+    if configured:
+        return configured
+    if os.getenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print(
+            "WARNING: using dev fallback MODELKEYGUARD_GRAPH_KEY. "
+            "Set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY for real state.",
+            file=sys.stderr,
+        )
+        return DEFAULT_APP_KEY
+    raise ValueError(
+        "graph_key_required: set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY. "
+        "For toy JSONL demos only, set MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY=1 to use the dev fallback key."
+    )
 
 
 @dataclass(frozen=True)
@@ -93,7 +114,7 @@ class GraphStateStore:
 
     def __init__(self, path: str | Path | None = None, app_key: str | None = None) -> None:
         self.path = Path(path or os.getenv("MODELKEYGUARD_GRAPH_PATH", str(DEFAULT_GRAPH_PATH)))
-        self.app_key = app_key or os.getenv("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY)
+        self.app_key = resolve_graph_app_key(app_key)
         self.nodes: dict[str, GraphNode] = {}
         self.edges: dict[str, GraphEdge] = {}
         self.events: list[dict[str, Any]] = []

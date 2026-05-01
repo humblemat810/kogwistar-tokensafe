@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from modelkeyguard.gateway import append_audit, create_app, process_chat_completion
-from modelkeyguard.graph_state import GraphStateStore
+from modelkeyguard.graph_state import GraphStateStore, resolve_graph_app_key
 from modelkeyguard.key_manager import KeyLifecycleError, KeyManager
 from modelkeyguard.settings import AppSettings, read_env_or_file
 from modelkeyguard.token_auth import TokenVerifier
@@ -21,6 +21,7 @@ ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret
 def prod_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-graph-key-32-bytes-minimum-abcdef")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     monkeypatch.setenv("MODELKEYGUARD_ENV", "local")
     monkeypatch.setenv("MODELKEYGUARD_AUTH_MODE", "local")
@@ -50,6 +51,42 @@ def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):
     monkeypatch.setenv("MODELKEYGUARD_ENV", "local")
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY_FILE", str(f))
     assert AppSettings.from_env().graph_key == "x" * 40
+
+
+def test_graph_key_resolver_requires_explicit_key_by_default(monkeypatch):
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY_FILE", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="graph_key_required"):
+        resolve_graph_app_key()
+
+
+def test_graph_key_resolver_allows_dev_fallback_only_when_opted_in(monkeypatch, capsys):
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY_FILE", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "1")
+
+    assert resolve_graph_app_key() == "dev-modelkeyguard-change-me"
+    assert "WARNING: using dev fallback MODELKEYGUARD_GRAPH_KEY" in capsys.readouterr().err
+
+
+def test_graph_store_uses_graph_key_file(monkeypatch, tmp_path):
+    graph_key = "file-backed-graph-key-32-bytes-minimum"
+    graph_key_file = tmp_path / "graph_key"
+    graph_key_file.write_text(graph_key, encoding="utf-8")
+    graph_path = tmp_path / "graph.jsonl"
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY_FILE", str(graph_key_file))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+
+    store = GraphStateStore.from_policy({})
+    store.put_node("node:file-key", "test", {"ok": True})
+    reloaded = GraphStateStore.from_policy({})
+
+    assert resolve_graph_app_key() == graph_key
+    assert reloaded.nodes["node:file-key"].payload == {"ok": True}
 
 
 def test_key_create_stores_no_plaintext(prod_env):

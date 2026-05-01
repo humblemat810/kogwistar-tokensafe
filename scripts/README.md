@@ -12,8 +12,9 @@ The most useful bash entrypoints are below.
 | `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose detached with the hardened override. Use `stop`/`start` to pause and resume containers without teardown, `down` to remove containers/networks, and `fresh-up` for a clean local rehearsal after stale data. By default the Keycloak import is empty of end-user demo accounts; set `MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE=./keycloak/modelguard-realm.beginner.json` if you want beginner seed data. Provider keys are registered later through `/admin/keys`. |
 | `render_deployment_env.sh` | Renders split-target `gateway.env`, `postgres.env`, `keycloak.env`, and `gateway-compose.env` from one filled `deployment-targets.env` file. |
 | `gateway_from_deployment_targets.sh` | Gateway-only split-target runner. It reads one source of truth, renders component env files, and runs `deploy/docker-compose.gateway-only.yml`. |
-| `deploy_remote_stack.sh` | SSH-based deploy wrapper for a same-machine lower-privilege user or another host. It builds the gateway image locally, loads it on the remote Docker host, stages secrets into remote tmpfs for the lifetime of the run, and then runs the local production or gateway-only workflow remotely. The compose path prints a one-time Keycloak bootstrap admin pair during deploy; copy it when the run finishes. |
+| `deploy_remote_stack.sh` | SSH-based deploy wrapper for a same-machine lower-privilege user or another host. It builds the gateway image locally, loads it on the remote Docker host, stages secrets into remote tmpfs for the lifetime of the run, and then runs the local production or gateway-only workflow remotely in a separate remote checkout root (`~/token-safe-deploy` by default). The compose path prints a one-time Keycloak bootstrap admin pair during deploy; copy it when the run finishes. |
 | `deployment_smoke.sh` | Shared smoke that checks browser OIDC redirect, CLI token auth, and the usage-analysis agent against a running deployment. |
+| `fresh_up_parity_smoke.sh` | Lifecycle smoke that checks `up`, `fresh-up`, and `down` against the expected Postgres bind mount path so stale rehearsal state does not silently come back. |
 | `start_postgres.sh` | Starts the pgvector-backed Postgres container or compose service used by the repo. It also prints the DSN and tells you what to export next. |
 | `start_keycloak.sh` | Starts only the Keycloak container from the compose stack and waits for the realm discovery endpoint to answer. |
 | `start_stack.sh` | Starts the local Postgres + Keycloak compose services together. It is the quick “local infrastructure” launcher. |
@@ -37,8 +38,9 @@ The most useful bash entrypoints are below.
 | Script | What it does |
 | --- | --- |
 | `get_agent_token.sh` | Fetches a Keycloak access token for a bundled client. If the compose gateway is running, it mints through that container so the token issuer matches the gateway’s Keycloak view. |
-| `langchain_user_openai_compatible.py` | Acts like a LangChain/OpenAI client against the gateway. |
+| `langchain_user_openai_compatible.py` | Acts like an OpenAI-compatible client against the gateway. |
 | `external_langchain_smoke.py` | Separate smoke path for external-style LangChain requests. |
+| `external_langchain_ollama.py` | LangChain Ollama smoke client against the gateway's Ollama-shaped route. |
 | `smoke_azure_real_completion.sh` | Checks a real Azure-style completion path. |
 | `smoke_langchain_azure_structured_real.py` | Real structured-output smoke for Azure-style usage. |
 | `usage_analysis_agent.py` | Minimal reusable Python usage-analysis agent that mints a Keycloak service-account token and reads `/admin/usage.json` for user, principal, or key analytics. |
@@ -57,6 +59,13 @@ The most useful bash entrypoints are below.
 | `host_admin_login_watcher.py` | Watches host security events and forwards them into the admin security intake. |
 | `bundle_for_chatgpt.sh` | Bundles a working tree snapshot for offline ChatGPT-style review or handoff. |
 | `setup_langchain_smoke_env.sh` | Prepares environment variables for LangChain smoke tests. |
+
+## Lifecycle parity notes
+
+- `up` and `start` keep the currently active bind mounts.
+- `fresh-up` creates a new timestamped rehearsal data root and records it.
+- after `fresh-up`, later `down` and `up` should keep using that same fresh root until the operator intentionally clears it.
+- `fresh-up` is not a search-for-the-newest-folder workflow; it is an explicit “set the active fresh root now” workflow.
 
 If you are tracing one script from another, this is the order most local flows use:
 
