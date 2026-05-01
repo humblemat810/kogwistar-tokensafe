@@ -1,8 +1,24 @@
-# Kogwistar ModelKeyGuard — graph-native Keycloak gateway
+<p align="center">
+  <img src="assets/MonkeyGuard.png" alt="MonkeyGuard logo" width="380" />
+</p>
 
-A small standalone application that turns provider model keys into graph-governed capabilities.
+<h1 align="center">Kogwistar ModelKeyGuard</h1>
 
-The client never receives the real OpenAI/Azure/Anthropic key. It receives a short-lived Keycloak token or local `kgw_*` token, calls this gateway with an OpenAI-compatible API, and the gateway verifies identity, checks Kogwistar-style ACL, checks named projections, decrypts/looks up the provider key, forwards the request, and appends audit/usage graph events.
+<p align="center"><strong>Graph-native Keycloak gateway for secure model-key mediation, policy enforcement, and usage governance.</strong></p>
+
+<p align="center">
+  <a href="#"><img alt="Python 3.12+" src="https://img.shields.io/badge/Python-3.12%2B-3776AB?logo=python&logoColor=white"></a>
+  <a href="#"><img alt="FastAPI Gateway" src="https://img.shields.io/badge/Gateway-FastAPI-009688?logo=fastapi&logoColor=white"></a>
+  <a href="#"><img alt="Storage JSONL and Postgres" src="https://img.shields.io/badge/Storage-JSONL%20%7C%20Postgres-4C8CBF"></a>
+  <a href="#"><img alt="Auth Keycloak and local tokens" src="https://img.shields.io/badge/Auth-Keycloak%20%7C%20Local%20Tokens-5B2C83"></a>
+  <a href="#"><img alt="Stars welcome" src="https://img.shields.io/badge/Stars-Welcome-FFC107?logo=github&logoColor=black"></a>
+</p>
+
+<p align="center"><a href="#full-tutorial-ladder">Explore tutorials</a> • <a href="#60-second-quickstart">Quickstart</a> • <a href="tutorial/README.md">Docs index</a></p>
+
+ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities.
+
+Clients never receive the real OpenAI/Azure/Anthropic key. They receive a short-lived Keycloak token or local `kgw_*` token, call this gateway with an OpenAI-compatible API, and the gateway verifies identity, checks Kogwistar-style ACL, checks named projections, resolves provider key material inside the gateway, forwards the request, and appends audit/usage graph events.
 
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
 For a plain-English explanation of the runnable shell entrypoints, see
