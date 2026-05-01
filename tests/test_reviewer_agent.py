@@ -223,6 +223,67 @@ def test_run_langchain_reviewer_explains_model_call_401(monkeypatch):
     assert "REVIEWER_SAFE_TOKEN" in message
 
 
+def test_run_langchain_reviewer_accepts_multiline_json_response(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return (
+                b'{"message":{"content":"partial"},"done":false}\n'
+                b'{"message":{"content":"final review"},"done":true}\n'
+            )
+
+    def fake_urlopen(req, timeout=20):
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = run_langchain_reviewer(
+        status={"should_review": True, "triggers": [], "summary": {}},
+        base_url="http://127.0.0.1:8789",
+        safe_token="safe-token",
+        model="gemma4:e2b",
+        key_id="key:fwd-ollama:gemma4-e2b",
+    )
+
+    assert result["text"] == "final review"
+
+
+def test_run_langchain_reviewer_merges_multichunk_content_when_final_chunk_is_empty(monkeypatch):
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return (
+                b'{"message":{"content":"safety "},"done":false}\n'
+                b'{"message":{"content":"summary"},"done":false}\n'
+                b'{"message":{"content":""},"done":true}\n'
+            )
+
+    def fake_urlopen(req, timeout=20):
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = run_langchain_reviewer(
+        status={"should_review": True, "triggers": [], "summary": {}},
+        base_url="http://127.0.0.1:8789",
+        safe_token="safe-token",
+        model="gemma4:e2b",
+        key_id="key:fwd-ollama:gemma4:e2b",
+    )
+
+    assert result["text"] == "safety summary"
+
+
 def test_external_langchain_ollama_forwards_key_id_header(monkeypatch):
     repo_root = Path(__file__).resolve().parents[1]
     script_path = repo_root / "scripts" / "external_langchain_ollama.py"
@@ -238,6 +299,46 @@ def test_external_langchain_ollama_forwards_key_id_header(monkeypatch):
 
     assert headers["Authorization"] == "Bearer safe-token"
     assert headers["x-modelkeyguard-key-id"] == "key:fwd-ollama:gemma4-e2b:3"
+
+
+def test_usage_reviewer_agent_prefers_reviewer_safe_token(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "usage_reviewer_agent.py"
+    spec = importlib.util.spec_from_file_location("usage_reviewer_agent_for_test", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("REVIEWER_SAFE_TOKEN", "reviewer-token")
+    monkeypatch.setenv("KGW_TOKEN", "kgw-token")
+    monkeypatch.setenv("MODELKEYGUARD_BEARER_TOKEN", "bearer-token")
+
+    candidates = module._review_model_token_candidates()
+
+    assert candidates[0] == ("REVIEWER_SAFE_TOKEN", "reviewer-token")
+    assert ("MODELKEYGUARD_BEARER_TOKEN", "bearer-token") in candidates
+
+
+def test_usage_reviewer_agent_deduplicates_token_candidates(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "usage_reviewer_agent.py"
+    spec = importlib.util.spec_from_file_location("usage_reviewer_agent_for_test_dedupe", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.delenv("REVIEWER_SAFE_TOKEN", raising=False)
+    monkeypatch.setenv("KGW_TOKEN", "same-token")
+    monkeypatch.setenv("SAFE_TOKEN", "same-token")
+    monkeypatch.setenv("OPENAI_API_KEY", "same-token")
+    monkeypatch.setenv("MODELKEYGUARD_BEARER_TOKEN", "other-token")
+
+    candidates = module._review_model_token_candidates()
+
+    assert candidates == [
+        ("KGW_TOKEN", "same-token"),
+        ("MODELKEYGUARD_BEARER_TOKEN", "other-token"),
+    ]
 
 
 def test_review_status_client_falls_back_to_admin_secret_on_bearer_401(monkeypatch):

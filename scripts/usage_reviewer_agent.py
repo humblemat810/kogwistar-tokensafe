@@ -21,6 +21,27 @@ def _reviewer_safe_token() -> str:
     return _env("REVIEWER_SAFE_TOKEN", "")
 
 
+def _review_model_token_candidates() -> list[tuple[str, str]]:
+    def _candidate(name: str) -> tuple[str, str]:
+        return name, _env(name, "")
+
+    ordered: list[tuple[str, str]] = [
+        _candidate("REVIEWER_SAFE_TOKEN"),
+        _candidate("KGW_TOKEN"),
+        _candidate("SAFE_TOKEN"),
+        _candidate("OPENAI_API_KEY"),
+        _candidate("MODELKEYGUARD_BEARER_TOKEN"),
+    ]
+    seen: set[str] = set()
+    resolved: list[tuple[str, str]] = []
+    for source, token in ordered:
+        if not token or token in seen:
+            continue
+        resolved.append((source, token))
+        seen.add(token)
+    return resolved
+
+
 def _key_id() -> str:
     return _env("MODELKEYGUARD_KEY_ID", "")
 
@@ -52,20 +73,40 @@ def main() -> int:
         print("reviewer_action: skipped (thresholds not met)")
         return 0
 
-    token = _reviewer_safe_token()
-    if not token:
+    candidates = _review_model_token_candidates()
+    if not candidates:
         print("error: missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call", file=sys.stderr)
-        print("hint: mint it with /admin/policy/tokens for principal agent:usage-reviewer and export REVIEWER_SAFE_TOKEN", file=sys.stderr)
+        print(
+            "hint: export REVIEWER_SAFE_TOKEN (recommended), or KGW_TOKEN/SAFE_TOKEN/OPENAI_API_KEY/MODELKEYGUARD_BEARER_TOKEN",
+            file=sys.stderr,
+        )
         return 2
 
-    result = run_langchain_reviewer(
-        status=status,
-        base_url=args.base_url,
-        safe_token=token,
-        model=args.model,
-        system_prompt=args.system_prompt,
-        key_id=_key_id(),
-    )
+    result: dict[str, object] | None = None
+    last_error: Exception | None = None
+    key_id = _key_id()
+    for idx, (token_source, token) in enumerate(candidates):
+        if idx > 0:
+            print(f"warning: retrying reviewer model call with token from {token_source}", file=sys.stderr)
+        try:
+            result = run_langchain_reviewer(
+                status=status,
+                base_url=args.base_url,
+                safe_token=token,
+                model=args.model,
+                system_prompt=args.system_prompt,
+                key_id=key_id,
+            )
+            break
+        except RuntimeError as exc:
+            last_error = exc
+            if "HTTP 401" not in str(exc):
+                raise
+            continue
+    if result is None:
+        if last_error is not None:
+            raise last_error
+        raise RuntimeError("reviewer model call failed before producing a result")
     print("review_result:")
     print(json.dumps(result, indent=2, sort_keys=True))
 

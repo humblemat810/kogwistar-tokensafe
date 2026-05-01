@@ -617,7 +617,10 @@ gateway route and still enforces safe-token auth, ACLs, quotas, and key
 selection.
 
 ```bash
+# pip install the required langchain package, or you can use rest API directly
+python -m venv .venv-langchain-smoke
 source .venv-langchain-smoke/bin/activate
+pip install -r requirements_smoke.txt
 KGW_BASE_URL='http://127.0.0.1:8789' \
 KGW_TOKEN="${SAFE_TOKEN}" \
 KGW_OLLAMA_MODEL='gemma4:e2b' \
@@ -673,7 +676,7 @@ Sample streaming response:
 base_url=http://127.0.0.1:8789
 model=gemma4:e2b
 stream=true
-Request received.
+Request| received| directly|.|
 ```
 
 That gives you the end-to-end path:

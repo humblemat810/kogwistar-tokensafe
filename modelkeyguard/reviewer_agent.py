@@ -89,7 +89,8 @@ def _ollama_chat_review(
         req.add_header("x-modelkeyguard-key-id", key_id.strip())
     try:
         with urllib.request.urlopen(req, timeout=20) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+            raw_body = resp.read().decode("utf-8")
+            data = _parse_review_response_json(raw_body)
     except urllib.error.HTTPError as exc:
         try:
             body = exc.read().decode("utf-8")
@@ -102,6 +103,83 @@ def _ollama_chat_review(
     if not isinstance(data, dict):
         raise RuntimeError("review response did not return a JSON object")
     return data
+
+
+def _parse_review_response_json(raw_body: str) -> dict[str, Any]:
+    text = (raw_body or "").strip()
+    if not text:
+        raise RuntimeError("review response body was empty")
+
+    decoder = json.JSONDecoder()
+    values: list[Any] = []
+    idx = 0
+    length = len(text)
+    while idx < length:
+        while idx < length and text[idx].isspace():
+            idx += 1
+        if idx >= length:
+            break
+        try:
+            value, next_idx = decoder.raw_decode(text, idx)
+        except json.JSONDecodeError:
+            values = _parse_review_response_lines(text)
+            break
+        values.append(value)
+        idx = next_idx
+
+    return _select_review_payload(values, raw_body=text)
+
+
+def _review_payload_text(value: dict[str, Any]) -> str:
+    message = value.get("message")
+    if isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, str):
+            return content
+    response = value.get("response")
+    if isinstance(response, str):
+        return response
+    return ""
+
+
+def _select_review_payload(values: list[Any], *, raw_body: str) -> dict[str, Any]:
+    dict_values = [value for value in values if isinstance(value, dict)]
+    if dict_values:
+        # Some Ollama-compatible routes emit NDJSON chunks where the final
+        # object has done=true and empty content; aggregate non-empty chunks.
+        final_text = _review_payload_text(dict_values[-1])
+        chunk_texts = [text for text in (_review_payload_text(item) for item in dict_values) if text]
+        if not final_text and len(chunk_texts) > 1:
+            merged = dict(dict_values[-1])
+            message = merged.get("message")
+            if not isinstance(message, dict):
+                message = {}
+            merged["message"] = {**message, "content": "".join(chunk_texts)}
+            return merged
+        for item in reversed(dict_values):
+            if _review_payload_text(item):
+                return item
+        return dict_values[-1]
+    if values:
+        raise RuntimeError("review response did not include a JSON object payload")
+    raise RuntimeError(f"review response was not valid JSON: {raw_body[:200]}")
+
+
+def _parse_review_response_lines(text: str) -> list[Any]:
+    values: list[Any] = []
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line.startswith("data:"):
+            line = line[5:].strip()
+        if not line or line == "[DONE]":
+            continue
+        try:
+            values.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    return values
 
 
 def _get_named_projection(graph_state: GraphStateStore, namespace: str, key: str) -> dict[str, Any] | None:
