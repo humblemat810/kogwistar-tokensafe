@@ -408,6 +408,8 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "The tutorial flow requires a real reviewer identity in both systems:" in tutorial
     assert "modelguard-usage-agent" in tutorial
     assert "agent:usage-reviewer" in tutorial
+    assert "registration set-quota" in tutorial
+    assert "--subject-id agent:usage-reviewer" in tutorial
     assert "set up quotas for alice and agent:doc-ingestor" in tutorial.lower()
     assert "bootstrap-operator quota" in tutorial.lower()
     assert "OIDC admin role" in tutorial
@@ -430,9 +432,15 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "modelkeyguard_admin_auth_mode=keycloak" in tutorial.lower()
     assert "secret_or_keycloak" in tutorial.lower()
     assert "for a true remote deployment, replace `http://127.0.0.1:8789` with the remote" in tutorial.lower()
+    assert "TOKEN_RESPONSE=" in tutorial
+    assert "SAFE_TOKEN_ID=" in tutorial
+    assert '\\"subject_id\\":\\"${SAFE_TOKEN_ID}\\"' in tutorial
     assert "MODELKEYGUARD_SAMPLE_PROVIDER" in tutorial
+    assert "Issue a safe token for the registered model route and cap it" in tutorial
+    assert "After step 6, ModelKeyGuard has a registered provider key/model route" in tutorial
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial
+    assert "lane quota using the returned token ID" in tutorial
     assert "keycloak_admin_first_setup.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs
     assert "easiest local path is to call `modelkeyguard" in docs.lower()

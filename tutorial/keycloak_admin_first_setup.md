@@ -282,7 +282,7 @@ account inspect usage without being able to mutate policy.
 The reusable Python client for that reviewer is
 [`modelkeyguard.analytics`](../README.md#usage-analysis-agent).
 
-## 5. Set quotas for Alice, the admin mapping, the agent, and the token
+## 5. Set quotas for Alice, the admin mapping, and the agents
 
 User quota:
 
@@ -329,9 +329,22 @@ modelkeyguard \
   --max-requests 200
 ```
 
-If you want the issued safe token itself to have a hard cap, create a `token`
-quota after issuance. That is optional and separate from the user and principal
-limits.
+Give that reviewer principal its own quota too. For example, cap it to a
+month-level budget:
+
+```bash
+modelkeyguard \
+  --admin-base-url http://127.0.0.1:8789 \
+  --admin-secret "$MODELKEYGUARD_ADMIN_API_SECRET" \
+  registration set-quota \
+  --lane principal \
+  --subject-id agent:usage-reviewer \
+  --quota-name month \
+  --period month \
+  --max-usd 2 \
+  --max-tokens 20000 \
+  --max-requests 200
+```
 
 ## 5b. Log in as Alice and inspect the quota pages
 
@@ -427,18 +440,32 @@ gateway container can actually reach. If Ollama is running on the host machine,
 container itself. Use a reachable host IP, a Docker service name, or a
 configured `host.docker.internal` entry instead.
 
-## 7. Issue a safe token for the agent and human pair
+## 7. Issue a safe token for the registered model route and cap it
+
+After step 6, ModelKeyGuard has a registered provider key/model route for
+`agent:doc-ingestor`. Now issue a safe token for Alice using that agent, then
+set a quota on the exact issued token.
 
 ```bash
-SAFE_TOKEN="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
+TOKEN_RESPONSE="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -H 'content-type: application/json' \
-  -d '{"principal_id":"agent:doc-ingestor","namespace":"tenant:kogwistar","on_behalf_of_user_id":"user:alice","application_id":"app:doc-ingestor","scopes":["model.invoke"]}' \
-  | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
+  -d '{"principal_id":"agent:doc-ingestor","namespace":"tenant:kogwistar","on_behalf_of_user_id":"user:alice","application_id":"app:doc-ingestor","scopes":["model.invoke"]}')"
+
+SAFE_TOKEN="$(printf '%s' "$TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
+SAFE_TOKEN_ID="$(printf '%s' "$TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')"
 ```
 
-If you want the exact token itself to stop after a fixed amount, add a `token`
-lane quota on the issued token ID.
+To make that exact safe token stop after a fixed amount on this registered
+model path, add a `token` lane quota using the returned token ID:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d "{\"lane\":\"token\",\"subject_id\":\"${SAFE_TOKEN_ID}\",\"quota_name\":\"lifetime\",\"period\":\"infinite\",\"max_usd\":5,\"max_tokens\":50000,\"max_requests\":100}" \
+  | python -m json.tool
+```
 
 In dry-run mode, the request still exercises auth, ACL, quota, and key
 selection, but the returned completion is synthetic. In real mode, with
