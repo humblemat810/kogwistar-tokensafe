@@ -40,14 +40,22 @@ def _build_llm():
 
     base_url = os.getenv("KGW_BASE_URL", os.getenv("OPENAI_BASE_URL", "http://127.0.0.1:8789")).rstrip("/")
     model = os.getenv("KGW_OLLAMA_MODEL", os.getenv("OPENAI_MODEL", "gemma4:e2b"))
-    headers = {}
-    token = os.getenv("KGW_TOKEN", os.getenv("SAFE_TOKEN", os.getenv("OPENAI_API_KEY", ""))).strip()
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
+    headers = _request_headers()
     try:
         return ChatOllama(model=model, base_url=base_url, client_kwargs={"headers": headers}, temperature=0)
     except TypeError:
         return ChatOllama(model=model, base_url=base_url, headers=headers, temperature=0)
+
+
+def _request_headers() -> dict[str, str]:
+    headers: dict[str, str] = {}
+    token = os.getenv("KGW_TOKEN", os.getenv("SAFE_TOKEN", os.getenv("OPENAI_API_KEY", ""))).strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    key_id = os.getenv("MODELKEYGUARD_KEY_ID", "").strip()
+    if key_id:
+        headers["x-modelkeyguard-key-id"] = key_id
+    return headers
 
 
 def main() -> int:
@@ -68,6 +76,9 @@ def main() -> int:
 
     print(f"base_url={os.getenv('KGW_BASE_URL', os.getenv('OPENAI_BASE_URL', 'http://127.0.0.1:8789')).rstrip('/')}")
     print(f"model={os.getenv('KGW_OLLAMA_MODEL', os.getenv('OPENAI_MODEL', 'gemma4:e2b'))}")
+    key_id = os.getenv("MODELKEYGUARD_KEY_ID", "").strip()
+    if key_id:
+        print(f"key_id={key_id}")
 
     try:
         if args.stream:
@@ -75,7 +86,7 @@ def main() -> int:
             for chunk in llm.stream(messages):
                 text = _message_text(chunk)
                 if text:
-                    print(text, end="", flush=True)
+                    print(text, end="|", flush=True)
             print()
             return 0
 

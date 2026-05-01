@@ -278,6 +278,14 @@ cp deploy/deployment-targets.env.example deploy/deployment-targets.env
 ./scripts/gateway_from_deployment_targets.sh config
 ```
 
+For gateway-only deployments, set the admin auth mode in that same targets
+file when you want the gateway to accept both the admin secret and Keycloak
+auth:
+
+```text
+MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak
+```
+
 For gateway-on-machine-A deployment, use the same single source directly:
 
 ```bash

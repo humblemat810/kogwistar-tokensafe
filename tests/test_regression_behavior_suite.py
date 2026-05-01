@@ -34,7 +34,7 @@ def isolated_graph(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-graph-key")
     monkeypatch.delenv("KOGWISTAR_REPO", raising=False)
     monkeypatch.delenv("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", raising=False)
-    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
 
 def _guard():
@@ -82,6 +82,16 @@ def test_003_sealed_payload_rejects_wrong_key():
     sealed = seal_json({"secret": "x"}, "key-a")
     with pytest.raises(ValueError):
         open_json(sealed, "key-b")
+
+
+def test_003a_sealed_payload_sentinel_check_runs_before_encrypt(monkeypatch):
+    def broken_open(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("modelkeyguard.sealed_payload._open_json_impl", broken_open)
+
+    with pytest.raises(ValueError, match="sentinel payload did not decrypt to the expected text"):
+        seal_json({"secret": "x"}, "key-a")
 
 
 def test_004_sealed_payload_rejects_tampered_ciphertext():

@@ -10,6 +10,12 @@ ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret
 EXPECTED_SYSTEM = "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
 
 
+@pytest.fixture(autouse=True)
+def _history_routes_test_env(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-history-key-32-bytes-minimum!")
+
+
 def _payload(stream: bool = False):
     return {
         "model": "gpt-4o-mini",

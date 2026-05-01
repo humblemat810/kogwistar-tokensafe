@@ -1,4 +1,5 @@
 import json
+import time
 import urllib.error
 
 import pytest
@@ -14,6 +15,7 @@ ADMIN_SECRET = "dev-modelkeyguard-admin-secret"
 @pytest.fixture(autouse=True)
 def _force_jsonl_store(monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-fastapi-gateway-key-32-bytes")
 
 
 def _admin_headers():
@@ -168,6 +170,78 @@ def test_fastapi_gateway_core_allows_local_token(tmp_path, monkeypatch):
     assert headers["content-type"] == "application/json"
     assert data["modelkeyguard"]["decision"] == "ALLOWED"
     assert data["choices"][0]["message"]["content"].startswith("ModelKeyGuard allowed")
+
+
+def test_keycloak_service_account_resource_role_counts_as_allowed_role(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-keycloak-token-key-32-bytes")
+
+    from modelkeyguard import token_auth
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "active": True,
+                    "client_id": "modelguard-usage-agent",
+                    "jti": "test-jti",
+                    "exp": int(time.time()) + 300,
+                    "scope": "openid profile",
+                    "realm_access": {"roles": []},
+                    "resource_access": {"modelguard-usage-agent": {"roles": ["model.usage.read"]}},
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(req, data=None, timeout=None):
+        return _Resp()
+
+    monkeypatch.setattr(token_auth.urllib.request, "urlopen", fake_urlopen)
+    verifier = TokenVerifier("config/gateway_policy.json")
+    principal = verifier.verify_keycloak_authorization_header("Bearer test-token")
+
+    assert "model.usage.read" in principal.groups
+
+
+def test_keycloak_service_account_realm_role_counts_as_allowed_role(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-keycloak-token-key-32-bytes")
+
+    from modelkeyguard import token_auth
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "active": True,
+                    "client_id": "modelguard-usage-agent",
+                    "jti": "test-jti",
+                    "exp": int(time.time()) + 300,
+                    "scope": "openid profile",
+                    "realm_access": {"roles": ["model.usage.read"]},
+                    "resource_access": {},
+                }
+            ).encode("utf-8")
+
+    def fake_urlopen(req, data=None, timeout=None):
+        return _Resp()
+
+    monkeypatch.setattr(token_auth.urllib.request, "urlopen", fake_urlopen)
+    verifier = TokenVerifier("config/gateway_policy.json")
+    principal = verifier.verify_keycloak_authorization_header("Bearer test-token")
+
+    assert "model.usage.read" in principal.groups
 
 
 def test_gateway_startup_explains_graph_key_mismatch(monkeypatch):

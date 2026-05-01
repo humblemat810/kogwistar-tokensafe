@@ -9,6 +9,8 @@ set -euo pipefail
 # - a gateway-only split-target host that points at remote Postgres/Keycloak
 # Secrets are staged into a remote tmpfs-backed runtime directory so the remote
 # target can run the same scripts without leaving static secret files behind.
+# Each `up` refreshes that runtime snapshot from the repo secrets source of
+# truth, so the remote tmpfs always matches the current local secret files.
 # Use `down` to stop the stack and clean up the runtime secret staging.
 
 usage() {
@@ -161,6 +163,7 @@ resolve_remote_root() {
 
 remote_root_expanded="$(resolve_remote_root "$ssh_target" "$remote_root")"
 runtime_state_file="${remote_root_expanded}/out/.runtime-secret-dir"
+remote_compose_project_name="$(basename "$remote_root_expanded")"
 
 sync_repo() {
   local remote="${1}"
@@ -169,6 +172,7 @@ sync_repo() {
     --exclude '.git/' \
     --exclude '.venv/' \
     --exclude 'data/' \
+    --exclude 'data.old/' \
     --exclude 'out/' \
     --exclude 'secrets/' \
     --exclude '__pycache__/' \
@@ -198,17 +202,13 @@ stage_runtime_secrets() {
   local remote="$1"
   ssh "$remote" "mkdir -p '$remote_root_expanded' '$remote_root_expanded/out'"
   runtime_secret_dir="$(ssh "$remote" "if [[ -f '$runtime_state_file' ]]; then cat '$runtime_state_file'; fi" | tr -d '\r\n')"
-  if [[ -n "$runtime_secret_dir" ]] && ssh "$remote" "test -d '$runtime_secret_dir'"; then
-    if [[ -d "${repo_root}/secrets" ]]; then
-      rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
-    fi
-  else
+  if [[ -z "$runtime_secret_dir" ]] || ! ssh "$remote" "test -d '$runtime_secret_dir'"; then
     runtime_secret_dir="$(ssh "$remote" "mktemp -d /dev/shm/token-safe-secrets.XXXXXX")"
-    if [[ -d "${repo_root}/secrets" ]]; then
-      ssh "$remote" "mkdir -p '$runtime_secret_dir'"
-      rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
-    fi
     ssh "$remote" "printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
+  fi
+  if [[ -d "${repo_root}/secrets" ]]; then
+    ssh "$remote" "mkdir -p '$runtime_secret_dir'"
+    rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
   fi
   ssh "$remote" "rm -rf '$remote_root_expanded/secrets' && ln -s '$runtime_secret_dir' '$remote_root_expanded/secrets' && printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
 }
@@ -240,6 +240,61 @@ with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
     except OSError:
         raise SystemExit(1)
 PY"
+}
+
+remote_port_owned_by_current_gateway() {
+  local remote="$1"
+  local bind="$2"
+  local port="${bind##*:}"
+  ssh "$remote" "python3 - <<'PY'
+import json
+import subprocess
+import sys
+
+port = '${port}'
+project = '${remote_compose_project_name}'
+try:
+    ids = subprocess.check_output(
+        ['docker', 'ps', '--filter', f'publish={port}', '--format', '{{.ID}}'],
+        text=True,
+    ).splitlines()
+except Exception:
+    raise SystemExit(1)
+for cid in ids:
+    try:
+        raw = subprocess.check_output(
+            ['docker', 'inspect', cid, '--format', '{{json .Config.Labels}}'],
+            text=True,
+        )
+        labels = json.loads(raw or '{}') or {}
+    except Exception:
+        continue
+    if (
+        labels.get('com.docker.compose.project') == project
+        and labels.get('com.docker.compose.service') == 'gateway'
+    ):
+        raise SystemExit(0)
+raise SystemExit(1)
+PY"
+}
+
+remote_project_has_service() {
+  local remote="$1"
+  local service="$2"
+  ssh "$remote" "docker ps --filter 'label=com.docker.compose.project=${remote_compose_project_name}' --filter 'label=com.docker.compose.service=${service}' --format '{{.ID}}' | grep -q ."
+}
+
+remote_project_service_env() {
+  local remote="$1"
+  local service="$2"
+  local name="$3"
+  ssh "$remote" "cid=\$(docker ps --filter 'label=com.docker.compose.project=${remote_compose_project_name}' --filter 'label=com.docker.compose.service=${service}' --format '{{.ID}}' | head -n 1); [[ -n \"\$cid\" ]] || exit 1; docker exec \"\$cid\" printenv '${name}'"
+}
+
+shell_quote() {
+  local quoted
+  printf -v quoted '%q' "$1"
+  printf '%s' "$quoted"
 }
 
 build_local_image() {
@@ -287,8 +342,11 @@ if [[ "$shape" == "gateway-only" && "$command_name" == "up" ]]; then
   gateway_bind="$(gateway_bind_from_targets "${repo_root}/${targets_file}")"
   if ! remote_port_in_use "$ssh_target" "$gateway_bind"; then
     gateway_port="${gateway_bind##*:}"
-    port_owner_report="$(ssh "$ssh_target" "docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep '${gateway_port}' || true")"
-    cat <<TXT >&2
+    if remote_port_owned_by_current_gateway "$ssh_target" "$gateway_bind"; then
+      echo "gateway-only deploy found existing gateway service for ${gateway_bind}; allowing Compose to recreate it." >&2
+    else
+      port_owner_report="$(ssh "$ssh_target" "docker ps --format 'table {{.Names}}\t{{.Ports}}' | grep '${gateway_port}' || true")"
+      cat <<TXT >&2
 gateway-only deploy cannot bind ${gateway_bind} on the remote target because that port is already in use.
 This usually means another gateway container is still running, often from the
 main compose stack, not the gateway-only stack you just stopped.
@@ -299,7 +357,22 @@ If this is the previous gateway stack on the same machine, stop it first:
   ./scripts/deploy_remote_stack.sh down --ssh ${ssh_target} --shape gateway-only
 Or change MODELKEYGUARD_GATEWAY_BIND in ${targets_file} and render again.
 TXT
-    exit 1
+      exit 1
+    fi
+  fi
+fi
+
+gateway_only_env_prefix="MODELKEYGUARD_IMAGE='$local_image' MODELKEYGUARD_COMPOSE_PROJECT_NAME='$remote_compose_project_name'"
+if [[ "$shape" == "gateway-only" && ( "$command_name" == "up" || "$command_name" == "fresh-up" || "$command_name" == "start" || "$command_name" == "config" ) ]]; then
+  if remote_project_has_service "$ssh_target" "postgres"; then
+    gateway_only_env_prefix="$gateway_only_env_prefix MODELKEYGUARD_GATEWAY_POSTGRES_HOST='postgres' MODELKEYGUARD_GATEWAY_POSTGRES_PORT='5432'"
+    postgres_password="$(remote_project_service_env "$ssh_target" "postgres" "POSTGRES_PASSWORD" | tr -d '\r\n' || true)"
+    if [[ -n "$postgres_password" ]]; then
+      gateway_only_env_prefix="$gateway_only_env_prefix MODELKEYGUARD_POSTGRES_PASSWORD_PLACEHOLDER=$(shell_quote "$postgres_password")"
+    fi
+  fi
+  if remote_project_has_service "$ssh_target" "keycloak"; then
+    gateway_only_env_prefix="$gateway_only_env_prefix MODELKEYGUARD_GATEWAY_KEYCLOAK_URL='http://keycloak:8080'"
   fi
 fi
 
@@ -308,35 +381,36 @@ case "$command_name" in
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh up"
     else
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   fresh-up)
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh fresh-up"
     else
-      remote_exec "$ssh_target" "rm -rf out/production_compose_fresh; export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "rm -rf out/production_compose_fresh; export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   start)
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh start"
     else
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh up --env-file '${targets_file}'"
     fi
     ;;
   stop)
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh stop"
     else
-      remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env stop"
+      remote_exec "$ssh_target" "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env stop"
     fi
     ;;
   down)
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh down"
     else
-      remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down --remove-orphans"
+      remote_exec "$ssh_target" "export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh render --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down"
     fi
     cleanup_runtime_secrets "$ssh_target"
     if [[ "$keep_remote" -eq 0 ]]; then
@@ -347,14 +421,14 @@ case "$command_name" in
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh logs"
     else
-      remote_exec "$ssh_target" "docker compose -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env logs -f"
+      remote_exec "$ssh_target" "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env logs -f"
     fi
     ;;
   config)
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh config"
     else
-      remote_exec "$ssh_target" "export MODELKEYGUARD_IMAGE='$local_image'; ./scripts/gateway_from_deployment_targets.sh config --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh config --env-file '${targets_file}'"
     fi
     ;;
   smoke)

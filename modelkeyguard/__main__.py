@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from .gateway import serve
 from .review_worker import main as review_main
+from .reviewer_agent import main as review_status_main
 from .cli import main as cli_main
 from .graph_tools import init_graph, inspect_graph
 from .registration import main as registration_main
@@ -30,6 +31,7 @@ def main(argv: list[str] | None = None) -> int:
     g.add_argument("--port", type=int, default=8789)
     g.add_argument("--policy", default="config/gateway_policy.json")
     sub.add_parser("review-once")
+    sub.add_parser("review-status")
     sub.add_parser("scenario")
     sub.add_parser("init-graph")
     sub.add_parser("inspect-graph")
@@ -40,6 +42,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if args.cmd == "review-once":
         return review_main(rest)
+    if args.cmd == "review-status":
+        return review_status_main(rest)
     if args.cmd == "scenario":
         return cli_main(["scenario"] + rest)
     if args.cmd == "init-graph":

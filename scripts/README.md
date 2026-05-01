@@ -9,7 +9,7 @@ The most useful bash entrypoints are below.
 | --- | --- |
 | `bootstrap_secrets.sh` | Creates local secret files under `./secrets` if they do not already exist. Local mode is demo-friendly and may create a placeholder provider key. `--production` generates strong graph/admin/Keycloak secrets, does not create placeholder provider keys, and never overwrites existing files. |
 | `bootstrap_keycloak_admin_role.sh` | Grants the `model.admin` realm role to the bundled `modelguard-admin` service account so the Keycloak admin bearer-token path can actually authorize `/admin/*` requests. Safe to rerun. |
-| `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose detached with the hardened override. Use `stop`/`start` to pause and resume containers without teardown, `down` to remove containers/networks, and `fresh-up` for a clean local rehearsal after stale data. By default the Keycloak import is empty of end-user demo accounts; set `MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE=./keycloak/modelguard-realm.beginner.json` if you want beginner seed data. Provider keys are registered later through `/admin/keys`. |
+| `production_compose.sh` | Production-style single-host Compose runner. It bootstraps production secrets, preflights build-context exclusions and required secret files, then runs Compose detached with the hardened override. Use `stop`/`start` to pause and resume containers without teardown, `down` to remove containers/networks while preserving mapped volumes, and `fresh-up` for an explicit clean local rehearsal root when you want to wipe stale data. By default the Keycloak import is empty of end-user demo accounts; set `MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE=./keycloak/modelguard-realm.beginner.json` if you want beginner seed data. Provider keys are registered later through `/admin/keys`. |
 | `render_deployment_env.sh` | Renders split-target `gateway.env`, `postgres.env`, `keycloak.env`, and `gateway-compose.env` from one filled `deployment-targets.env` file. |
 | `gateway_from_deployment_targets.sh` | Gateway-only split-target runner. It reads one source of truth, renders component env files, and runs `deploy/docker-compose.gateway-only.yml`. |
 | `deploy_remote_stack.sh` | SSH-based deploy wrapper for a same-machine lower-privilege user or another host. It builds the gateway image locally, loads it on the remote Docker host, stages secrets into remote tmpfs for the lifetime of the run, and then runs the local production or gateway-only workflow remotely in a separate remote checkout root (`~/token-safe-deploy` by default). The compose path prints a one-time Keycloak bootstrap admin pair during deploy; copy it when the run finishes. |
@@ -44,6 +44,7 @@ The most useful bash entrypoints are below.
 | `smoke_azure_real_completion.sh` | Checks a real Azure-style completion path. |
 | `smoke_langchain_azure_structured_real.py` | Real structured-output smoke for Azure-style usage. |
 | `usage_analysis_agent.py` | Minimal reusable Python usage-analysis agent that mints a Keycloak service-account token and reads `/admin/usage.json` for user, principal, or key analytics. |
+| `usage_reviewer_agent.py` | LangChain-based reviewer helper that reads review status from the gateway and can run an Ollama-shaped review pass with a reviewer-specific safe token. |
 | `usage_analysis_agent_smoke.sh` | Fresh-up smoke harness for the usage-analysis agent. Run it after `production_compose.sh fresh-up` to prove the reusable agent talks to the live gateway and Keycloak. |
 | `register_usage_example.sh` | Demonstrates registering usage/principal/token state. |
 | `register_and_run_usage_demo.sh` | Registers sample state and runs a demo request. |
@@ -63,6 +64,7 @@ The most useful bash entrypoints are below.
 ## Lifecycle parity notes
 
 - `up` and `start` keep the currently active bind mounts.
+- `down` removes containers and networks, but it does not wipe mapped volumes or the active rehearsal root.
 - `fresh-up` creates a new timestamped rehearsal data root and records it.
 - after `fresh-up`, later `down` and `up` should keep using that same fresh root until the operator intentionally clears it.
 - `fresh-up` is not a search-for-the-newest-folder workflow; it is an explicit “set the active fresh root now” workflow.

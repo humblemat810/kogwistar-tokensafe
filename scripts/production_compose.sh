@@ -49,7 +49,8 @@ Fresh local rehearsal:
 Pause/resume:
   stop pauses existing containers without removing them.
   start resumes containers stopped by stop.
-  down removes containers/networks and is more destructive than stop.
+  down removes containers/networks, but preserves mapped volumes. Use
+  fresh-up or a dedicated reset path when you want a clean wipe.
 TXT
 }
 
@@ -80,6 +81,9 @@ fi
 compose_files=(-f docker-compose.yml -f docker-compose.container-secure.yml)
 runtime_state_dir="${MODELKEYGUARD_RUNTIME_STATE_DIR:-./out}"
 runtime_compose_data_file="${MODELKEYGUARD_RUNTIME_COMPOSE_DATA_FILE:-${runtime_state_dir%/}/.runtime-compose-data-dir}"
+fresh_up_started=0
+keycloak_bootstrap_admin_username="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}"
+keycloak_bootstrap_admin_password="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
 
 require_dockerignore_entry() {
   local pattern="$1"
@@ -120,8 +124,8 @@ load_runtime_compose_data_dir() {
 bootstrap_keycloak_admin_role() {
   KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}" \
   KEYCLOAK_REALM="${KEYCLOAK_REALM:-modelguard}" \
-  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
-  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="$keycloak_bootstrap_admin_username" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$keycloak_bootstrap_admin_password" \
   MODELKEYGUARD_OIDC_ADMIN_CLIENT_ID="${MODELKEYGUARD_OIDC_ADMIN_CLIENT_ID:-modelguard-admin}" \
   MODELKEYGUARD_ADMIN_REQUIRED_ROLE="${MODELKEYGUARD_ADMIN_REQUIRED_ROLE:-model.admin}" \
     ./scripts/bootstrap_keycloak_admin_role.sh
@@ -130,8 +134,8 @@ bootstrap_keycloak_admin_role() {
 bootstrap_keycloak_usage_role() {
   KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8080}" \
   KEYCLOAK_REALM="${KEYCLOAK_REALM:-modelguard}" \
-  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME:-admin}" \
-  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="${MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD:-admin}" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_USERNAME="$keycloak_bootstrap_admin_username" \
+  MODELKEYGUARD_KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD="$keycloak_bootstrap_admin_password" \
   MODELKEYGUARD_KEYCLOAK_ROLE_GRANT_CLIENT_ID="${MODELKEYGUARD_OIDC_USAGE_CLIENT_ID:-modelguard-usage-agent}" \
   MODELKEYGUARD_KEYCLOAK_ROLE_GRANT_ROLE="${MODELKEYGUARD_USAGE_REQUIRED_ROLE:-model.usage.read}" \
     ./scripts/bootstrap_keycloak_admin_role.sh
@@ -180,6 +184,7 @@ TXT
 }
 
 if [[ "$command_name" == "fresh-up" ]]; then
+  fresh_up_started=1
   fresh_root="${MODELKEYGUARD_FRESH_ROOT:-./out/production_compose_fresh/$(date +%Y%m%d%H%M%S)-$$}"
   export MODELKEYGUARD_POSTGRES_DATA_DIR="${fresh_root%/}/postgres"
   export MODELKEYGUARD_KEYCLOAK_DATA_DIR="${fresh_root%/}/keycloak"
@@ -216,7 +221,7 @@ case "$command_name" in
     ;;
   *)
     needs_bootstrap=0
-    ;;
+  ;;
 esac
 
 if [[ "$needs_bootstrap" == "1" ]]; then
@@ -271,6 +276,15 @@ TXT
     wait_http "http://127.0.0.1:${keycloak_port}/realms/master/.well-known/openid-configuration" "Keycloak"
     bootstrap_keycloak_admin_role
     bootstrap_keycloak_usage_role
+    if [[ "$fresh_up_started" -eq 1 ]]; then
+      cat <<TXT
+Keycloak bootstrap admin for this deployment:
+  username: ${keycloak_bootstrap_admin_username}
+  password: ${keycloak_bootstrap_admin_password}
+Use this pair only for a fresh Keycloak data directory. If the realm already
+exists, keep using the older admin that already works for that realm.
+TXT
+    fi
     wait_http "http://127.0.0.1:${gateway_port}/healthz" "Gateway"
     cat <<'TXT'
 production compose stack started in the background.

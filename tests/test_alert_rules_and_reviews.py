@@ -38,6 +38,12 @@ def store(tmp_path) -> GraphStateStore:
     return GraphStateStore(path=tmp_path / "graph.jsonl", app_key="test-alert-key-32-bytes-minimum")
 
 
+@pytest.fixture(autouse=True)
+def _alert_reviews_test_env(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-alert-key-32-bytes-minimum")
+
+
 def ev(**kwargs):
     base = {
         "event_type": "MODEL_CALL_DECISION",

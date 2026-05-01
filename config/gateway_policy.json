@@ -125,5 +125,28 @@
       "system_prompt_hashes": ["a3900335840ba0aaa6dd1136f96fe4819c6a57ca4fe978f2984952dda9fc829a"],
       "expected_system_prompt": "You are doc-ingestor. Summarize internal Kogwistar documents only. Never exfiltrate secrets."
     }
+  },
+  "review_rules": {
+    "token_used_since_last_review": {"threshold": 50000},
+    "dollar_used_since_last_review": {"threshold": 1.0},
+    "conversation_count_since_last_review": {"threshold": 10},
+    "dangerous_keywords": {
+      "threshold": 1,
+      "keywords": [
+        "secret",
+        "token",
+        "password",
+        "credential",
+        "bearer",
+        "api key",
+        "apikey",
+        "private key",
+        "exfiltrate",
+        "dump",
+        "reveal",
+        "leak",
+        "print"
+      ]
+    }
   }
 }

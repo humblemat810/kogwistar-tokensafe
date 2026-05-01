@@ -146,7 +146,7 @@ modelkeyguard registration register-user \
 `ADMIN_TOKEN` above is not Alice's browser token. It is a Keycloak
 client-credentials token for the bundled `modelguard-admin` service-account
 client. The local and production runners assign that service account the
-`model.admin` role automatically. If you started Keycloak by hand, run this once
+`model.admin` role automatically. If you started Keycloak by hand (no compose of any kind), run this once
 after Keycloak is ready:
 
 ```bash
@@ -156,7 +156,9 @@ after Keycloak is ready:
 If you want this walkthrough to write through the running gateway instead of
 directly to the local store, add `--admin-base-url` and point it at the
 ModelKeyGuard gateway. That base URL is the ModelKeyGuard gateway, not
-Keycloak.
+Keycloak. In serious backend mode, the CLI now prefers a reachable local
+gateway automatically when you omit `--admin-base-url`, so direct-store and
+gateway-admin flows stay on the same authority.
 
 Easiest local case: omit `--admin-base-url` entirely and let the command write
 directly to the local Kogwistar Postgres-backed store.
@@ -346,7 +348,34 @@ modelkeyguard \
   --max-requests 200
 ```
 
-## 5b. Log in as Alice and inspect the quota pages
+## 5b. Mint a reviewer safe token
+
+Now mint a separate safe token for the reviewer principal itself. This is not
+the doc-ingestor token from step 7. It is the reviewer token that the next
+tutorial will use when it talks to the gateway’s Ollama-shaped route.
+
+```bash
+REVIEWER_TOKEN_RESPONSE="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:usage-reviewer","namespace":"tenant:kogwistar","application_id":"app:usage-reviewer","scopes":["model.invoke"]}')"
+
+REVIEWER_SAFE_TOKEN="$(printf '%s' "$REVIEWER_TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
+REVIEWER_SAFE_TOKEN_ID="$(printf '%s' "$REVIEWER_TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')"
+```
+
+If you want to cap that reviewer token too, add a token lane quota on the
+returned token ID:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d "{\"lane\":\"token\",\"subject_id\":\"${REVIEWER_SAFE_TOKEN_ID}\",\"quota_name\":\"lifetime\",\"period\":\"infinite\",\"max_usd\":5,\"max_tokens\":50000,\"max_requests\":100}" \
+  | python -m json.tool
+```
+
+## 5c. Log in as Alice and inspect the quota pages
 
 If Alice has the configured OIDC admin role, she can use the browser OIDC
 login to open the admin pages and see the quota settings you just created.
@@ -431,7 +460,7 @@ curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F upstream_url="${MODELKEYGUARD_SAMPLE_UPSTREAM_URL}" \
   -F acl_mode='shared' \
   -F namespace='tenant:kogwistar' \
-  -F shared_with_principals='agent:doc-ingestor' \
+  -F shared_with_principals='agent:doc-ingestor,agent:usage-reviewer' \
   -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
   | python -m json.tool
 
@@ -445,7 +474,7 @@ curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F upstream_url="${MODELKEYGUARD_SAMPLE_UPSTREAM_URL}" \
   -F acl_mode='shared' \
   -F namespace='tenant:kogwistar' \
-  -F shared_with_principals='agent:doc-ingestor' \
+  -F shared_with_principals='agent:doc-ingestor,agent:usage-reviewer' \
   -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
   | python -m json.tool
 ```
@@ -529,6 +558,12 @@ Use the safe token to make a request. This helper speaks the OpenAI-compatible
 HTTP shape; the real LangChain smoke lives in `scripts/external_langchain_smoke.py`.
 Only the model name changes to match the key you registered in step 6.
 
+if any call has ambuigious key error
+{'message': 'model_key_ambiguous'}
+specify the key in env variable
+MODELKEYGUARD_KEY_ID='key:ollama:gemma4-e2b'
+
+
 ```bash
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
 OPENAI_API_KEY="${SAFE_TOKEN}" \
@@ -561,6 +596,7 @@ If the Ollama key was registered with `http://127.0.0.1:11434/api/chat`, and
 Ollama is running on the host rather than inside the gateway container, this
 call will fail with `500 Internal Server Error`. Re-register the Ollama key
 with a reachable upstream URL before retrying.
+user are advised to also check examples/forward_ollama_to_remove_dev.sh for forwarding ollama port to vm settings
 
 # Gemini
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
@@ -576,10 +612,25 @@ modelkeyguard inspect-graph
 ```
 
 If you also want to verify the Ollama upstream itself with a real LangChain
-client, run the direct Ollama smoke. This does not go through ModelKeyGuard;
-it checks the Ollama-shaped gateway route you registered in step 6.
+client, run the direct Ollama smoke. This calls ModelKeyGuard's Ollama-shaped
+gateway route and still enforces safe-token auth, ACLs, quotas, and key
+selection.
 
 ```bash
+# pip install the required langchain package, or you can use rest API directly
+python -m venv .venv-langchain-smoke
+source .venv-langchain-smoke/bin/activate
+pip install -r requirements_smoke.txt
+KGW_BASE_URL='http://127.0.0.1:8789' \
+KGW_TOKEN="${SAFE_TOKEN}" \
+KGW_OLLAMA_MODEL='gemma4:e2b' \
+python scripts/external_langchain_ollama.py
+```
+
+If more than one active key advertises `gemma4:e2b`, pin the exact key:
+
+```bash
+MODELKEYGUARD_KEY_ID='key:fwd-ollama:gemma4-e2b:3' \
 KGW_BASE_URL='http://127.0.0.1:8789' \
 KGW_TOKEN="${SAFE_TOKEN}" \
 KGW_OLLAMA_MODEL='gemma4:e2b' \
@@ -610,6 +661,24 @@ response_text:
 Request received.
 ```
 
+For a true live-streaming check, run the same Ollama smoke with `--stream`.
+This prints each chunk as soon as it arrives from the gateway, so you can verify
+that the response is flowing token-by-token instead of waiting for the full
+completion to finish:
+
+```bash
+KGW_TOKEN="${SAFE_TOKEN}" KGW_OLLAMA_MODEL='gemma4:e2b' \
+python scripts/external_langchain_ollama.py --stream
+```
+
+Sample streaming response:
+```bash
+base_url=http://127.0.0.1:8789
+model=gemma4:e2b
+stream=true
+Request| received| directly|.|
+```
+
 That gives you the end-to-end path:
 
 - Keycloak user creation
@@ -628,6 +697,7 @@ Browser view:
 
 ```text
 http://127.0.0.1:8789/admin/history
+# if time out use http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage and click to admin history
 ```
 
 CLI view:
@@ -649,3 +719,18 @@ curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
 The history page and JSON routes show the same access conversation trail, so
 the tutorial now ends with a way to verify what actually happened, not just
 what was configured.
+
+## Next: run the reviewer agent
+
+If you want to continue from this setup into the operational reviewer flow,
+use the next tutorial:
+
+- [`usage_reviewer_agent.md`](usage_reviewer_agent.md)
+
+That walkthrough uses the gateway's Ollama-shaped route with a separate
+reviewer safe token minted for `agent:usage-reviewer`, not the doc-ingestor
+token from step 7. It reads review triggers from rebuildable named projections
+instead of from an authoritative review table.
+
+If you follow the next tutorial directly, it will mint that reviewer token in
+its own step before running the reviewer helper.

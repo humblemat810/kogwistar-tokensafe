@@ -84,7 +84,7 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 6. production deployment notes.
 
 See [`tutorial/slow_quickstart_cli_gui_parity.md`](tutorial/slow_quickstart_cli_gui_parity.md) for a slower, retry-safe CLI and GUI parity walkthrough.
-See [`tutorial/keycloak_admin_first_setup.md`](tutorial/keycloak_admin_first_setup.md) for the first real Keycloak-admin setup path: create `alice`, register `user:alice` and `agent:doc-ingestor`, set quotas, choose a provider key, and add a reviewer account.
+See [`tutorial/keycloak_admin_first_setup.md`](tutorial/keycloak_admin_first_setup.md) for the first real Keycloak-admin setup path: create `alice`, register `user:alice` and `agent:doc-ingestor`, set quotas, choose a provider key, and add a reviewer account. The next tutorial is [`tutorial/usage_reviewer_agent.md`](tutorial/usage_reviewer_agent.md).
 See [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md) for the copy-paste installed-Kogwistar managed Postgres setup, including no-JSONL graph artifact verification.
 See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_azure_real_setup.md) for final-dev guard setup with real Azure token pathway, PostgreSQL-backed state, and real smoke tests (completion + LangChain structured output).
 
@@ -684,6 +684,10 @@ console until you provision another admin path. If you need a truly fresh
 Keycloak admin after losing the existing one in a dev deployment, use
 `fresh-up` so Keycloak starts from an empty data directory.
 
+Note: `./scripts/production_compose.sh down` is not a data wipe. It removes
+containers and networks, but it preserves the mapped volumes. Use
+`fresh-up` or a dedicated reset path when you want to clear persisted data.
+
 The default compose realm import does not seed end-user demo accounts. If you
 want the beginner/test seed data, point
 `MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE` at
@@ -768,6 +772,8 @@ New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and kee
 - `POST /admin/policy/quotas/upsert` append-only quota policy revision (latest revision is active)
 - `POST /admin/policy/quotas/revoke` append-only quota revoke revision (`revoked=true`, no hard delete)
 - `GET /admin/policy/quotas.json` quota policy revision list with filters/paging (`lane`, `subject_id`, `quota_name`, `revoked`, `page`, `page_size`)
+- `GET /admin/review/status.json` review trigger and checkpoint status from rebuildable projections
+- `POST /admin/review/checkpoint` advance the review checkpoint projection after a completed review
 - `POST /admin/review/run` manual/scheduled review trigger (`sample_size`, `lookback_minutes`, `checkpoint_path`)
 - `POST /admin/security-events` host security event intake (shared-secret protected)
 

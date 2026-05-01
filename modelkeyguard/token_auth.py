@@ -146,7 +146,20 @@ class TokenVerifier:
         mapping = client_node.payload if client_node else self.policy.get("keycloak_clients", {}).get(client_id, {})
         principal = self.graph_state.nodes.get(principal_id or "")
         principal_payload = principal.payload if principal else {}
-        roles = payload.get("realm_access", {}).get("roles", [])
+        roles = []
+        realm_access = payload.get("realm_access", {})
+        if isinstance(realm_access, dict):
+            realm_roles = realm_access.get("roles", [])
+            if isinstance(realm_roles, list):
+                roles.extend(str(role) for role in realm_roles)
+        resource_access = payload.get("resource_access", {})
+        if isinstance(resource_access, dict):
+            for value in resource_access.values():
+                if not isinstance(value, dict):
+                    continue
+                resource_roles = value.get("roles", [])
+                if isinstance(resource_roles, list):
+                    roles.extend(str(role) for role in resource_roles)
         scope_string = payload.get("scope", "")
         scopes = tuple(sorted(set(mapping.get("scopes", []) + scope_string.split()))) or ("model.invoke",)
         groups = tuple(principal_payload.get("groups", mapping.get("groups", [])) + roles)

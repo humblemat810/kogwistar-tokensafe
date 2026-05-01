@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .graph_key_contract import graph_key_startup_self_test, scan_graph_key_env_contract
+
 
 def read_env_or_file(name: str, default: str | None = None, *, required: bool = False) -> str | None:
     file_name = f"{name}_FILE"
@@ -22,6 +24,11 @@ def bool_env(name: str, default: bool = False) -> bool:
     if v is None:
         return default
     return v.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def is_dev_mode(env_name: str | None = None) -> bool:
+    env = (env_name if env_name is not None else read_env_or_file("MODELKEYGUARD_ENV", "local") or "local").strip().lower()
+    return env not in {"prod", "production"}
 
 
 def _allow_dev_graph_key() -> bool:
@@ -47,6 +54,7 @@ class AppSettings:
     auth_mode: str
     keycloak_url: str
     keycloak_public_url: str
+    keycloak_local_url: str
     keycloak_realm: str
     audit_path: str
     policy_path: str
@@ -85,6 +93,7 @@ class AppSettings:
             auth_mode=read_env_or_file("MODELKEYGUARD_AUTH_MODE", "local") or "local",
             keycloak_url=read_env_or_file("KEYCLOAK_URL", "http://localhost:8080") or "http://localhost:8080",
             keycloak_public_url=read_env_or_file("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "http://127.0.0.1:8080") or "http://127.0.0.1:8080",
+            keycloak_local_url=read_env_or_file("MODELKEYGUARD_KEYCLOAK_LOCAL_URL", "") or "",
             keycloak_realm=read_env_or_file("KEYCLOAK_REALM", "modelguard") or "modelguard",
             audit_path=read_env_or_file("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl") or "out/audit.jsonl",
             policy_path=read_env_or_file("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json") or "config/gateway_policy.json",
@@ -113,6 +122,19 @@ class AppSettings:
                 errors.append("MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY must be configured for production")
             if len(self.graph_key) < 32:
                 errors.append("MODELKEYGUARD_GRAPH_KEY must be at least 32 characters")
+            try:
+                self_test_error = graph_key_startup_self_test(self.graph_key)
+            except Exception as exc:
+                self_test_error = f"MODELKEYGUARD_GRAPH_KEY startup self-test failed: {exc}"
+            if self_test_error:
+                errors.append(self_test_error)
+            violations = scan_graph_key_env_contract()
+            if violations:
+                errors.append(
+                    "graph_key_env_contract_violation: "
+                    + "; ".join(violations[:5])
+                    + ("; ..." if len(violations) > 5 else "")
+                )
             if self.auth_mode not in {"keycloak", "local_or_keycloak"}:
                 errors.append("MODELKEYGUARD_AUTH_MODE must be keycloak or local_or_keycloak in production")
             if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
@@ -131,6 +153,8 @@ class AppSettings:
             errors.append("KEYCLOAK_URL must start with http:// or https://")
         if not self.keycloak_public_url.startswith(("http://", "https://")):
             errors.append("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL must start with http:// or https://")
+        if self.keycloak_local_url and not self.keycloak_local_url.startswith(("http://", "https://")):
+            errors.append("MODELKEYGUARD_KEYCLOAK_LOCAL_URL must start with http:// or https://")
         if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.admin_required_role:
             errors.append("MODELKEYGUARD_ADMIN_REQUIRED_ROLE must be configured when Keycloak admin auth is enabled")
         if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.usage_required_role:

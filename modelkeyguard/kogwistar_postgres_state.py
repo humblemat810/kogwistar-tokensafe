@@ -10,7 +10,7 @@ from typing import Any, Iterable
 
 from .graph_state import GraphEdge, GraphNode, iso_now, period_bucket, resolve_graph_app_key, utc_now
 from .kogwistar_import_guard import enforce_installed_kogwistar_only
-from .sealed_payload import open_json, seal_json
+from .sealed_payload import GRAPH_KEY_SENTINEL_NODE_ID, open_json, seal_json
 
 DEFAULT_DSN = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
 DEFAULT_EMBED_DIM = 2
@@ -43,6 +43,7 @@ ALL_PROJECTION_NAMESPACES = (
     "modelkeyguard.history.blob",
     "modelkeyguard.history.index",
     "modelkeyguard.history.config",
+    "modelkeyguard.review.checkpoint",
 )
 
 
@@ -619,6 +620,10 @@ class KogwistarPostgresGraphStateStore:
                         node_payload = payload.get("payload")
                         if isinstance(node_payload, dict):
                             self.nodes[node_id] = GraphNode(node_id, str(payload.get("kind") or ""), node_payload)
+                            if node_id == GRAPH_KEY_SENTINEL_NODE_ID:
+                                from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+                                seed_graph_key_sentinel_from_storage_payload(node_payload, self.app_key)
                     elif namespace == CURRENT_EDGE_PROJECTION_NAMESPACE:
                         edge_id = str(payload.get("id") or key)
                         edge_payload = payload.get("payload")
@@ -720,8 +725,12 @@ class KogwistarPostgresGraphStateStore:
     # Graph state API used by ModelKeyGuard.
     # ------------------------------------------------------------------
     def append_node_if_updated(self, node_id: str, kind: str, payload: dict[str, Any]) -> bool:
-        content_hash = canonical_node_hash(kind, payload)
         existing = self.nodes.get(node_id)
+        if node_id == GRAPH_KEY_SENTINEL_NODE_ID and existing is not None:
+            if existing.kind != kind or existing.payload != payload:
+                raise ValueError("graph key sentinel node cannot be overwritten")
+            return False
+        content_hash = canonical_node_hash(kind, payload)
         existing_hash = None
         existing_revision_id = None
         if existing is not None:
@@ -1047,8 +1056,23 @@ class KogwistarPostgresGraphStateStore:
     @classmethod
     def from_policy(cls, policy: dict[str, Any], dsn: str | None = None, app_key: str | None = None) -> "KogwistarPostgresGraphStateStore":
         store = cls(dsn, app_key)
-        if store.nodes:
+        existing_nodes = [node_id for node_id in store.nodes if node_id != GRAPH_KEY_SENTINEL_NODE_ID]
+        if existing_nodes:
+            sentinel = store.nodes.get(GRAPH_KEY_SENTINEL_NODE_ID)
+            if sentinel is None:
+                raise ValueError("graph key sentinel node missing from existing graph state")
+            from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+            seed_graph_key_sentinel_from_storage_payload(sentinel.payload, store.app_key)
             return store
+        if GRAPH_KEY_SENTINEL_NODE_ID in store.nodes:
+            from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+            seed_graph_key_sentinel_from_storage_payload(store.nodes[GRAPH_KEY_SENTINEL_NODE_ID].payload, store.app_key)
+        else:
+            from .graph_key_contract import ensure_graph_key_sentinel_node
+
+            ensure_graph_key_sentinel_node(store, store.app_key)
         store.put_node("policy:version:0001", "policy_version", {"version": 1, "source": "config/gateway_policy.json"})
         store.put_node("issuer:keycloak:modelguard", "issuer", {"name": policy.get("issuer", "keycloak:modelguard")})
         for user_id, user in policy.get("users", {}).items():

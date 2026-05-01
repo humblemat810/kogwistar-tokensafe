@@ -9,7 +9,9 @@ __pycache__
 *.pyc
 
 data
+data.old
 out
+compose_state_backups
 secrets
 
 # Reference-only clone: runtime Kogwistar must come from the installed package,
