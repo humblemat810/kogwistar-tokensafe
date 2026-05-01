@@ -24,27 +24,45 @@ human or service account would:
   mint the reviewer’s OAuth service-account token
 - `SAFE_TOKEN` or `KGW_TOKEN` authorizes the gateway’s Ollama-shaped model call
 
-For the read-only review status query, assign the reviewer service account the
-`model.usage.read` realm role. If you want to advance the checkpoint
-projection, keep that as an admin-authenticated write path.
+For the read-only review status query, the reviewer identity must have the
+`model.usage.read` role, or the equivalent read claim in your OAuth provider.
+In the bundled Keycloak flow, grant that role to the
+`modelguard-usage-agent` service account. If you use a different OAuth system,
+give the reviewer client/token the matching read permission there too. If you
+want to advance the checkpoint projection, keep that as an admin-authenticated
+write path.
+
+In Keycloak GUI:
+
+1. Open `modelguard-usage-agent`
+2. Go to `Service account roles`
+3. Add the `model.usage.read` realm role
+
+If you manage OAuth roles by CLI or API, assign the same read role there. The
+review-status query must see the role before it will return data.
 
 ## 1. Inspect the review checkpoint
 
 The review checkpoint is a named projection. It is rebuildable and not an
 authoritative table.
 
+First mint the reviewer service-account token that can read review status:
+
+```bash
+export REVIEWER_TOKEN="$(./scripts/get_agent_token.sh modelguard-usage-agent usage-agent-secret)"
+```
+
 Query it from the gateway:
 
 ```bash
 modelkeyguard review-status \
-  --base-url "${MODELKEYGUARD_GATEWAY_PUBLIC_URL:-http://127.0.0.1:8789}"
+  --base-url "${MODELKEYGUARD_GATEWAY_PUBLIC_URL:-http://127.0.0.1:8789}" \
+  --bearer-token "${REVIEWER_TOKEN}"
 ```
 
 Or use REST directly:
 
 ```bash
-export REVIEWER_TOKEN="$(./scripts/get_agent_token.sh modelguard-usage-agent usage-agent-secret)"
-
 curl -sS \
   -H "Authorization: Bearer ${REVIEWER_TOKEN}" \
   "${MODELKEYGUARD_GATEWAY_PUBLIC_URL:-http://127.0.0.1:8789}/admin/review/status.json" \

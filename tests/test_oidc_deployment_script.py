@@ -147,6 +147,16 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
         result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
 
+    gateway_runner = (repo_root / "scripts" / "gateway_from_deployment_targets.sh").read_text(encoding="utf-8")
+    assert "up -d --force-recreate gateway" in gateway_runner
+    assert 'compose_project_name="${MODELKEYGUARD_COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}"' in gateway_runner
+    assert '-p "$compose_project_name"' in gateway_runner
+    renderer = (repo_root / "scripts" / "render_deployment_env.sh").read_text(encoding="utf-8")
+    assert 'gateway_postgres_host="${MODELKEYGUARD_GATEWAY_POSTGRES_HOST:-${MODELKEYGUARD_POSTGRES_HOST}}"' in renderer
+    assert 'gateway_keycloak_url="${MODELKEYGUARD_GATEWAY_KEYCLOAK_URL:-${MODELKEYGUARD_KEYCLOAK_PUBLIC_URL}}"' in renderer
+    assert "KEYCLOAK_URL=${gateway_keycloak_url}" in renderer
+    assert 'gateway_postgres_dsn="postgresql://${MODELKEYGUARD_POSTGRES_USER}:${postgres_password_placeholder}@${gateway_postgres_host}:${gateway_postgres_port}/${MODELKEYGUARD_POSTGRES_DB}"' in renderer
+
 
 def test_production_compose_script_pins_build_context_and_secrets_contract():
     repo_root = Path(__file__).resolve().parents[1]
@@ -252,7 +262,9 @@ def test_split_target_deploy_templates_document_required_contract():
     deploy_readme = (repo_root / "deploy" / "README.md").read_text(encoding="utf-8")
 
     assert "MODELKEYGUARD_POSTGRES_HOST" in target_env
+    assert "MODELKEYGUARD_GATEWAY_POSTGRES_HOST" in target_env
     assert "MODELKEYGUARD_KEYCLOAK_PUBLIC_URL" in target_env
+    assert "MODELKEYGUARD_GATEWAY_KEYCLOAK_URL" in target_env
     assert "MODELKEYGUARD_GATEWAY_PUBLIC_URL" in target_env
     assert "MODELKEYGUARD_POSTGRES_HOST" in gateway_env
     assert "MODELKEYGUARD_KEYCLOAK_PUBLIC_URL" in gateway_env
@@ -444,6 +456,38 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
     assert "keycloak_admin_first_setup.md" in readme
+
+
+def test_remote_gateway_only_up_branch_redeploys_without_down():
+    repo_root = Path(__file__).resolve().parents[1]
+    deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
+
+    marker = 'if [[ "$shape" == "gateway-only" && "$command_name" == "up" ]]; then'
+    assert marker in deploy
+    start = deploy.index(marker)
+    end = deploy.index('fresh-up)', start)
+    up_branch = deploy[start:end]
+
+    assert "./scripts/gateway_from_deployment_targets.sh up --env-file" in up_branch
+    assert "down --remove-orphans" not in up_branch
+    assert 'remote_exec "$ssh_target" "export $gateway_only_env_prefix' in up_branch
+    assert "MODELKEYGUARD_COMPOSE_PROJECT_NAME" in up_branch
+    assert "remote_port_owned_by_current_gateway" in up_branch
+    assert "allowing Compose to recreate it" in up_branch
+    assert "remote_project_has_service" in up_branch
+    assert "MODELKEYGUARD_GATEWAY_POSTGRES_HOST='postgres'" in deploy
+    assert "remote_project_service_env" in deploy
+    assert "POSTGRES_PASSWORD" in deploy
+    assert "MODELKEYGUARD_POSTGRES_PASSWORD_PLACEHOLDER" in deploy
+    assert "MODELKEYGUARD_GATEWAY_KEYCLOAK_URL='http://keycloak:8080'" in deploy
+    assert "build_local_image" in deploy
+    assert "load_remote_image" in deploy
+    assert "sync_repo" in deploy
+    assert "stage_runtime_secrets" in deploy
+    assert 'remote_compose_project_name="$(basename "$remote_root_expanded")"' in deploy
+    assert "docker compose -p '$remote_compose_project_name'" in deploy
+    assert "com.docker.compose.project" in deploy
+    assert "com.docker.compose.service" in deploy
 
 
 def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():

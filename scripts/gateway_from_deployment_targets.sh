@@ -85,6 +85,8 @@ else
   exit 1
 fi
 
+compose_project_name="${MODELKEYGUARD_COMPOSE_PROJECT_NAME:-$(basename "$(pwd)")}"
+
 if [[ "$source_mode" == "env" ]]; then
   ./scripts/render_deployment_env.sh --from-env "$out_dir"
 else
@@ -100,28 +102,23 @@ TXT
   ./scripts/render_deployment_env.sh --env-file "$targets_file" "$out_dir"
 fi
 
+compose_args=(
+  -p "$compose_project_name"
+  -f deploy/docker-compose.gateway-only.yml
+  --env-file "${out_dir}/gateway.env"
+  --env-file "${out_dir}/gateway-compose.env"
+)
+
 case "$command_name" in
   render)
     ;;
   config)
-    "${compose_cmd[@]}" \
-      -f deploy/docker-compose.gateway-only.yml \
-      --env-file "${out_dir}/gateway.env" \
-      --env-file "${out_dir}/gateway-compose.env" \
-      config
+    "${compose_cmd[@]}" "${compose_args[@]}" config
     ;;
   build)
-    "${compose_cmd[@]}" \
-      -f deploy/docker-compose.gateway-only.yml \
-      --env-file "${out_dir}/gateway.env" \
-      --env-file "${out_dir}/gateway-compose.env" \
-      build gateway
+    "${compose_cmd[@]}" "${compose_args[@]}" build gateway
     ;;
   up)
-    "${compose_cmd[@]}" \
-      -f deploy/docker-compose.gateway-only.yml \
-      --env-file "${out_dir}/gateway.env" \
-      --env-file "${out_dir}/gateway-compose.env" \
-      up -d
+    "${compose_cmd[@]}" "${compose_args[@]}" up -d --force-recreate gateway
     ;;
 esac
