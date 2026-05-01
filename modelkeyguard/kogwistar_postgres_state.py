@@ -43,6 +43,7 @@ ALL_PROJECTION_NAMESPACES = (
     "modelkeyguard.history.blob",
     "modelkeyguard.history.index",
     "modelkeyguard.history.config",
+    "modelkeyguard.review.checkpoint",
 )
 
 

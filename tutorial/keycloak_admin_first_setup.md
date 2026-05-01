@@ -610,6 +610,24 @@ response_text:
 Request received.
 ```
 
+For a true live-streaming check, run the same Ollama smoke with `--stream`.
+This prints each chunk as soon as it arrives from the gateway, so you can verify
+that the response is flowing token-by-token instead of waiting for the full
+completion to finish:
+
+```bash
+KGW_TOKEN="${SAFE_TOKEN}" KGW_OLLAMA_MODEL='gemma4:e2b' \
+python scripts/external_langchain_ollama.py --stream
+```
+
+Sample streaming response:
+```bash
+base_url=http://127.0.0.1:8789
+model=gemma4:e2b
+stream=true
+Request received.
+```
+
 That gives you the end-to-end path:
 
 - Keycloak user creation
@@ -649,3 +667,14 @@ curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
 The history page and JSON routes show the same access conversation trail, so
 the tutorial now ends with a way to verify what actually happened, not just
 what was configured.
+
+## Next: run the reviewer agent
+
+If you want to continue from this setup into the operational reviewer flow,
+use the next tutorial:
+
+- [`usage_reviewer_agent.md`](usage_reviewer_agent.md)
+
+That walkthrough uses the gateway's Ollama-shaped route with the safe token
+you created here, and it reads review triggers from rebuildable named
+projections instead of from an authoritative review table.

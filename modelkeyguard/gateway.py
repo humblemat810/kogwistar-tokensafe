@@ -877,6 +877,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         create_admin_history_router,
         create_admin_keys_router,
         create_admin_policy_router,
+        create_admin_review_router,
         create_admin_security_router,
         create_admin_oidc_router,
         create_admin_session_router,
@@ -923,7 +924,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             if required and provided == required:
                 return await call_next(request)
 
-        is_usage_route = path in {"/admin/usage", "/admin/usage.json"}
+        is_usage_route = path in {"/admin/usage", "/admin/usage.json", "/admin/review/status.json"}
 
         if settings.admin_auth_mode in {"keycloak", "secret_or_keycloak"}:
             try:
@@ -1146,6 +1147,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
     app.include_router(create_admin_keys_router(render_admin_keys_page))
     app.include_router(create_admin_policy_router(render_admin_policy_page))
     app.include_router(create_admin_usage_router())
+    app.include_router(create_admin_review_router())
     app.include_router(create_admin_history_router())
     app.include_router(create_admin_security_router())
     app.include_router(create_admin_oidc_router())

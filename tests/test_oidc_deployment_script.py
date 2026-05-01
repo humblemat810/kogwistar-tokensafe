@@ -364,6 +364,32 @@ def test_usage_analysis_agent_tutorial_and_script_pin_reusable_library():
     assert "--key" in script
 
 
+def test_usage_reviewer_agent_tutorial_and_script_pin_projection_backed_flow():
+    repo_root = Path(__file__).resolve().parents[1]
+    tutorial = (repo_root / "tutorial" / "usage_reviewer_agent.md").read_text(encoding="utf-8")
+    tutorial_index = (repo_root / "tutorial" / "README.md").read_text(encoding="utf-8")
+    script = (repo_root / "scripts" / "usage_reviewer_agent.py").read_text(encoding="utf-8")
+    scripts_readme = (repo_root / "scripts" / "README.md").read_text(encoding="utf-8")
+
+    assert "modelkeyguard.reviewer_agent" in tutorial
+    assert "MODELKEYGUARD_GATEWAY_PUBLIC_URL" in tutorial
+    assert "KEYCLOAK_URL" in tutorial
+    assert "review-status" in tutorial
+    assert "/admin/review/status.json" in tutorial
+    assert "/admin/review/checkpoint" in tutorial
+    assert "dangerous keyword hits" in tutorial.lower()
+    assert "named projection" in tutorial.lower()
+    assert "usage_reviewer_agent.py" in tutorial
+    assert "KGW_TOKEN" in tutorial
+    assert "SAFE_TOKEN" in tutorial
+    assert "usage_reviewer_agent.md" in tutorial_index
+    assert "usage_reviewer_agent.py" in scripts_readme
+    assert "LangChain-based reviewer helper" in scripts_readme
+    assert "ReviewStatusClient" in script
+    assert "run_langchain_reviewer" in script
+    assert "advance-checkpoint" in script
+
+
 def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     repo_root = Path(__file__).resolve().parents[1]
     deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
@@ -472,6 +498,7 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "This helper speaks the OpenAI-compatible" in tutorial
     assert "external_langchain_smoke.py" in tutorial
     assert "external_langchain_ollama.py" in tutorial
+    assert "usage_reviewer_agent.md" in tutorial
     assert "Ollama-shaped gateway route" in tutorial
     assert "KGW_BASE_URL='http://127.0.0.1:8789'" in tutorial
     assert 'KGW_TOKEN="${SAFE_TOKEN}"' in tutorial
@@ -483,7 +510,9 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "/admin/history" in tutorial
     assert "/admin/history.json" in tutorial
     assert "/admin/history/${REQUEST_ID}.json" in tutorial
+    assert "Next: run the reviewer agent" in tutorial
     assert "keycloak_admin_first_setup.md" in tutorial_index
+    assert "usage_reviewer_agent.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs
     assert "glossary.md" in readme
     assert "easiest local path is to call `modelkeyguard" in docs.lower()

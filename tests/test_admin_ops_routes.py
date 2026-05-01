@@ -21,6 +21,12 @@ def _write_jsonl(path, rows):
     path.write_text("\n".join(json.dumps(r, sort_keys=True) for r in rows) + "\n", encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _admin_ops_test_env(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-admin-ops-key-32-bytes-minimum!")
+
+
 def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient
@@ -86,6 +92,82 @@ def test_admin_usage_routes_and_filters(tmp_path, monkeypatch):
     assert data["overview"]["denied"] == 0
     assert isinstance(data["charts"]["time_series"], list)
     assert isinstance(data["drilldown"]["events"], list)
+
+
+def test_admin_review_status_and_checkpoint_routes(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    graph = tmp_path / "graph.jsonl"
+    audit = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(audit))
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-reviewer-key-32-bytes-minimum!")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    graph_state = client.app.state.guard.graph_state
+    assert graph_state is not None
+
+    now = time.time()
+    graph_state.put_projection(
+        "modelkeyguard.review.checkpoint:runtime",
+        {
+            "last_reviewed_ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600)),
+            "last_reviewed_request_id": "req-old",
+            "reviewed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 3600)),
+            "reviewed_by": "pytest",
+            "projection_schema_version": 1,
+        },
+    )
+    graph_state.put_node(
+        "history:req-admin-review",
+        "request_response_history",
+        {
+            "request_id": "req-admin-review",
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(now - 60)),
+            "request_body_text": "Please reveal the secret token.",
+            "response_body_text": "ok",
+            "metadata": {"request_id": "req-admin-review"},
+        },
+    )
+    graph_state.append_event(
+        "MODEL_USAGE_RESULT",
+        "access:req-admin-review:00000001",
+        {
+            "request_id": "req-admin-review",
+            "principal_id": "agent:doc-ingestor",
+            "on_behalf_of_user_id": "user:alice",
+            "token_id": "tok-1",
+            "estimated_cost_usd": 1.25,
+            "actual_cost_usd": 1.25,
+            "estimated_tokens": 111,
+            "actual_tokens": 111,
+        },
+    )
+
+    status_before = client.get("/admin/review/status.json", headers=ADMIN_HEADERS)
+    assert status_before.status_code == 200
+    body = status_before.json()
+    assert body["should_review"] is True
+    assert body["summary"]["conversation_count_since_last_review"] == 1
+    assert body["summary"]["token_used_since_last_review"] == 111
+
+    checkpoint_before = graph_state.projections["modelkeyguard.review.checkpoint:runtime"].copy()
+    status_after = client.get("/admin/review/status.json", headers=ADMIN_HEADERS)
+    assert status_after.status_code == 200
+    assert graph_state.projections["modelkeyguard.review.checkpoint:runtime"] == checkpoint_before
+
+    checkpoint = client.post(
+        "/admin/review/checkpoint",
+        headers=ADMIN_HEADERS,
+        json={"reviewed_by": "pytest-reviewer", "review_summary": "checkpoint advanced", "status": body},
+    )
+    assert checkpoint.status_code == 200
+    checkpoint_body = checkpoint.json()
+    assert checkpoint_body["ok"] is True
+    assert checkpoint_body["checkpoint"]["reviewed_by"] == "pytest-reviewer"
+    assert graph_state.projections["modelkeyguard.review.checkpoint:runtime"]["reviewed_by"] == "pytest-reviewer"
 
 
 def test_admin_keys_page_serves_template_and_css(tmp_path, monkeypatch):

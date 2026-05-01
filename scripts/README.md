@@ -44,6 +44,7 @@ The most useful bash entrypoints are below.
 | `smoke_azure_real_completion.sh` | Checks a real Azure-style completion path. |
 | `smoke_langchain_azure_structured_real.py` | Real structured-output smoke for Azure-style usage. |
 | `usage_analysis_agent.py` | Minimal reusable Python usage-analysis agent that mints a Keycloak service-account token and reads `/admin/usage.json` for user, principal, or key analytics. |
+| `usage_reviewer_agent.py` | LangChain-based reviewer helper that reads review status from the gateway and can run an Ollama-shaped review pass with the safe token from the first tutorial. |
 | `usage_analysis_agent_smoke.sh` | Fresh-up smoke harness for the usage-analysis agent. Run it after `production_compose.sh fresh-up` to prove the reusable agent talks to the live gateway and Keycloak. |
 | `register_usage_example.sh` | Demonstrates registering usage/principal/token state. |
 | `register_and_run_usage_demo.sh` | Registers sample state and runs a demo request. |

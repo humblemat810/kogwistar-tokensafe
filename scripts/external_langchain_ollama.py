@@ -75,7 +75,7 @@ def main() -> int:
             for chunk in llm.stream(messages):
                 text = _message_text(chunk)
                 if text:
-                    print(text, end="", flush=True)
+                    print(text, end="|", flush=True)
             print()
             return 0
 
