@@ -156,6 +156,7 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
     assert 'gateway_keycloak_url="${MODELKEYGUARD_GATEWAY_KEYCLOAK_URL:-${MODELKEYGUARD_KEYCLOAK_PUBLIC_URL}}"' in renderer
     assert "KEYCLOAK_URL=${gateway_keycloak_url}" in renderer
     assert 'gateway_postgres_dsn="postgresql://${MODELKEYGUARD_POSTGRES_USER}:${postgres_password_placeholder}@${gateway_postgres_host}:${gateway_postgres_port}/${MODELKEYGUARD_POSTGRES_DB}"' in renderer
+    assert 'MODELKEYGUARD_ADMIN_AUTH_MODE=${MODELKEYGUARD_ADMIN_AUTH_MODE:-keycloak}' in renderer
 
     clone_script = (repo_root / "scripts" / "compose_state_clone.sh").read_text(encoding="utf-8")
     assert "production_compose.sh\" stop" in clone_script
@@ -297,6 +298,7 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_KEYCLOAK_PUBLIC_URL" in target_env
     assert "MODELKEYGUARD_GATEWAY_KEYCLOAK_URL" in target_env
     assert "MODELKEYGUARD_GATEWAY_PUBLIC_URL" in target_env
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak" in target_env
     assert "MODELKEYGUARD_POSTGRES_HOST" in gateway_env
     assert "MODELKEYGUARD_KEYCLOAK_PUBLIC_URL" in gateway_env
     assert "MODELKEYGUARD_POSTGRES_DSN" in gateway_env
@@ -304,6 +306,7 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "KEYCLOAK_URL" in gateway_env
     assert "MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak" in gateway_env
     assert "MODELKEYGUARD_REQUIRE_KEYCLOAK=1" in gateway_env
+    assert "Optional override for the gateway-only split-target path" in (repo_root / "deploy" / "gateway.env.example").read_text(encoding="utf-8")
     assert "MODELKEYGUARD_POSTGRES_DSN" in postgres_env
     assert "pgvector" in postgres_env
     assert "KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE" in keycloak_env
@@ -313,6 +316,7 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_USAGE_REQUIRED_ROLE" in keycloak_env
     assert "docker-compose.gateway-only.yml" in deploy_readme
     assert "deployment-targets.env.example" in deploy_readme
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak" in deploy_readme
     assert "out/deployment_targets_rendered/gateway.env" in deploy_readme
     assert "out/deployment_targets_rendered/gateway-compose.env" in deploy_readme
     assert "gateway.env.example" in gateway_compose
@@ -322,6 +326,48 @@ def test_split_target_deploy_templates_document_required_contract():
         assert "keycloak-c.example" not in text
         assert "postgres-b.example" not in text
         assert "ollama-b.example" not in text
+
+
+def test_split_target_renderer_honors_gateway_only_admin_auth_override(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    script = repo_root / "scripts" / "render_deployment_env.sh"
+    targets = tmp_path / "deployment-targets.env"
+    out_dir = tmp_path / "rendered"
+
+    targets.write_text(
+        "\n".join(
+            [
+                "MODELKEYGUARD_GATEWAY_HOST=gateway.example",
+                "MODELKEYGUARD_GATEWAY_PORT=8789",
+                "MODELKEYGUARD_GATEWAY_PUBLIC_URL=https://gateway.example",
+                "MODELKEYGUARD_POSTGRES_HOST=postgres.example",
+                "MODELKEYGUARD_POSTGRES_PORT=5432",
+                "MODELKEYGUARD_POSTGRES_DB=modelguard",
+                "MODELKEYGUARD_POSTGRES_USER=modelguard",
+                "MODELKEYGUARD_KEYCLOAK_HOST=keycloak.example",
+                "MODELKEYGUARD_KEYCLOAK_PORT=443",
+                "MODELKEYGUARD_KEYCLOAK_PUBLIC_URL=https://keycloak.example",
+                "MODELKEYGUARD_KEYCLOAK_REALM=modelguard",
+                "MODELKEYGUARD_KEYCLOAK_INTROSPECTION_CLIENT_ID=modelguard-gateway",
+                "MODELKEYGUARD_ADMIN_REQUIRED_ROLE=model.admin",
+                "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak",
+                "",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    result = subprocess.run(
+        [str(script), "--env-file", str(targets), str(out_dir)],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    gateway_env = (out_dir / "gateway.env").read_text(encoding="utf-8")
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak" in gateway_env
 
 
 def test_keycloak_realm_default_is_empty_and_beginner_profile_is_opt_in():
@@ -494,6 +540,7 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "deploy_remote_stack.sh" in readme
     assert "deployment_smoke.sh" in readme
     assert "keycloak_admin_first_setup.md" in readme
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak" in docs
 
 
 def test_remote_gateway_only_up_branch_redeploys_without_down():

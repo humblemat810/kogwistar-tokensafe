@@ -49,6 +49,17 @@ The target values must agree across files:
 | Keycloak realm | `keycloak.env.example` `MODELKEYGUARD_KEYCLOAK_REALM` | `gateway.env.example` `KEYCLOAK_REALM` |
 | Introspection client id | `keycloak.env.example` `MODELKEYGUARD_KEYCLOAK_INTROSPECTION_CLIENT_ID` | `gateway.env.example` `KEYCLOAK_INTROSPECTION_CLIENT_ID` |
 
+For the gateway-only split-target path, you can also choose the admin auth
+mode in `deployment-targets.env`:
+
+```text
+MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak
+```
+
+Use `keycloak` when the gateway should accept Keycloak auth only. Use
+`secret_or_keycloak` when the same gateway should accept either the admin
+secret or Keycloak auth.
+
 Start by filling your copied `deployment-targets.env`. Then run
 `scripts/gateway_from_deployment_targets.sh config` or `up`. Do not leave the
 placeholder hostnames in place; they are intentionally invalid.
