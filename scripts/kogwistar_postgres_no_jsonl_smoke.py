@@ -22,9 +22,6 @@ from modelkeyguard.kogwistar_postgres_state import (
 )
 
 
-DEFAULT_DSN = "postgresql://modelguard:modelguard@localhost:5432/modelguard"
-
-
 def _require_module(name: str) -> None:
     if importlib.util.find_spec(name) is None:
         raise RuntimeError(f"missing required module for kogwistar_postgres smoke: {name}")
@@ -47,7 +44,12 @@ def main() -> int:
     kogwistar_origin = _assert_installed_kogwistar()
 
     policy_path = REPO_ROOT / "config" / "gateway_policy.json"
-    dsn = os.getenv("MODELKEYGUARD_POSTGRES_DSN", DEFAULT_DSN)
+    dsn = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "").strip()
+    if not dsn:
+        raise RuntimeError(
+            "MODELKEYGUARD_POSTGRES_DSN must be set explicitly for the kogwistar_postgres smoke. "
+            "Use a disposable testcontainer or a dedicated throwaway database."
+        )
 
     with tempfile.TemporaryDirectory(prefix="mkg-kogwistar-pg-") as run_dir_raw:
         run_dir = Path(run_dir_raw)

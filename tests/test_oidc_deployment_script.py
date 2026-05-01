@@ -167,6 +167,23 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
     assert "copy_tree" in clone_script
 
 
+def test_compose_state_clone_script_pins_stop_copy_start_order():
+    repo_root = Path(__file__).resolve().parents[1]
+    clone_script = (repo_root / "scripts" / "compose_state_clone.sh").read_text(encoding="utf-8")
+
+    backup_idx = clone_script.index('case "$command_name" in')
+    backup_block = clone_script[backup_idx:clone_script.index('  restore)', backup_idx)]
+    restore_block = clone_script[clone_script.index('  restore)'):]
+
+    assert "stop_stack" in backup_block
+    assert "stop_stack" in restore_block
+    assert backup_block.index("stop_stack") < backup_block.index("copy_tree \"${repo_root}/secrets\"")
+    assert backup_block.index("copy_tree \"${repo_root}/secrets\"") < backup_block.index("cat >\"${backup_dir}/manifest.txt\"")
+    assert restore_block.index("copy_tree \"${backup_dir}/secrets\"") < restore_block.index('"${repo_root}/scripts/production_compose.sh" start')
+    assert "production_compose.sh\" stop" in clone_script
+    assert "production_compose.sh\" start" in clone_script
+
+
 def test_production_compose_script_pins_build_context_and_secrets_contract():
     repo_root = Path(__file__).resolve().parents[1]
     script = repo_root / "scripts" / "production_compose.sh"
