@@ -205,6 +205,33 @@ def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
     assert "${MODELKEYGUARD_KEYCLOAK_BIND:-127.0.0.1:8080}:8080" in compose
 
 
+def test_glossary_pins_oauth_oidc_bridge_language():
+    repo_root = Path(__file__).resolve().parents[1]
+    text = (repo_root / "glossary.md").read_text(encoding="utf-8")
+
+    assert "If you come from OAuth / OIDC" in text
+    assert "Troubleshooting by category" in text
+    assert "Authentication and login" in text
+    assert "Graph state and secrets" in text
+    assert "Provider keys and model routing" in text
+    assert "Quick Q&A" in text
+    assert "Provider endpoint map" in text
+    assert "/api/tags" in text
+    assert "gateway’s Ollama-shaped `/api/chat`" in text
+    assert "/openai/deployments/{deployment}/chat/completions" in text
+    assert "/v1beta/models/{model}:generateContent" in text
+    assert "Gemini" in text
+    assert "Azure OpenAI" in text
+    assert "I ran `deploy_remote_stack.sh up --ssh localhost --shape compose`" in text
+    assert "I used `fresh-up`, then `down`, then `up`" in text
+    assert "The local repo and the remote localhost deploy both show the same secrets" in text
+    assert "Why does `gateway-only` behave differently from `compose`?" in text
+    assert "authorization server" in text
+    assert "service account" in text
+    assert "OIDC login" in text
+    assert "Rule of thumb: if you are in the OAuth world" in text
+
+
 def test_root_dockerignore_excludes_runtime_state_and_reference_clone():
     repo_root = Path(__file__).resolve().parents[1]
     text = (repo_root / ".dockerignore").read_text(encoding="utf-8")
@@ -398,6 +425,7 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     tutorial = (repo_root / "tutorial" / "keycloak_admin_first_setup.md").read_text(encoding="utf-8")
     tutorial_index = (repo_root / "tutorial" / "README.md").read_text(encoding="utf-8")
     docs = (repo_root / "docs_production.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
 
     assert "create Keycloak alice" in tutorial
     assert "register user:alice" in tutorial
@@ -451,8 +479,13 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial
     assert "lane quota using the returned token ID" in tutorial
+    assert "Review the conversation history" in tutorial
+    assert "/admin/history" in tutorial
+    assert "/admin/history.json" in tutorial
+    assert "/admin/history/${REQUEST_ID}.json" in tutorial
     assert "keycloak_admin_first_setup.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs
+    assert "glossary.md" in readme
     assert "easiest local path is to call `modelkeyguard" in docs.lower()
     assert "same kogwistar postgres-backed store" in docs.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in docs

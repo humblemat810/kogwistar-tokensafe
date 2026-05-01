@@ -618,3 +618,34 @@ That gives you the end-to-end path:
 - safe-token issue/use
 - quota inspection
 - reviewer/read-only usage analysis
+
+## 10. Review the conversation history
+
+After the model call, you can inspect the exact request/decision history as the
+admin user.
+
+Browser view:
+
+```text
+http://127.0.0.1:8789/admin/history
+```
+
+CLI view:
+
+```bash
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  'http://127.0.0.1:8789/admin/history.json?time_range=24h&page_size=20' \
+  | python -m json.tool
+```
+
+For one request ID from the table:
+
+```bash
+curl -sS -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  "http://127.0.0.1:8789/admin/history/${REQUEST_ID}.json" \
+  | python -m json.tool
+```
+
+The history page and JSON routes show the same access conversation trail, so
+the tutorial now ends with a way to verify what actually happened, not just
+what was configured.

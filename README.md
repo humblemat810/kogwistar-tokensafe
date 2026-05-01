@@ -7,6 +7,8 @@ The client never receives the real OpenAI/Azure/Anthropic key. It receives a sho
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
 For a plain-English explanation of the runnable shell entrypoints, see
 [`scripts/README.md`](scripts/README.md).
+For a plain-English glossary of the terms, tokens, and env vars that keep
+coming up in tutorials, see [`glossary.md`](glossary.md).
 
 If you install the package from PyPI or a wheel, the default policy graph is
 bundled into the package, so the `modelkeyguard` CLI can still start without a
