@@ -304,7 +304,7 @@ def test_split_target_deploy_templates_document_required_contract():
     assert "MODELKEYGUARD_POSTGRES_DSN" in gateway_env
     assert "MODELKEYGUARD_GRAPH_KEY_FILE" in gateway_env
     assert "KEYCLOAK_URL" in gateway_env
-    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=keycloak" in gateway_env
+    assert "MODELKEYGUARD_ADMIN_AUTH_MODE=secret_or_keycloak" in gateway_env
     assert "MODELKEYGUARD_REQUIRE_KEYCLOAK=1" in gateway_env
     assert "Optional override for the gateway-only split-target path" in (repo_root / "deploy" / "gateway.env.example").read_text(encoding="utf-8")
     assert "MODELKEYGUARD_POSTGRES_DSN" in postgres_env
@@ -480,7 +480,8 @@ def test_usage_reviewer_agent_tutorial_and_script_pin_projection_backed_flow():
     assert "ReviewStatusClient" in script
     assert "run_langchain_reviewer" in script
     assert "advance-checkpoint" in script
-    assert "_safe_token" in script
+    assert "_reviewer_safe_token" in script
+    assert "missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call" in script
 
 
 def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
@@ -651,8 +652,9 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "This helper speaks the OpenAI-compatible" in tutorial
     assert "external_langchain_smoke.py" in tutorial
     assert "external_langchain_ollama.py" in tutorial
+    assert "MODELKEYGUARD_KEY_ID='key:fwd-ollama:gemma4-e2b:3'" in tutorial
     assert "usage_reviewer_agent.md" in tutorial
-    assert "Ollama-shaped gateway route" in tutorial
+    assert "Ollama-shaped" in tutorial and "gateway route" in tutorial
     assert "KGW_BASE_URL='http://127.0.0.1:8789'" in tutorial
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial

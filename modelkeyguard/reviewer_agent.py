@@ -87,8 +87,18 @@ def _ollama_chat_review(
     )
     if key_id.strip():
         req.add_header("x-modelkeyguard-key-id", key_id.strip())
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        try:
+            body = exc.read().decode("utf-8")
+        except Exception:
+            body = ""
+        hint = ""
+        if exc.code == 401:
+            hint = " Check REVIEWER_SAFE_TOKEN; the review status credential is separate from the model-call safe token."
+        raise RuntimeError(f"review model call failed with HTTP {exc.code}: {body or exc.reason}.{hint}") from exc
     if not isinstance(data, dict):
         raise RuntimeError("review response did not return a JSON object")
     return data

@@ -612,11 +612,22 @@ modelkeyguard inspect-graph
 ```
 
 If you also want to verify the Ollama upstream itself with a real LangChain
-client, run the direct Ollama smoke. This does not go through ModelKeyGuard;
-it checks the Ollama-shaped gateway route you registered in step 6.
+client, run the direct Ollama smoke. This calls ModelKeyGuard's Ollama-shaped
+gateway route and still enforces safe-token auth, ACLs, quotas, and key
+selection.
 
 ```bash
 source .venv-langchain-smoke/bin/activate
+KGW_BASE_URL='http://127.0.0.1:8789' \
+KGW_TOKEN="${SAFE_TOKEN}" \
+KGW_OLLAMA_MODEL='gemma4:e2b' \
+python scripts/external_langchain_ollama.py
+```
+
+If more than one active key advertises `gemma4:e2b`, pin the exact key:
+
+```bash
+MODELKEYGUARD_KEY_ID='key:fwd-ollama:gemma4-e2b:3' \
 KGW_BASE_URL='http://127.0.0.1:8789' \
 KGW_TOKEN="${SAFE_TOKEN}" \
 KGW_OLLAMA_MODEL='gemma4:e2b' \

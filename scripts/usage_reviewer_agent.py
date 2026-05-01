@@ -17,8 +17,8 @@ def _env(name: str, default: str = "") -> str:
     return os.getenv(name, default).strip() or default
 
 
-def _safe_token() -> str:
-    return _env("REVIEWER_SAFE_TOKEN", _env("KGW_TOKEN", _env("OPENAI_API_KEY", "")))
+def _reviewer_safe_token() -> str:
+    return _env("REVIEWER_SAFE_TOKEN", "")
 
 
 def _key_id() -> str:
@@ -52,9 +52,10 @@ def main() -> int:
         print("reviewer_action: skipped (thresholds not met)")
         return 0
 
-    token = _safe_token()
+    token = _reviewer_safe_token()
     if not token:
-        print("error: missing REVIEWER_SAFE_TOKEN, KGW_TOKEN, or OPENAI_API_KEY for the Ollama-shaped review call", file=sys.stderr)
+        print("error: missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call", file=sys.stderr)
+        print("hint: mint it with /admin/policy/tokens for principal agent:usage-reviewer and export REVIEWER_SAFE_TOKEN", file=sys.stderr)
         return 2
 
     result = run_langchain_reviewer(

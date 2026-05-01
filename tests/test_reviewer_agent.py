@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sys
+import importlib.util
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from types import SimpleNamespace
@@ -192,6 +193,51 @@ def test_run_langchain_reviewer_forwards_key_id(monkeypatch):
     headers = {str(k).lower(): v for k, v in captured["headers"].items()}
     assert headers["x-modelkeyguard-key-id"] == "key:fwd-ollama:gemma4-e2b"
     assert headers["authorization"] == "Bearer safe-token"
+
+
+def test_run_langchain_reviewer_explains_model_call_401(monkeypatch):
+    class FakeHTTPError(urllib.error.HTTPError):
+        def read(self):
+            return json.dumps({"error": {"message": "missing_bearer_token"}}).encode("utf-8")
+
+    def fake_urlopen(req, timeout=20):
+        raise FakeHTTPError(req.full_url, 401, "Unauthorized", None, None)
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    try:
+        run_langchain_reviewer(
+            status={"should_review": True, "triggers": [], "summary": {}},
+            base_url="http://127.0.0.1:8789",
+            safe_token="stale-token",
+            model="gemma4:e2b",
+            key_id="key:fwd-ollama:gemma4-e2b",
+        )
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected reviewer model call to raise")
+
+    assert "review model call failed with HTTP 401" in message
+    assert "missing_bearer_token" in message
+    assert "REVIEWER_SAFE_TOKEN" in message
+
+
+def test_external_langchain_ollama_forwards_key_id_header(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "external_langchain_ollama.py"
+    spec = importlib.util.spec_from_file_location("external_langchain_ollama_for_test", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("KGW_TOKEN", "safe-token")
+    monkeypatch.setenv("MODELKEYGUARD_KEY_ID", "key:fwd-ollama:gemma4-e2b:3")
+
+    headers = module._request_headers()
+
+    assert headers["Authorization"] == "Bearer safe-token"
+    assert headers["x-modelkeyguard-key-id"] == "key:fwd-ollama:gemma4-e2b:3"
 
 
 def test_review_status_client_falls_back_to_admin_secret_on_bearer_401(monkeypatch):
