@@ -424,6 +424,9 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "local kogwistar postgres-backed store" in tutorial.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in tutorial
     assert "--admin-secret \"$MODELKEYGUARD_ADMIN_API_SECRET\"" in tutorial
+    assert "/admin/keys.json" in tutorial
+    assert "The JSON response from `/admin/keys.json` lists the active provider keys" in tutorial
+    assert "If you prefer the browser, open `http://127.0.0.1:8789/admin/keys`" in tutorial
     assert "bootstrap_secrets.sh" in tutorial
     assert "modelkeyguard_admin_api_secret" in tutorial
     assert "MODELKEYGUARD_ADMIN_API_SECRET_FILE" in tutorial
@@ -438,6 +441,13 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "MODELKEYGUARD_SAMPLE_PROVIDER" in tutorial
     assert "Issue a safe token for the registered model route and cap it" in tutorial
     assert "After step 6, ModelKeyGuard has a registered provider key/model route" in tutorial
+    assert "This helper speaks the OpenAI-compatible" in tutorial
+    assert "external_langchain_smoke.py" in tutorial
+    assert "external_langchain_ollama.py" in tutorial
+    assert "Ollama-shaped gateway route" in tutorial
+    assert "KGW_BASE_URL='http://127.0.0.1:8789'" in tutorial
+    assert 'KGW_TOKEN="${SAFE_TOKEN}"' in tutorial
+    assert "same doc-ingestor system prompt as the gateway smoke" in tutorial
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial
     assert "lane quota using the returned token ID" in tutorial

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-minute client demo: LangChain/OpenAI-style app calls ModelKeyGuard.
+"""One-minute OpenAI-compatible client demo calls ModelKeyGuard.
 
 This intentionally sends an OpenAI-compatible /v1/chat/completions request with
 Authorization: Bearer <Kogwistar token>. The gateway replaces that with the real
@@ -9,6 +9,10 @@ If the running gateway is still in dry-run mode, the request will succeed but
 return a synthetic ModelKeyGuard completion instead of a real provider reply.
 Set MODELKEYGUARD_DRY_RUN=0 and register a real provider secret to exercise the
 real upstream path.
+
+This is not the LangChain client wrapper. The dedicated LangChain smoke lives
+in scripts/external_langchain_smoke.py, which uses ChatOpenAI / ChatOllama /
+ChatGoogleGenerativeAI directly.
 """
 from __future__ import annotations
 import json

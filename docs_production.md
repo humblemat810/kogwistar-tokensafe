@@ -877,6 +877,10 @@ OPENAI_MODEL='gpt-4o-mini' \
 python scripts/langchain_user_openai_compatible.py
 ```
 
+This helper is a plain OpenAI-compatible HTTP client, not a LangChain wrapper.
+For a real LangChain example, use `scripts/external_langchain_smoke.py`, which
+calls `ChatOpenAI`, `ChatOllama`, or `ChatGoogleGenerativeAI` directly.
+
 If the gateway is still in dry-run mode, this call proves the auth, ACL, quota,
 and key-selection path but returns a synthetic ModelKeyGuard completion. To
 exercise the real upstream provider, start the gateway with

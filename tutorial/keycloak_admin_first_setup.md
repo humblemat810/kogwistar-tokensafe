@@ -409,9 +409,20 @@ esac
 ```
 
 Register the provider key using those variables:
-
+check provider keys first
 ```bash
-curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
+curl -sS 'http://127.0.0.1:8789/admin/keys.json' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  | python -m json.tool
+
+# or, if the gateway uses the shared admin secret instead of bearer auth:
+curl -sS 'http://127.0.0.1:8789/admin/keys.json' \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  | python -m json.tool
+
+Register:
+
+curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -H "Authorization: Bearer ${ADMIN_TOKEN}" \
   -F key_id="${MODELKEYGUARD_SAMPLE_KEY_ID}" \
   -F provider="${MODELKEYGUARD_SAMPLE_PROVIDER}" \
@@ -423,7 +434,29 @@ curl -fsS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F shared_with_principals='agent:doc-ingestor' \
   -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
   | python -m json.tool
+
+# or:
+curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
+  -H "x-modelkeyguard-admin-secret: ${MODELKEYGUARD_ADMIN_API_SECRET}" \
+  -F key_id="${MODELKEYGUARD_SAMPLE_KEY_ID}" \
+  -F provider="${MODELKEYGUARD_SAMPLE_PROVIDER}" \
+  -F models="${MODELKEYGUARD_SAMPLE_MODELS}" \
+  -F display_name='First tutorial provider key' \
+  -F upstream_url="${MODELKEYGUARD_SAMPLE_UPSTREAM_URL}" \
+  -F acl_mode='shared' \
+  -F namespace='tenant:kogwistar' \
+  -F shared_with_principals='agent:doc-ingestor' \
+  -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
+  | python -m json.tool
 ```
+
+The JSON response from `/admin/keys.json` lists the active provider keys with
+`key_id`, `provider`, `models`, `display_name`, `upstream_url`, `acl_mode`,
+`namespace`, `status`, and `active_secret_ref`. It does not return the raw
+provider secret.
+
+If you prefer the browser, open `http://127.0.0.1:8789/admin/keys` and the
+table view shows the same list.
 
 That gives you one provider route for the same agent, regardless of the backend
 flavor you pick.
@@ -492,9 +525,9 @@ admin GUI on a separate Keycloak account with `model.admin`.
 
 ## 9. Run a request and inspect quota
 
-Use the safe token to make a request. The same OpenAI-compatible client works
-for all four provider flavors; only the model name changes to match the key you
-registered in step 6.
+Use the safe token to make a request. This helper speaks the OpenAI-compatible
+HTTP shape; the real LangChain smoke lives in `scripts/external_langchain_smoke.py`.
+Only the model name changes to match the key you registered in step 6.
 
 ```bash
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
@@ -542,6 +575,20 @@ Then inspect usage as the admin:
 modelkeyguard inspect-graph
 ```
 
+If you also want to verify the Ollama upstream itself with a real LangChain
+client, run the direct Ollama smoke. This does not go through ModelKeyGuard;
+it checks the Ollama-shaped gateway route you registered in step 6.
+
+```bash
+KGW_BASE_URL='http://127.0.0.1:8789' \
+KGW_TOKEN="${SAFE_TOKEN}" \
+KGW_OLLAMA_MODEL='gemma4:e2b' \
+python scripts/external_langchain_ollama.py
+```
+
+This helper uses the same doc-ingestor system prompt as the gateway smoke, so
+the gateway accepts it as the registered Ollama-shaped request.
+
 Or, if you are using the usage-analysis reviewer account, call:
 
 ```bash
@@ -551,6 +598,16 @@ python scripts/usage_analysis_agent.py \
   --user user:alice \
   --principal agent:doc-ingestor \
   --key "${MODELKEYGUARD_SAMPLE_KEY_ID}"
+```
+
+Sample response:
+```bash
+KGW_TOKEN="${SAFE_TOKEN}" KGW_OLLAMA_MODEL='gemma4:e2b' python scripts/external_langchain_ollama.py
+base_url=http://127.0.0.1:8789
+model=gemma4:e2b
+stream=false
+response_text:
+Request received.
 ```
 
 That gives you the end-to-end path:

@@ -38,8 +38,9 @@ The most useful bash entrypoints are below.
 | Script | What it does |
 | --- | --- |
 | `get_agent_token.sh` | Fetches a Keycloak access token for a bundled client. If the compose gateway is running, it mints through that container so the token issuer matches the gateway’s Keycloak view. |
-| `langchain_user_openai_compatible.py` | Acts like a LangChain/OpenAI client against the gateway. |
+| `langchain_user_openai_compatible.py` | Acts like an OpenAI-compatible client against the gateway. |
 | `external_langchain_smoke.py` | Separate smoke path for external-style LangChain requests. |
+| `external_langchain_ollama.py` | LangChain Ollama smoke client against the gateway's Ollama-shaped route. |
 | `smoke_azure_real_completion.sh` | Checks a real Azure-style completion path. |
 | `smoke_langchain_azure_structured_real.py` | Real structured-output smoke for Azure-style usage. |
 | `usage_analysis_agent.py` | Minimal reusable Python usage-analysis agent that mints a Keycloak service-account token and reads `/admin/usage.json` for user, principal, or key analytics. |
