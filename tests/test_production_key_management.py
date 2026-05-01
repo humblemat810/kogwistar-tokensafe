@@ -21,6 +21,7 @@ ADMIN_HEADERS = {"x-modelkeyguard-admin-secret": "dev-modelkeyguard-admin-secret
 def prod_env(monkeypatch, tmp_path):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-graph-key-32-bytes-minimum-abcdef")
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     monkeypatch.setenv("MODELKEYGUARD_ENV", "local")
     monkeypatch.setenv("MODELKEYGUARD_AUTH_MODE", "local")
@@ -50,6 +51,24 @@ def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):
     monkeypatch.setenv("MODELKEYGUARD_ENV", "local")
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY_FILE", str(f))
     assert AppSettings.from_env().graph_key == "x" * 40
+
+
+def test_graph_key_resolver_requires_explicit_key_by_default(monkeypatch):
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY_FILE", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", raising=False)
+
+    with pytest.raises(ValueError, match="graph_key_required"):
+        resolve_graph_app_key()
+
+
+def test_graph_key_resolver_allows_dev_fallback_only_when_opted_in(monkeypatch, capsys):
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY_FILE", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "1")
+
+    assert resolve_graph_app_key() == "dev-modelkeyguard-change-me"
+    assert "WARNING: using dev fallback MODELKEYGUARD_GRAPH_KEY" in capsys.readouterr().err
 
 
 def test_graph_store_uses_graph_key_file(monkeypatch, tmp_path):

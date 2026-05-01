@@ -246,6 +246,7 @@ Use these role choices:
 
 Assign `model.usage.read` to a usage reviewer, `model.admin` to an admin API
 client, and `model.invoke` to a model-invoking service account.
+The usage agent will also invoke llm to analyse the usage, so assign model.invoke.
 
 Important: creating a Keycloak client does not automatically create a
 ModelKeyGuard principal mapping. The bundled `langchain-agent` client already
@@ -255,15 +256,15 @@ Keycloak token for model calls. Otherwise use the safe token issued in step 7.
 
 ## 4. Register the agent reviewer account
 
-There are two good reviewer shapes:
+The tutorial flow requires a real reviewer identity in both systems:
 
-1. Reuse the bundled `modelguard-usage-agent` Keycloak service account.
-2. Create a new Keycloak service-account client for a dedicated reviewer.
+- Keycloak service account client: `modelguard-usage-agent`
+- ModelKeyGuard principal: `agent:usage-reviewer`
 
-The bundled one is the simplest path. It is meant for usage analysis and reads
-from `/admin/usage.json` using `model.usage.read`.
-
-If you want a dedicated reviewer principal in ModelKeyGuard, register one:
+There is no prebuilt `agent:usage-reviewer` subject in ModelKeyGuard, so
+register it explicitly before you try the usage-analysis flow. The bundled
+`modelguard-usage-agent` client is only the Keycloak-side credential; it does
+not create the ModelKeyGuard principal for you.
 
 ```bash
 modelkeyguard registration register-principal \
@@ -274,9 +275,9 @@ modelkeyguard registration register-principal \
   --application-id app:usage-reviewer
 ```
 
-Then, in Keycloak, create or reuse a service-account client and assign it the
-`model.usage.read` realm role. That lets a non-human reviewer account inspect
-usage without being able to mutate policy.
+Then, in Keycloak, create or reuse the `modelguard-usage-agent` service-account
+client and assign it the `model.usage.read` realm role. That lets the reviewer
+account inspect usage without being able to mutate policy.
 
 The reusable Python client for that reviewer is
 [`modelkeyguard.analytics`](../README.md#usage-analysis-agent).

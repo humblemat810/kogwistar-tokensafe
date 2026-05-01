@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -61,7 +62,22 @@ def resolve_store_backend(value: str | None = None) -> str:
 
 
 def resolve_graph_app_key(app_key: str | None = None) -> str:
-    return app_key or read_env_or_file("MODELKEYGUARD_GRAPH_KEY", DEFAULT_APP_KEY) or DEFAULT_APP_KEY
+    if app_key:
+        return app_key
+    configured = read_env_or_file("MODELKEYGUARD_GRAPH_KEY")
+    if configured:
+        return configured
+    if os.getenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "").strip().lower() in {"1", "true", "yes", "on"}:
+        print(
+            "WARNING: using dev fallback MODELKEYGUARD_GRAPH_KEY. "
+            "Set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY for real state.",
+            file=sys.stderr,
+        )
+        return DEFAULT_APP_KEY
+    raise ValueError(
+        "graph_key_required: set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY. "
+        "For toy JSONL demos only, set MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY=1 to use the dev fallback key."
+    )
 
 
 @dataclass(frozen=True)

@@ -526,11 +526,17 @@ def open_registration_store():
     if store_kind == "postgres":
         from .postgres_state import PostgresGraphStateStore
 
-        return PostgresGraphStateStore()
+        try:
+            return PostgresGraphStateStore()
+        except ValueError as exc:
+            raise _local_registration_store_error(store_kind, exc) from exc
     if store_kind == "kogwistar_postgres":
         from .kogwistar_postgres_state import KogwistarPostgresGraphStateStore
 
-        return KogwistarPostgresGraphStateStore()
+        try:
+            return KogwistarPostgresGraphStateStore()
+        except ValueError as exc:
+            raise _local_registration_store_error(store_kind, exc) from exc
     raise RegistrationError(f"unsupported_store_backend:{store_kind}")
 
 
@@ -539,6 +545,22 @@ def open_registration_service(*, remote_base_url: str = "", bearer_token: str = 
     if remote_base_url:
         return RemoteRegistrationService(remote_base_url, bearer_token=bearer_token, admin_secret=admin_secret)
     return open_registration_store()
+
+
+def _local_registration_store_error(store_kind: str, exc: Exception) -> RegistrationError:
+    message = str(exc)
+    if "sealed graph payload authentication failed" in message:
+        dsn = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
+        return RegistrationError(
+            "local_registration_store_decryption_failed: the local direct-store mode is trying to read "
+            f"{store_kind} state at {dsn}, but the sealed graph payload does not match the current "
+            "MODELKEYGUARD_GRAPH_KEY. This usually means you are not talking to the gateway: "
+            "you omitted --admin-base-url, so the CLI opened the local store directly. "
+            "If you meant to use the running gateway, rerun with "
+            "--admin-base-url http://127.0.0.1:8789 (or your remote gateway URL). "
+            "If you intended a clean local rehearsal, reset the local Postgres state first."
+        )
+    return RegistrationError(message)
 
 
 def register_usage_demo(graph_path: str | Path = "out/registration_demo_graph.jsonl", app_key: str = "dev-registration-demo-key-change-me") -> IssuedToken:

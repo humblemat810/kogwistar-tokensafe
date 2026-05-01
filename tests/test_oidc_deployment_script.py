@@ -405,7 +405,9 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "take the keycloak username and prefix it with" in tutorial.lower()
     assert "register agent:doc-ingestor" in tutorial
     assert "Give the agent and reviewer OIDC machine credentials" in tutorial
+    assert "The tutorial flow requires a real reviewer identity in both systems:" in tutorial
     assert "modelguard-usage-agent" in tutorial
+    assert "agent:usage-reviewer" in tutorial
     assert "set up quotas for alice and agent:doc-ingestor" in tutorial.lower()
     assert "bootstrap-operator quota" in tutorial.lower()
     assert "OIDC admin role" in tutorial

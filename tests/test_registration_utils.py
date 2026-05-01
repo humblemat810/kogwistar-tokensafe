@@ -570,6 +570,45 @@ def test_registration_store_invariant_defaults_to_kogwistar_postgres(monkeypatch
     assert isinstance(store, FakeKogwistarStore)
 
 
+def test_registration_store_invariant_explains_local_decryption_failure(monkeypatch):
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            raise ValueError("sealed graph payload authentication failed")
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    with pytest.raises(ValueError, match="local_registration_store_decryption_failed"):
+        open_registration_store()
+
+
+def test_registration_store_requires_graph_key_before_serious_local_backend(monkeypatch):
+    class FakeKogwistarStore:
+        def __init__(self, *args, **kwargs):
+            raise ValueError(
+                "graph_key_required: set MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY. "
+                "For toy JSONL demos only, set MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY=1 to use the dev fallback key."
+            )
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY_FILE", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", raising=False)
+    monkeypatch.setitem(
+        sys.modules,
+        "modelkeyguard.kogwistar_postgres_state",
+        SimpleNamespace(KogwistarPostgresGraphStateStore=FakeKogwistarStore),
+    )
+
+    with pytest.raises(ValueError, match="graph_key_required"):
+        open_registration_store()
+
+
 def test_store_backend_resolver_defaults_to_kogwistar_postgres(monkeypatch):
     monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
     assert resolve_store_backend() == "kogwistar_postgres"

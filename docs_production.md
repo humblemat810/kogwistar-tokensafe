@@ -543,7 +543,9 @@ URL and keep the same auth mode the remote gateway is configured for.
 export ADMIN_TOKEN="$(./scripts/get_agent_token.sh modelguard-admin admin-agent-secret)"
 ```
 
-Register an application:
+The above assumes you have hosting machine access. You can also register via OIDC.
+
+Register an application all via OIDC now:
 
 ```bash
 curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/applications' \
