@@ -346,7 +346,34 @@ modelkeyguard \
   --max-requests 200
 ```
 
-## 5b. Log in as Alice and inspect the quota pages
+## 5b. Mint a reviewer safe token
+
+Now mint a separate safe token for the reviewer principal itself. This is not
+the doc-ingestor token from step 7. It is the reviewer token that the next
+tutorial will use when it talks to the gateway’s Ollama-shaped route.
+
+```bash
+REVIEWER_TOKEN_RESPONSE="$(curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/tokens' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d '{"principal_id":"agent:usage-reviewer","namespace":"tenant:kogwistar","application_id":"app:usage-reviewer","scopes":["model.invoke"]}')"
+
+REVIEWER_SAFE_TOKEN="$(printf '%s' "$REVIEWER_TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["safe_token"])')"
+REVIEWER_SAFE_TOKEN_ID="$(printf '%s' "$REVIEWER_TOKEN_RESPONSE" | python -c 'import json,sys; print(json.load(sys.stdin)["token_id"])')"
+```
+
+If you want to cap that reviewer token too, add a token lane quota on the
+returned token ID:
+
+```bash
+curl -fsS -X POST 'http://127.0.0.1:8789/admin/policy/quotas/upsert' \
+  -H "Authorization: Bearer ${ADMIN_TOKEN}" \
+  -H 'content-type: application/json' \
+  -d "{\"lane\":\"token\",\"subject_id\":\"${REVIEWER_SAFE_TOKEN_ID}\",\"quota_name\":\"lifetime\",\"period\":\"infinite\",\"max_usd\":5,\"max_tokens\":50000,\"max_requests\":100}" \
+  | python -m json.tool
+```
+
+## 5c. Log in as Alice and inspect the quota pages
 
 If Alice has the configured OIDC admin role, she can use the browser OIDC
 login to open the admin pages and see the quota settings you just created.
@@ -675,6 +702,10 @@ use the next tutorial:
 
 - [`usage_reviewer_agent.md`](usage_reviewer_agent.md)
 
-That walkthrough uses the gateway's Ollama-shaped route with the safe token
-you created here, and it reads review triggers from rebuildable named
-projections instead of from an authoritative review table.
+That walkthrough uses the gateway's Ollama-shaped route with a separate
+reviewer safe token minted for `agent:usage-reviewer`, not the doc-ingestor
+token from step 7. It reads review triggers from rebuildable named projections
+instead of from an authoritative review table.
+
+If you follow the next tutorial directly, it will mint that reviewer token in
+its own step before running the reviewer helper.

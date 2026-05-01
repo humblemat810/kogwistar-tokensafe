@@ -34,7 +34,7 @@ def isolated_graph(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-graph-key")
     monkeypatch.delenv("KOGWISTAR_REPO", raising=False)
     monkeypatch.delenv("MODELKEYGUARD_USE_INSTALLED_KOGWISTAR", raising=False)
-    monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
 
 
 def _guard():

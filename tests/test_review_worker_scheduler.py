@@ -4,7 +4,15 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import pytest
+
 from modelkeyguard.review_worker import review_once
+
+
+@pytest.fixture(autouse=True)
+def _pin_local_review_backend(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-review-worker-key-32-bytes-minimum")
 
 
 def _iso(dt: datetime) -> str:

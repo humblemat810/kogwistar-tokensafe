@@ -47,6 +47,7 @@ class AppSettings:
     auth_mode: str
     keycloak_url: str
     keycloak_public_url: str
+    keycloak_local_url: str
     keycloak_realm: str
     audit_path: str
     policy_path: str
@@ -85,6 +86,7 @@ class AppSettings:
             auth_mode=read_env_or_file("MODELKEYGUARD_AUTH_MODE", "local") or "local",
             keycloak_url=read_env_or_file("KEYCLOAK_URL", "http://localhost:8080") or "http://localhost:8080",
             keycloak_public_url=read_env_or_file("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "http://127.0.0.1:8080") or "http://127.0.0.1:8080",
+            keycloak_local_url=read_env_or_file("MODELKEYGUARD_KEYCLOAK_LOCAL_URL", "") or "",
             keycloak_realm=read_env_or_file("KEYCLOAK_REALM", "modelguard") or "modelguard",
             audit_path=read_env_or_file("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl") or "out/audit.jsonl",
             policy_path=read_env_or_file("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json") or "config/gateway_policy.json",
@@ -131,6 +133,8 @@ class AppSettings:
             errors.append("KEYCLOAK_URL must start with http:// or https://")
         if not self.keycloak_public_url.startswith(("http://", "https://")):
             errors.append("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL must start with http:// or https://")
+        if self.keycloak_local_url and not self.keycloak_local_url.startswith(("http://", "https://")):
+            errors.append("MODELKEYGUARD_KEYCLOAK_LOCAL_URL must start with http:// or https://")
         if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.admin_required_role:
             errors.append("MODELKEYGUARD_ADMIN_REQUIRED_ROLE must be configured when Keycloak admin auth is enabled")
         if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and not self.usage_required_role:

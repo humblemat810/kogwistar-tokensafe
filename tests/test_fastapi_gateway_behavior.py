@@ -15,6 +15,7 @@ ADMIN_SECRET = "dev-modelkeyguard-admin-secret"
 @pytest.fixture(autouse=True)
 def _force_jsonl_store(monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-fastapi-gateway-key-32-bytes")
 
 
 def _admin_headers():

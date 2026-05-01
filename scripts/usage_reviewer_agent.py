@@ -18,7 +18,7 @@ def _env(name: str, default: str = "") -> str:
 
 
 def _safe_token() -> str:
-    return _env("KGW_TOKEN", _env("SAFE_TOKEN", _env("OPENAI_API_KEY", "")))
+    return _env("REVIEWER_SAFE_TOKEN", _env("KGW_TOKEN", _env("OPENAI_API_KEY", "")))
 
 
 def main() -> int:
@@ -50,7 +50,7 @@ def main() -> int:
 
     token = _safe_token()
     if not token:
-        print("error: missing KGW_TOKEN, SAFE_TOKEN, or OPENAI_API_KEY for the Ollama-shaped review call", file=sys.stderr)
+        print("error: missing REVIEWER_SAFE_TOKEN, KGW_TOKEN, or OPENAI_API_KEY for the Ollama-shaped review call", file=sys.stderr)
         return 2
 
     result = run_langchain_reviewer(

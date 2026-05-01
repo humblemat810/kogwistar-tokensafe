@@ -771,6 +771,96 @@ def test_admin_login_page_shows_keycloak_entry_point(tmp_path, monkeypatch):
     assert "Sign in with Keycloak" in page.text
 
 
+def test_admin_oidc_login_uses_forwarded_localhost_for_browser_redirect(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "oidc-admin")
+    monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789")
+    monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.example")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "http://10.5.0.4:8080")
+    monkeypatch.setenv("KEYCLOAK_REALM", "modelguard")
+    monkeypatch.setenv("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web")
+
+    client = TestClient(create_app("config/gateway_policy.json"), base_url="http://127.0.0.1:8789")
+    login = client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
+
+    assert login.status_code == 303
+    location = login.headers["location"]
+    assert location.startswith("http://127.0.0.1:8080/")
+    assert "10.5.0.4" not in location
+    params = parse_qs(urlparse(location).query)
+    assert params["redirect_uri"] == ["http://127.0.0.1:8789/admin/oidc/callback"]
+
+
+def test_admin_oidc_login_keeps_public_urls_for_public_browser_access(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "oidc-admin")
+    monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "https://gateway.example")
+    monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak:8080")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "https://keycloak.example")
+    monkeypatch.setenv("KEYCLOAK_REALM", "modelguard")
+    monkeypatch.setenv("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web")
+
+    client = TestClient(create_app("config/gateway_policy.json"), base_url="https://gateway.example")
+    login = client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
+
+    assert login.status_code == 303
+    location = login.headers["location"]
+    assert location.startswith("https://keycloak.example/")
+    params = parse_qs(urlparse(location).query)
+    assert params["redirect_uri"] == ["https://gateway.example/admin/oidc/callback"]
+
+
+def test_admin_oidc_login_supports_intranet_and_internet_browser_access(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from urllib.parse import parse_qs, urlparse
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "oidc-admin")
+    monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "https://gateway.example")
+    monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak:8080")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "https://keycloak.example")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_LOCAL_URL", "http://127.0.0.1:8080")
+    monkeypatch.setenv("KEYCLOAK_REALM", "modelguard")
+    monkeypatch.setenv("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web")
+
+    app = create_app("config/gateway_policy.json")
+    intranet_client = TestClient(app, base_url="http://127.0.0.1:8789")
+    internet_client = TestClient(app, base_url="https://gateway.example")
+
+    intranet_login = intranet_client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
+    internet_login = internet_client.get("/admin/oidc/login", params={"next": "/admin/usage"}, follow_redirects=False)
+
+    assert intranet_login.status_code == 303
+    intranet_location = intranet_login.headers["location"]
+    assert intranet_location.startswith("http://127.0.0.1:8080/")
+    intranet_params = parse_qs(urlparse(intranet_location).query)
+    assert intranet_params["redirect_uri"] == ["http://127.0.0.1:8789/admin/oidc/callback"]
+
+    assert internet_login.status_code == 303
+    internet_location = internet_login.headers["location"]
+    assert internet_location.startswith("https://keycloak.example/")
+    internet_params = parse_qs(urlparse(internet_location).query)
+    assert internet_params["redirect_uri"] == ["https://gateway.example/admin/oidc/callback"]
+
+
 def test_admin_policy_quota_upsert_and_revoke_are_append_only_and_effective(tmp_path, monkeypatch):
     pytest.importorskip("fastapi")
     from fastapi.testclient import TestClient

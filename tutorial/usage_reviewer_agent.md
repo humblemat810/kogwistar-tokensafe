@@ -22,7 +22,11 @@ human or service account would:
 - `KEYCLOAK_URL` points at Keycloak
 - `MODELKEYGUARD_OIDC_USAGE_CLIENT_ID` / `MODELKEYGUARD_OIDC_USAGE_CLIENT_SECRET`
   mint the reviewer’s OAuth service-account token
-- `SAFE_TOKEN` or `KGW_TOKEN` authorizes the gateway’s Ollama-shaped model call
+- `REVIEWER_SAFE_TOKEN` authorizes the reviewer’s Ollama-shaped model call
+- `SAFE_TOKEN` from the first tutorial still belongs to the doc-ingestor demo
+
+This walkthrough assumes you already minted `REVIEWER_SAFE_TOKEN` in
+[`keycloak_admin_first_setup.md`](keycloak_admin_first_setup.md).
 
 For the read-only review status query, the reviewer identity must have the
 `model.usage.read` role, or the equivalent read claim in your OAuth provider.
@@ -89,13 +93,13 @@ checkpoint projection.
 
 ## 2. Run the reviewer through the gateway
 
-The runner uses the gateway’s Ollama-shaped route and the safe token created in
-the first tutorial. The system prompt stays aligned with the policy for
-`agent:doc-ingestor`, while the user message carries the review summary.
+The runner uses the gateway’s Ollama-shaped route and the reviewer token
+minted in the first tutorial. The system prompt stays aligned with the
+reviewer policy, while the user message carries the review summary.
 
 ```bash
 KGW_BASE_URL="${MODELKEYGUARD_GATEWAY_PUBLIC_URL:-http://127.0.0.1:8789}" \
-KGW_TOKEN="${SAFE_TOKEN}" \
+REVIEWER_SAFE_TOKEN="${REVIEWER_SAFE_TOKEN}" \
 KGW_OLLAMA_MODEL="${KGW_OLLAMA_MODEL:-gemma4:e2b}" \
 python scripts/usage_reviewer_agent.py
 ```

@@ -11,6 +11,12 @@ from modelkeyguard.graph_state import GraphStateStore
 from modelkeyguard.registration import RegistrationService
 
 
+@pytest.fixture(autouse=True)
+def _gateway_policy_test_env(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-gateway-policy-key-32-bytes")
+
+
 def test_local_token_verifies_with_on_behalf_user(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     v = TokenVerifier("config/gateway_policy.json")

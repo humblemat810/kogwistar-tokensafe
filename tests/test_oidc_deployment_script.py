@@ -392,14 +392,18 @@ def test_usage_reviewer_agent_tutorial_and_script_pin_projection_backed_flow():
     assert "dangerous keyword hits" in tutorial.lower()
     assert "named projection" in tutorial.lower()
     assert "usage_reviewer_agent.py" in tutorial
-    assert "KGW_TOKEN" in tutorial
-    assert "SAFE_TOKEN" in tutorial
+    assert "REVIEWER_SAFE_TOKEN" in tutorial
+    assert "agent:usage-reviewer" in tutorial
+    assert "minted `REVIEWER_SAFE_TOKEN` in" in tutorial
+    assert "This walkthrough assumes you already minted `REVIEWER_SAFE_TOKEN`" in tutorial
     assert "usage_reviewer_agent.md" in tutorial_index
     assert "usage_reviewer_agent.py" in scripts_readme
     assert "LangChain-based reviewer helper" in scripts_readme
+    assert "reviewer-specific safe token" in scripts_readme
     assert "ReviewStatusClient" in script
     assert "run_langchain_reviewer" in script
     assert "advance-checkpoint" in script
+    assert "_safe_token" in script
 
 
 def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
@@ -518,6 +522,10 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "Do not use the browser client `modelguard-admin-web` for machines" in tutorial
     assert "creating a Keycloak client does not automatically create a" in tutorial
     assert "safe token issued in step 7" in tutorial
+    assert "Mint a reviewer safe token" in tutorial
+    assert "REVIEWER_TOKEN_RESPONSE" in tutorial
+    assert "REVIEWER_SAFE_TOKEN" in tutorial
+    assert "REVIEWER_SAFE_TOKEN_ID" in tutorial
     assert "easiest local case: omit `--admin-base-url` entirely" in tutorial.lower()
     assert "local kogwistar postgres-backed store" in tutorial.lower()
     assert "--admin-base-url http://127.0.0.1:8789" in tutorial
@@ -545,8 +553,6 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "usage_reviewer_agent.md" in tutorial
     assert "Ollama-shaped gateway route" in tutorial
     assert "KGW_BASE_URL='http://127.0.0.1:8789'" in tutorial
-    assert 'KGW_TOKEN="${SAFE_TOKEN}"' in tutorial
-    assert "same doc-ingestor system prompt as the gateway smoke" in tutorial
     assert "model.usage.read" in tutorial
     assert "usage_analysis_agent.py" in tutorial
     assert "lane quota using the returned token ID" in tutorial
@@ -555,6 +561,11 @@ def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():
     assert "/admin/history.json" in tutorial
     assert "/admin/history/${REQUEST_ID}.json" in tutorial
     assert "Next: run the reviewer agent" in tutorial
+    assert "mint a reviewer safe token" in tutorial.lower()
+    assert "REVIEWER_SAFE_TOKEN" in tutorial
+    assert "REVIEWER_SAFE_TOKEN_ID" in tutorial
+    assert "Mint a reviewer safe token" in tutorial
+    assert "If you follow the next tutorial directly, it will mint that reviewer token in" in tutorial
     assert "keycloak_admin_first_setup.md" in tutorial_index
     assert "usage_reviewer_agent.md" in tutorial_index
     assert "keycloak_admin_first_setup.md" in docs

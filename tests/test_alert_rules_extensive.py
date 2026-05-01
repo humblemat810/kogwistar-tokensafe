@@ -38,6 +38,12 @@ def store(tmp_path) -> GraphStateStore:
     return GraphStateStore(tmp_path / "graph.jsonl", "test-alert-key-32-bytes-minimum")
 
 
+@pytest.fixture(autouse=True)
+def _alert_rules_extensive_test_env(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-alert-key-32-bytes-minimum")
+
+
 def ev(**kwargs):
     base = {"event_type": "MODEL_CALL_DECISION", "request_id": "req-1", "decision": "ALLOWED", "reason": "allow", "principal_id": "agent:doc-ingestor", "on_behalf_of_user_id": "user:alice", "application_id": "app:crm", "key_id": "key:openai:prod", "model": "gpt-4o-mini", "system_prompt_hash": "hash-good", "estimated_tokens": 1000, "estimated_usd": 0.02}
     base.update(kwargs)

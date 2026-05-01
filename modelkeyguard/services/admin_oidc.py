@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import ipaddress
 import json
 import secrets
 import time
@@ -100,16 +101,19 @@ def admin_oidc_login_response(
     next_path: str,
     keycloak_url: str,
     keycloak_public_url: str,
+    keycloak_local_url: str = "",
     realm: str,
     client_id: str,
     gateway_public_url: str,
     ttl_seconds: int,
 ) -> Response:
-    redirect_uri = f"{gateway_public_url.rstrip('/')}/admin/oidc/callback"
+    browser_gateway_url = _browser_gateway_url(request, gateway_public_url)
+    browser_keycloak_url = _browser_keycloak_url(request, keycloak_public_url or keycloak_url, keycloak_local_url=keycloak_local_url)
+    redirect_uri = f"{browser_gateway_url.rstrip('/')}/admin/oidc/callback"
     code_verifier, code_challenge = pkce_pair()
     state_cookie, state = issue_login_state(secret, ttl_seconds=ttl_seconds, next_path=next_path, redirect_uri=redirect_uri, code_verifier=code_verifier)
     login_url = build_oidc_login_url(
-        keycloak_url=keycloak_public_url or keycloak_url,
+        keycloak_url=browser_keycloak_url,
         realm=realm,
         client_id=client_id,
         redirect_uri=redirect_uri,
@@ -164,6 +168,9 @@ def admin_oidc_callback_response(
     claims = decode_access_token_claims(access_token)
     if not _has_required_role(claims, required_role):
         return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required", "required_role": required_role}})
+    next_target = str(state_payload.get("next") or next_path or "/admin/usage")
+    if not next_target.startswith("/admin/"):
+        next_target = "/admin/usage"
     session_cookie, _ = issue_admin_session(
         secret,
         ttl_seconds,
@@ -175,7 +182,7 @@ def admin_oidc_callback_response(
             "aud": claims.get("aud", ""),
         },
     )
-    response: Response = RedirectResponse(url=next_path if next_path.startswith("/admin/") else "/admin/usage", status_code=303)
+    response: Response = RedirectResponse(url=next_target, status_code=303)
     response.set_cookie(
         ADMIN_COOKIE_NAME,
         session_cookie,
@@ -190,6 +197,51 @@ def admin_oidc_callback_response(
 
 def render_admin_login_page(next_path: str, *, oidc_login_url: str | None = None) -> HTMLResponse:
     return admin_html_login_response(next_path, oidc_login_url=oidc_login_url)
+
+
+def _browser_gateway_url(request: Request, configured_url: str) -> str:
+    host = request.url.hostname
+    if host and _is_loopback_host(host):
+        return str(request.base_url).rstrip("/")
+    return configured_url
+
+
+def _browser_keycloak_url(request: Request, configured_url: str, *, keycloak_local_url: str = "") -> str:
+    request_host = request.url.hostname
+    if not request_host or not _is_loopback_host(request_host):
+        return configured_url
+    if keycloak_local_url:
+        return keycloak_local_url
+    parsed = urllib.parse.urlparse(configured_url)
+    configured_host = parsed.hostname
+    if not configured_host or not _is_browser_local_candidate(configured_host):
+        return configured_url
+    port = parsed.port
+    netloc = request_host
+    if ":" in request_host and not request_host.startswith("["):
+        netloc = f"[{request_host}]"
+    if port:
+        netloc = f"{netloc}:{port}"
+    return urllib.parse.urlunparse(parsed._replace(netloc=netloc))
+
+
+def _is_browser_local_candidate(host: str) -> bool:
+    if host in {"localhost", "keycloak"}:
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_private or ip.is_loopback or ip.is_link_local
+
+
+def _is_loopback_host(host: str) -> bool:
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
 
 
 def _fetch_json(url: str) -> dict[str, Any]:
