@@ -37,7 +37,8 @@ Rules:
   scanning disk.
 - the local production runner and the remote deploy wrapper must share the same
   lifecycle semantics.
-- `down` is not a data wipe; it only removes containers and networks.
+- `down` is not a data wipe; it only removes containers and networks and
+  preserves mapped volumes.
 - a separate, explicit cleanup action is required if an operator wants to delete
   stale rehearsal roots from disk.
 

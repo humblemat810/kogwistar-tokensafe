@@ -544,7 +544,25 @@ def open_registration_service(*, remote_base_url: str = "", bearer_token: str = 
     remote_base_url = remote_base_url.strip()
     if remote_base_url:
         return RemoteRegistrationService(remote_base_url, bearer_token=bearer_token, admin_secret=admin_secret)
+    try:
+        store_kind = resolve_store_backend()
+    except ValueError as exc:
+        raise RegistrationError(str(exc)) from exc
+    if store_kind in {"postgres", "kogwistar_postgres"} and (bearer_token.strip() or admin_secret.strip()) and _localhost_gateway_is_ready():
+        return RemoteRegistrationService(
+            "http://127.0.0.1:8789",
+            bearer_token=bearer_token,
+            admin_secret=admin_secret,
+        )
     return open_registration_store()
+
+
+def _localhost_gateway_is_ready() -> bool:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:8789/healthz", timeout=1) as resp:
+            return 200 <= getattr(resp, "status", 200) < 500
+    except Exception:
+        return False
 
 
 def _local_registration_store_error(store_kind: str, exc: Exception) -> RegistrationError:

@@ -13,7 +13,7 @@ from .sealed_payload import (
     open_json,
     seal_json,
 )
-from .settings import read_env_or_file
+from .settings import is_dev_mode, read_env_or_file
 
 DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl"))
 DEFAULT_APP_KEY = "dev-modelkeyguard-change-me"
@@ -62,6 +62,11 @@ def resolve_store_backend(value: str | None = None) -> str:
     store = (value if value is not None else os.getenv("MODELKEYGUARD_STORE", "kogwistar_postgres")).strip().lower() or "kogwistar_postgres"
     if store not in SUPPORTED_STORE_BACKENDS:
         raise ValueError(f"unsupported_store_backend:{store}")
+    if store == "jsonl" and not is_dev_mode():
+        raise ValueError(
+            "jsonl_toy_backend_requires_dev_mode: set MODELKEYGUARD_ENV=local (or another non-production dev mode) "
+            "before using the jsonl store."
+        )
     return store
 
 

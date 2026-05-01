@@ -59,6 +59,41 @@ def _ts_to_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _ollama_chat_review(
+    *,
+    base_url: str,
+    safe_token: str,
+    model: str,
+    system_prompt: str,
+    prompt: str,
+    key_id: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt},
+        ],
+        "stream": False,
+    }
+    req = urllib.request.Request(
+        f"{base_url.rstrip('/')}/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {safe_token}",
+            "content-type": "application/json",
+        },
+        method="POST",
+    )
+    if key_id.strip():
+        req.add_header("x-modelkeyguard-key-id", key_id.strip())
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        data = json.loads(resp.read().decode("utf-8"))
+    if not isinstance(data, dict):
+        raise RuntimeError("review response did not return a JSON object")
+    return data
+
+
 def _get_named_projection(graph_state: GraphStateStore, namespace: str, key: str) -> dict[str, Any] | None:
     getter = getattr(graph_state, "get_named_projection", None)
     if callable(getter):
@@ -379,7 +414,31 @@ def run_langchain_reviewer(
     safe_token: str,
     model: str = "gemma4:e2b",
     system_prompt: str = DEFAULT_REVIEW_SYSTEM_PROMPT,
+    key_id: str = "",
 ) -> dict[str, Any]:
+    prompt = build_review_prompt(status)
+    if key_id.strip():
+        result = _ollama_chat_review(
+            base_url=base_url,
+            safe_token=safe_token,
+            model=model,
+            system_prompt=system_prompt,
+            prompt=prompt,
+            key_id=key_id,
+        )
+        message = result.get("message") if isinstance(result, dict) else {}
+        text = ""
+        if isinstance(message, dict):
+            text = str(message.get("content") or "")
+        if not text:
+            text = str(result.get("response") or "")
+        return {
+            "model": model,
+            "base_url": base_url.rstrip("/"),
+            "key_id": key_id.strip(),
+            "text": text,
+        }
+
     from langchain_core.messages import HumanMessage, SystemMessage
     from langchain_ollama import ChatOllama
 
@@ -388,11 +447,12 @@ def run_langchain_reviewer(
         llm = ChatOllama(model=model, base_url=base_url.rstrip("/"), client_kwargs={"headers": headers}, temperature=0)
     except TypeError:
         llm = ChatOllama(model=model, base_url=base_url.rstrip("/"), headers=headers, temperature=0)
-    messages = [SystemMessage(content=system_prompt), HumanMessage(content=build_review_prompt(status))]
+    messages = [SystemMessage(content=system_prompt), HumanMessage(content=prompt)]
     result = llm.invoke(messages)
     return {
         "model": model,
         "base_url": base_url.rstrip("/"),
+        "key_id": key_id.strip(),
         "text": _message_text(result),
     }
 
@@ -439,19 +499,43 @@ class ReviewStatusClient:
 
     def _request_json(self, method: str, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         url = f"{self.base_url.rstrip('/')}{path}"
-        data = None
-        headers = self._headers()
-        if payload is not None:
-            data = json.dumps(payload).encode("utf-8")
-            headers = dict(headers)
-            headers["content-type"] = "application/json"
-        req = urllib.request.Request(url, data=data, headers=headers, method=method)
-        with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
-            body = resp.read().decode("utf-8")
-        parsed = json.loads(body or "{}")
-        if not isinstance(parsed, dict):
-            raise RuntimeError("review endpoint did not return a JSON object")
-        return parsed
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        candidates = self._header_candidates()
+        last_error: urllib.error.HTTPError | None = None
+        for headers in candidates:
+            req_headers = dict(headers)
+            if data is not None:
+                req_headers["content-type"] = "application/json"
+            req = urllib.request.Request(url, data=data, headers=req_headers, method=method)
+            try:
+                with urllib.request.urlopen(req, timeout=self.timeout_seconds) as resp:
+                    body = resp.read().decode("utf-8")
+                parsed = json.loads(body or "{}")
+                if not isinstance(parsed, dict):
+                    raise RuntimeError("review endpoint did not return a JSON object")
+                return parsed
+            except urllib.error.HTTPError as exc:
+                if exc.code == 401 and len(candidates) > 1:
+                    last_error = exc
+                    continue
+                raise
+        if last_error is not None:
+            try:
+                body = last_error.read().decode("utf-8")
+            except Exception:
+                body = ""
+            raise urllib.error.HTTPError(last_error.url, last_error.code, body or last_error.msg, last_error.hdrs, last_error.fp)
+        raise RuntimeError("missing bearer token, admin secret, or Keycloak service account")
+
+    def _header_candidates(self) -> list[dict[str, str]]:
+        candidates: list[dict[str, str]] = []
+        if self.bearer_token:
+            candidates.append({"Authorization": f"Bearer {self.bearer_token}"})
+        if self.admin_secret:
+            candidates.append({"x-modelkeyguard-admin-secret": self.admin_secret})
+        if self.keycloak:
+            candidates.append({"Authorization": f"Bearer {self.keycloak.mint_access_token()}"})
+        return candidates
 
 
 def main(argv: list[str] | None = None) -> int:

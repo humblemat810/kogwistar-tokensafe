@@ -146,7 +146,7 @@ modelkeyguard registration register-user \
 `ADMIN_TOKEN` above is not Alice's browser token. It is a Keycloak
 client-credentials token for the bundled `modelguard-admin` service-account
 client. The local and production runners assign that service account the
-`model.admin` role automatically. If you started Keycloak by hand, run this once
+`model.admin` role automatically. If you started Keycloak by hand (no compose of any kind), run this once
 after Keycloak is ready:
 
 ```bash
@@ -156,7 +156,9 @@ after Keycloak is ready:
 If you want this walkthrough to write through the running gateway instead of
 directly to the local store, add `--admin-base-url` and point it at the
 ModelKeyGuard gateway. That base URL is the ModelKeyGuard gateway, not
-Keycloak.
+Keycloak. In serious backend mode, the CLI now prefers a reachable local
+gateway automatically when you omit `--admin-base-url`, so direct-store and
+gateway-admin flows stay on the same authority.
 
 Easiest local case: omit `--admin-base-url` entirely and let the command write
 directly to the local Kogwistar Postgres-backed store.
@@ -458,7 +460,7 @@ curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F upstream_url="${MODELKEYGUARD_SAMPLE_UPSTREAM_URL}" \
   -F acl_mode='shared' \
   -F namespace='tenant:kogwistar' \
-  -F shared_with_principals='agent:doc-ingestor' \
+  -F shared_with_principals='agent:doc-ingestor,agent:usage-reviewer' \
   -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
   | python -m json.tool
 
@@ -472,7 +474,7 @@ curl -sS -X POST 'http://127.0.0.1:8789/admin/keys' \
   -F upstream_url="${MODELKEYGUARD_SAMPLE_UPSTREAM_URL}" \
   -F acl_mode='shared' \
   -F namespace='tenant:kogwistar' \
-  -F shared_with_principals='agent:doc-ingestor' \
+  -F shared_with_principals='agent:doc-ingestor,agent:usage-reviewer' \
   -F provider_secret="${MODELKEYGUARD_SAMPLE_PROVIDER_SECRET}" \
   | python -m json.tool
 ```
@@ -556,6 +558,12 @@ Use the safe token to make a request. This helper speaks the OpenAI-compatible
 HTTP shape; the real LangChain smoke lives in `scripts/external_langchain_smoke.py`.
 Only the model name changes to match the key you registered in step 6.
 
+if any call has ambuigious key error
+{'message': 'model_key_ambiguous'}
+specify the key in env variable
+MODELKEYGUARD_KEY_ID='key:ollama:gemma4-e2b'
+
+
 ```bash
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
 OPENAI_API_KEY="${SAFE_TOKEN}" \
@@ -588,6 +596,7 @@ If the Ollama key was registered with `http://127.0.0.1:11434/api/chat`, and
 Ollama is running on the host rather than inside the gateway container, this
 call will fail with `500 Internal Server Error`. Re-register the Ollama key
 with a reachable upstream URL before retrying.
+user are advised to also check examples/forward_ollama_to_remove_dev.sh for forwarding ollama port to vm settings
 
 # Gemini
 OPENAI_BASE_URL='http://127.0.0.1:8789/v1' \
@@ -607,6 +616,7 @@ client, run the direct Ollama smoke. This does not go through ModelKeyGuard;
 it checks the Ollama-shaped gateway route you registered in step 6.
 
 ```bash
+source .venv-langchain-smoke/bin/activate
 KGW_BASE_URL='http://127.0.0.1:8789' \
 KGW_TOKEN="${SAFE_TOKEN}" \
 KGW_OLLAMA_MODEL='gemma4:e2b' \
@@ -673,6 +683,7 @@ Browser view:
 
 ```text
 http://127.0.0.1:8789/admin/history
+# if time out use http://127.0.0.1:8789/admin/oidc/login?next=/admin/usage and click to admin history
 ```
 
 CLI view:

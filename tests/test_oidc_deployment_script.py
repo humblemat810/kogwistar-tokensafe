@@ -142,7 +142,7 @@ def test_fresh_up_parity_smoke_has_valid_bash_syntax_and_contract():
 
 def test_single_source_gateway_runner_has_valid_bash_syntax():
     repo_root = Path(__file__).resolve().parents[1]
-    for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh", "bootstrap_keycloak_admin_role.sh"):
+    for name in ("render_deployment_env.sh", "gateway_from_deployment_targets.sh", "bootstrap_keycloak_admin_role.sh", "compose_state_clone.sh"):
         script = repo_root / "scripts" / name
         result = subprocess.run(["bash", "-n", str(script)], cwd=repo_root, capture_output=True, text=True, check=False)
         assert result.returncode == 0, result.stderr
@@ -156,6 +156,15 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
     assert 'gateway_keycloak_url="${MODELKEYGUARD_GATEWAY_KEYCLOAK_URL:-${MODELKEYGUARD_KEYCLOAK_PUBLIC_URL}}"' in renderer
     assert "KEYCLOAK_URL=${gateway_keycloak_url}" in renderer
     assert 'gateway_postgres_dsn="postgresql://${MODELKEYGUARD_POSTGRES_USER}:${postgres_password_placeholder}@${gateway_postgres_host}:${gateway_postgres_port}/${MODELKEYGUARD_POSTGRES_DB}"' in renderer
+
+    clone_script = (repo_root / "scripts" / "compose_state_clone.sh").read_text(encoding="utf-8")
+    assert "production_compose.sh\" stop" in clone_script
+    assert "production_compose.sh\" start" in clone_script
+    assert "secrets/" in clone_script
+    assert "data/" in clone_script
+    assert "out/.runtime-compose-data-dir" in clone_script
+    assert "backup-dir" in clone_script
+    assert "copy_tree" in clone_script
 
 
 def test_production_compose_script_pins_build_context_and_secrets_contract():
@@ -182,6 +191,8 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert "MODELKEYGUARD_KEYCLOAK_DATA_DIR" in text
     assert "MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE" in text
     assert "gateway-secret" in text
+    assert "Keycloak bootstrap admin for this deployment" in text
+    assert "fresh_up_started=0" in text
     assert "bootstrap_keycloak_admin_role.sh" in text
     assert "bootstrap role" in text.lower() or "model.admin" in text
     assert 'require_dockerignore_entry "data"' in text
@@ -197,6 +208,9 @@ def test_production_compose_script_pins_build_context_and_secrets_contract():
     assert "./scripts/production_compose.sh down" in remote_text
     assert "./scripts/production_compose.sh logs" in remote_text
     assert "./scripts/production_compose.sh config" in remote_text
+    assert "./scripts/gateway_from_deployment_targets.sh render --env-file" in remote_text
+    assert "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down" in remote_text
+    assert "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down --remove-orphans" not in remote_text
 
 
 def test_hardened_compose_pins_oidc_only_flags_without_provider_key_secret():
@@ -495,6 +509,26 @@ def test_remote_gateway_only_up_branch_redeploys_without_down():
     assert "docker compose -p '$remote_compose_project_name'" in deploy
     assert "com.docker.compose.project" in deploy
     assert "com.docker.compose.service" in deploy
+
+
+def test_remote_gateway_only_down_branch_does_not_remove_other_services():
+    repo_root = Path(__file__).resolve().parents[1]
+    deploy = (repo_root / "scripts" / "deploy_remote_stack.sh").read_text(encoding="utf-8")
+
+    marker = '  down)\n    if [[ "$shape" == "compose" ]]; then'
+    assert marker in deploy
+    start = deploy.index(marker)
+    end = deploy.index('  logs)', start)
+    down_branch = deploy[start:end]
+
+    assert "gateway_from_deployment_targets.sh render --env-file" in down_branch
+    assert "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down" in down_branch
+    assert "--remove-orphans" not in down_branch
+    assert "postgres" not in down_branch
+    assert "keycloak" not in down_branch
+    assert "ingress_public" not in down_branch
+    assert 'cleanup_runtime_secrets "$ssh_target"' in down_branch
+    assert "rm -rf out/deployment_targets_rendered" in down_branch
 
 
 def test_keycloak_admin_first_setup_tutorial_pins_setup_flow():

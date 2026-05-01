@@ -649,6 +649,7 @@ def process_chat_completion(
     forward_body: bytes | None = None,
     forward_content_type: str = "application/json",
     history_meta: dict[str, Any] | None = None,
+    requested_key_id: str | None = None,
 ) -> tuple[int, dict[str, Any] | bytes, dict[str, str]]:
     meta = history_meta if history_meta is not None else {}
 
@@ -690,7 +691,7 @@ def process_chat_completion(
         )
         return 403, {"error": {"message": "model_not_registered"}}, {"content-type": "application/json"}
 
-    requested_key_id = _requested_modelkeyguard_key_id(payload)
+    requested_key_id = (requested_key_id or "").strip() or _requested_modelkeyguard_key_id(payload)
     if requested_key_id:
         key_id, key_error = select_requested_key(
             policy,
@@ -1019,6 +1020,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
         route_model: str | None = None,
         deployment: str | None = None,
         x_goog_api_key: str | None = None,
+        x_modelkeyguard_key_id: str | None = None,
         stream: bool = False,
         operation: str | None = None,
     ):
@@ -1107,6 +1109,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             forward_body=adapter.forward_body(raw, payload, route_model=route_model, deployment=deployment, operation=operation),
             forward_content_type=adapter.forward_content_type(payload, route_model=route_model, deployment=deployment, operation=operation),
             history_meta=history_meta,
+            requested_key_id=x_modelkeyguard_key_id,
         )
 
         content_type = headers.get("content-type", "application/json")

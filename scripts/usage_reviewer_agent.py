@@ -21,6 +21,10 @@ def _safe_token() -> str:
     return _env("REVIEWER_SAFE_TOKEN", _env("KGW_TOKEN", _env("OPENAI_API_KEY", "")))
 
 
+def _key_id() -> str:
+    return _env("MODELKEYGUARD_KEY_ID", "")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="LangChain-based usage reviewer against the ModelKeyGuard gateway")
     parser.add_argument("--base-url", default=_env("KGW_BASE_URL", _env("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "http://127.0.0.1:8789")))
@@ -59,6 +63,7 @@ def main() -> int:
         safe_token=token,
         model=args.model,
         system_prompt=args.system_prompt,
+        key_id=_key_id(),
     )
     print("review_result:")
     print(json.dumps(result, indent=2, sort_keys=True))

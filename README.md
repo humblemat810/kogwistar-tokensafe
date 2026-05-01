@@ -684,6 +684,10 @@ console until you provision another admin path. If you need a truly fresh
 Keycloak admin after losing the existing one in a dev deployment, use
 `fresh-up` so Keycloak starts from an empty data directory.
 
+Note: `./scripts/production_compose.sh down` is not a data wipe. It removes
+containers and networks, but it preserves the mapped volumes. Use
+`fresh-up` or a dedicated reset path when you want to clear persisted data.
+
 The default compose realm import does not seed end-user demo accounts. If you
 want the beginner/test seed data, point
 `MODELKEYGUARD_KEYCLOAK_REALM_IMPORT_FILE` at

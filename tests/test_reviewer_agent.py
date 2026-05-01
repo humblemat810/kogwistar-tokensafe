@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import json
+import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
+import urllib.error
+import urllib.request
 
 from modelkeyguard.graph_state import GraphStateStore
 from modelkeyguard.reviewer_agent import (
@@ -11,6 +16,8 @@ from modelkeyguard.reviewer_agent import (
     advance_review_checkpoint,
     compute_review_status,
     main as review_status_main,
+    ReviewStatusClient,
+    run_langchain_reviewer,
 )
 
 
@@ -146,3 +153,84 @@ def test_review_status_cli_local_mode_uses_graph_key_file(tmp_path, monkeypatch,
     body = json.loads(output)
     assert body["should_review"] is True
     assert body["summary"]["conversation_count_since_last_review"] == 1
+
+
+def test_run_langchain_reviewer_forwards_key_id(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps({"message": {"content": "review ok"}}).encode("utf-8")
+
+    def fake_urlopen(req, timeout=20):
+        captured["url"] = req.full_url
+        captured["headers"] = dict(req.headers)
+        captured["body"] = json.loads(req.data.decode("utf-8"))
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    result = run_langchain_reviewer(
+        status={"should_review": True, "triggers": [], "summary": {}},
+        base_url="http://127.0.0.1:8789",
+        safe_token="safe-token",
+        model="gemma4:e2b",
+        key_id="key:fwd-ollama:gemma4-e2b",
+    )
+
+    assert result["key_id"] == "key:fwd-ollama:gemma4-e2b"
+    assert result["text"] == "review ok"
+    assert captured["url"] == "http://127.0.0.1:8789/api/chat"
+    assert "modelkeyguard" not in captured["body"]
+    headers = {str(k).lower(): v for k, v in captured["headers"].items()}
+    assert headers["x-modelkeyguard-key-id"] == "key:fwd-ollama:gemma4-e2b"
+    assert headers["authorization"] == "Bearer safe-token"
+
+
+def test_review_status_client_falls_back_to_admin_secret_on_bearer_401(monkeypatch):
+    calls: list[dict[str, str]] = []
+
+    class FakeHTTPError(urllib.error.HTTPError):
+        def __init__(self, url, code, msg, hdrs, fp):
+            super().__init__(url, code, msg, hdrs, fp)
+
+    class FakeResponse:
+        def __init__(self, body: dict[str, Any]):
+            self._body = json.dumps(body).encode("utf-8")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return self._body
+
+    def fake_urlopen(req, timeout=20):
+        headers = {str(k).lower(): v for k, v in req.headers.items()}
+        calls.append(headers)
+        if headers.get("authorization") == "Bearer stale-bearer":
+            raise FakeHTTPError(req.full_url, 401, "Unauthorized", None, None)
+        assert headers.get("x-modelkeyguard-admin-secret") == "secret-abc"
+        return FakeResponse({"ok": True})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+    client = ReviewStatusClient(
+        base_url="http://127.0.0.1:8789",
+        bearer_token="stale-bearer",
+        admin_secret="secret-abc",
+    )
+
+    status = client.status()
+
+    assert status == {"ok": True}
+    assert any("authorization" in call for call in calls)
+    assert any("x-modelkeyguard-admin-secret" in call for call in calls)

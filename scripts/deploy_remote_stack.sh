@@ -409,7 +409,8 @@ case "$command_name" in
     if [[ "$shape" == "compose" ]]; then
       remote_exec "$ssh_target" "export $compose_env_prefix; ./scripts/production_compose.sh down"
     else
-      remote_exec "$ssh_target" "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down --remove-orphans"
+      remote_exec "$ssh_target" "export $gateway_only_env_prefix; ./scripts/gateway_from_deployment_targets.sh render --env-file '${targets_file}'"
+      remote_exec "$ssh_target" "docker compose -p '$remote_compose_project_name' -f deploy/docker-compose.gateway-only.yml --env-file out/deployment_targets_rendered/gateway.env --env-file out/deployment_targets_rendered/gateway-compose.env down"
     fi
     cleanup_runtime_secrets "$ssh_target"
     if [[ "$keep_remote" -eq 0 ]]; then

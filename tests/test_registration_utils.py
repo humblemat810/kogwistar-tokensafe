@@ -246,6 +246,82 @@ def test_registration_seed_cli_uses_remote_admin_api_when_configured(tmp_path, m
     assert any(call["headers"].get("authorization") == "Bearer bearer-123" for call in calls)
 
 
+def test_registration_cli_prefers_local_gateway_when_gateway_is_ready(monkeypatch, capsys):
+    calls: list[dict[str, object]] = []
+    state: dict[str, set[str]] = {"users": set()}
+
+    class FakeResponse:
+        status = 200
+
+        def __init__(self, payload: dict[str, object] | None = None):
+            self.payload = json.dumps(payload or {}).encode("utf-8")
+
+        def read(self):
+            return self.payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(req, timeout=10):
+        if isinstance(req, str):
+            url = req
+            method = "GET"
+            headers = {}
+            body = {}
+        else:
+            url = req.full_url
+            method = req.get_method()
+            headers = {str(k).lower(): str(v) for k, v in req.header_items()}
+            body = json.loads(req.data.decode("utf-8")) if req.data else {}
+        calls.append({"url": url, "method": method, "headers": headers, "body": body})
+        if url.endswith("/healthz"):
+            return FakeResponse({"ok": True})
+        if url.endswith("/admin/policy/users"):
+            state["users"].add(str(body["user_id"]))
+            return FakeResponse({"ok": True, "user_id": body["user_id"]})
+        if url.endswith("/admin/policy/quotas/upsert"):
+            assert str(body["subject_id"]) in state["users"], "gateway parity should see the registered user"
+            return FakeResponse({"ok": True, "quota_policy_id": f"quota:{body['lane']}:{body['subject_id']}:{body['quota_name']}"})
+        raise AssertionError(f"unexpected remote url: {url}")
+
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "kogwistar_postgres")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_API_SECRET", "local-gateway-secret")
+    monkeypatch.setattr("modelkeyguard.registration.urllib.request.urlopen", fake_urlopen)
+
+    rc_user = registration_main(["register-user", "--user-id", "user:local-gateway", "--display-name", "Local Gateway User"])
+    rc_quota = registration_main(
+        [
+            "set-quota",
+            "--lane",
+            "user",
+            "--subject-id",
+            "user:local-gateway",
+            "--quota-name",
+            "month",
+            "--period",
+            "month",
+            "--max-usd",
+            "5",
+            "--max-tokens",
+            "50000",
+            "--max-requests",
+            "200",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert rc_user == 0
+    assert rc_quota == 0
+    assert any(call["url"].endswith("/healthz") for call in calls)
+    assert any(call["url"].endswith("/admin/policy/users") for call in calls)
+    assert any(call["url"].endswith("/admin/policy/quotas/upsert") for call in calls)
+    assert "user:local-gateway" in state["users"]
+    assert captured.out
+
+
 def test_modelkeyguard_top_level_registration_forwards_remote_admin_args(monkeypatch):
     import modelkeyguard.__main__ as cli_main
 
@@ -612,6 +688,14 @@ def test_registration_store_requires_graph_key_before_serious_local_backend(monk
 def test_store_backend_resolver_defaults_to_kogwistar_postgres(monkeypatch):
     monkeypatch.delenv("MODELKEYGUARD_STORE", raising=False)
     assert resolve_store_backend() == "kogwistar_postgres"
+
+
+def test_store_backend_resolver_rejects_jsonl_outside_dev_mode(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
+
+    with pytest.raises(ValueError, match="jsonl_toy_backend_requires_dev_mode"):
+        resolve_store_backend()
 
 
 def test_packaged_default_policy_is_available_without_checkout_config(tmp_path, monkeypatch):

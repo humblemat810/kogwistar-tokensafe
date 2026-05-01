@@ -26,6 +26,11 @@ def bool_env(name: str, default: bool = False) -> bool:
     return v.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def is_dev_mode(env_name: str | None = None) -> bool:
+    env = (env_name if env_name is not None else read_env_or_file("MODELKEYGUARD_ENV", "local") or "local").strip().lower()
+    return env not in {"prod", "production"}
+
+
 def _allow_dev_graph_key() -> bool:
     return os.getenv("MODELKEYGUARD_ALLOW_DEV_GRAPH_KEY", "").strip().lower() in {"1", "true", "yes", "on"}
 
