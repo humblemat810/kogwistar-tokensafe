@@ -125,3 +125,24 @@ def test_review_status_cli_local_mode_matches_core(tmp_path, monkeypatch, capsys
     body = json.loads(output)
     assert body["should_review"] is True
     assert body["summary"]["conversation_count_since_last_review"] == 1
+
+
+def test_review_status_cli_local_mode_uses_graph_key_file(tmp_path, monkeypatch, capsys):
+    now = datetime.now(timezone.utc)
+    graph_path = tmp_path / "graph.jsonl"
+    graph_key_file = tmp_path / "graph_key"
+    graph_key_file.write_text("test-reviewer-key-file-backed-32-bytes!", encoding="utf-8")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.delenv("MODELKEYGUARD_GRAPH_KEY", raising=False)
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY_FILE", str(graph_key_file))
+    graph = GraphStateStore(graph_path, app_key="test-reviewer-key-file-backed-32-bytes!")
+    _seed_review_state(graph, now=now)
+    policy_path = tmp_path / "policy.json"
+    policy_path.write_text(Path("config/gateway_policy.json").read_text(encoding="utf-8"), encoding="utf-8")
+
+    review_status_main(["--local", "--policy", str(policy_path)])
+    output = capsys.readouterr().out
+    body = json.loads(output)
+    assert body["should_review"] is True
+    assert body["summary"]["conversation_count_since_last_review"] == 1

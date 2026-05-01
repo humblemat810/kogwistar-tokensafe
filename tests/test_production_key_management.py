@@ -45,6 +45,30 @@ def test_settings_production_requires_real_graph_key(monkeypatch):
     assert any("GRAPH_KEY" in e for e in settings.validate_for_startup())
 
 
+def test_settings_production_runs_graph_key_startup_self_test(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "x" * 40)
+    settings = AppSettings.from_env()
+
+    def _broken_probe(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("modelkeyguard.settings.graph_key_startup_self_test", _broken_probe)
+
+    errors = settings.validate_for_startup()
+    assert any("startup self-test failed" in e for e in errors)
+
+
+def test_settings_production_rejects_graph_key_env_contract_violation(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "x" * 40)
+    settings = AppSettings.from_env()
+    monkeypatch.setattr("modelkeyguard.settings.scan_graph_key_env_contract", lambda: ["bad.py:1 directly accesses MODELKEYGUARD_GRAPH_KEY"])
+
+    errors = settings.validate_for_startup()
+    assert any("graph_key_env_contract_violation" in e for e in errors)
+
+
 def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):
     f = tmp_path / "graph_key"
     f.write_text("x" * 40, encoding="utf-8")

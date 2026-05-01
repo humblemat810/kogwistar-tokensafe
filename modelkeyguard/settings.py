@@ -5,6 +5,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from .graph_key_contract import graph_key_startup_self_test, scan_graph_key_env_contract
+
 
 def read_env_or_file(name: str, default: str | None = None, *, required: bool = False) -> str | None:
     file_name = f"{name}_FILE"
@@ -115,6 +117,19 @@ class AppSettings:
                 errors.append("MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY must be configured for production")
             if len(self.graph_key) < 32:
                 errors.append("MODELKEYGUARD_GRAPH_KEY must be at least 32 characters")
+            try:
+                self_test_error = graph_key_startup_self_test(self.graph_key)
+            except Exception as exc:
+                self_test_error = f"MODELKEYGUARD_GRAPH_KEY startup self-test failed: {exc}"
+            if self_test_error:
+                errors.append(self_test_error)
+            violations = scan_graph_key_env_contract()
+            if violations:
+                errors.append(
+                    "graph_key_env_contract_violation: "
+                    + "; ".join(violations[:5])
+                    + ("; ..." if len(violations) > 5 else "")
+                )
             if self.auth_mode not in {"keycloak", "local_or_keycloak"}:
                 errors.append("MODELKEYGUARD_AUTH_MODE must be keycloak or local_or_keycloak in production")
             if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:

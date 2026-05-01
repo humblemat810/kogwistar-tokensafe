@@ -726,6 +726,7 @@ def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypat
     fake_engine_core_module = ModuleType("kogwistar.engine_core")
     fake_engine_module = ModuleType("kogwistar.engine_core.engine")
     fake_engine_module.SearchIndexService = ExplodingSearchIndex
+    fake_engine_core_module.engine = fake_engine_module
 
     class FakeGraphKnowledgeEngine:
         def __init__(self, *, persist_directory, embedding_function, backend):
@@ -742,11 +743,22 @@ def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypat
             calls["dsn"] = dsn
             calls["embedding_dim"] = embedding_dim
 
+    for name in [name for name in sys.modules if name == "kogwistar" or name.startswith("kogwistar.")]:
+        monkeypatch.delitem(sys.modules, name, raising=False)
+
+    fake_kogwistar_module = ModuleType("kogwistar")
+    fake_kogwistar_module.__path__ = []  # type: ignore[attr-defined]
     fake_postgres_module = ModuleType("kogwistar.engine_core.engine_postgres")
     fake_postgres_module.EnginePostgresConfig = FakePostgresConfig
     fake_postgres_module.build_postgres_backend = lambda cfg: ("postgres-backend", "postgres-uow")
+    fake_postgres_module.__package__ = "kogwistar.engine_core"
+    fake_engine_core_module.__path__ = []  # type: ignore[attr-defined]
+    fake_engine_core_module.engine_postgres = fake_postgres_module
+    fake_engine_core_module.__package__ = "kogwistar"
+    fake_kogwistar_module.engine_core = fake_engine_core_module
 
     monkeypatch.setattr(kog_state, "enforce_installed_kogwistar_only", lambda: None)
+    monkeypatch.setitem(sys.modules, "kogwistar", fake_kogwistar_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core", fake_engine_core_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine", fake_engine_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine_postgres", fake_postgres_module)

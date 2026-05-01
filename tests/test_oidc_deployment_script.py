@@ -424,6 +424,9 @@ def test_remote_deployment_and_smoke_scripts_pin_required_workflow():
     assert "--shape MODE" in deploy
     assert "compose | gateway-only" in deploy
     assert "tmpfs-backed runtime directory" in deploy
+    assert "Each `up` refreshes that runtime snapshot from the repo secrets source of" in deploy
+    assert "truth, so the remote tmpfs always matches the current local secret files." in deploy
+    assert deploy.count('rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"') == 1
     assert "rm -rf '$remote_root_expanded/secrets'" in deploy
     assert "rm -rf '$remote_root_expanded/secrets' '$runtime_state_file' '$dir'" in deploy
     assert 'cleanup_runtime_secrets "$ssh_target"' in deploy

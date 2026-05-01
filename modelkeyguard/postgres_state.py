@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any, Iterable
 
 from .graph_state import GraphEdge, GraphNode, iso_now, period_bucket, resolve_graph_app_key, utc_now
-from .sealed_payload import open_json, seal_json
+from .sealed_payload import GRAPH_KEY_SENTINEL_NODE_ID, open_json, seal_json
 
 DEFAULT_DSN = os.getenv("MODELKEYGUARD_POSTGRES_DSN", "postgresql://modelguard:modelguard@localhost:5432/modelguard")
 QUOTA_PROJECTION_NAMESPACE = "modelkeyguard.quota_usage"
@@ -207,7 +207,12 @@ class PostgresGraphStateStore:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute("select id, kind, payload_sealed from graph_nodes")
             for node_id, kind, sealed in cur.fetchall():
-                self.nodes[node_id] = GraphNode(node_id, kind, open_json(dict(sealed), self.app_key))
+                payload = open_json(dict(sealed), self.app_key)
+                self.nodes[node_id] = GraphNode(node_id, kind, payload)
+                if node_id == GRAPH_KEY_SENTINEL_NODE_ID:
+                    from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+                    seed_graph_key_sentinel_from_storage_payload(payload, self.app_key)
             cur.execute("select id, kind, source, target, payload_sealed from graph_edges")
             for edge_id, kind, source, target, sealed in cur.fetchall():
                 self.edges[edge_id] = GraphEdge(edge_id, kind, source, target, open_json(dict(sealed), self.app_key))
@@ -219,6 +224,11 @@ class PostgresGraphStateStore:
                 self.projections[f"{namespace}:{key}"] = open_json(dict(sealed), self.app_key)
 
     def put_node(self, node_id: str, kind: str, payload: dict[str, Any]) -> None:
+        existing = self.nodes.get(node_id)
+        if node_id == GRAPH_KEY_SENTINEL_NODE_ID and existing is not None:
+            if existing.kind != kind or existing.payload != payload:
+                raise ValueError("graph key sentinel node cannot be overwritten")
+            return
         sealed = seal_json(payload, self.app_key)
         self.nodes[node_id] = GraphNode(node_id, kind, payload)
         with self._connect() as conn, conn.cursor() as cur:
@@ -445,8 +455,23 @@ class PostgresGraphStateStore:
     @classmethod
     def from_policy(cls, policy: dict[str, Any], dsn: str | None = None, app_key: str | None = None) -> "PostgresGraphStateStore":
         store = cls(dsn, app_key)
-        if store.nodes:
+        existing_nodes = [node_id for node_id in store.nodes if node_id != GRAPH_KEY_SENTINEL_NODE_ID]
+        if existing_nodes:
+            sentinel = store.nodes.get(GRAPH_KEY_SENTINEL_NODE_ID)
+            if sentinel is None:
+                raise ValueError("graph key sentinel node missing from existing graph state")
+            from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+            seed_graph_key_sentinel_from_storage_payload(sentinel.payload, store.app_key)
             return store
+        if GRAPH_KEY_SENTINEL_NODE_ID in store.nodes:
+            from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+            seed_graph_key_sentinel_from_storage_payload(store.nodes[GRAPH_KEY_SENTINEL_NODE_ID].payload, store.app_key)
+        else:
+            from .graph_key_contract import ensure_graph_key_sentinel_node
+
+            ensure_graph_key_sentinel_node(store, store.app_key)
         # same graph seed shape as the JSONL store
         store.put_node("policy:version:0001", "policy_version", {"version": 1, "source": "config/gateway_policy.json"})
         store.put_node("issuer:keycloak:modelguard", "issuer", {"name": policy.get("issuer", "keycloak:modelguard")})

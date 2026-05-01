@@ -9,6 +9,8 @@ set -euo pipefail
 # - a gateway-only split-target host that points at remote Postgres/Keycloak
 # Secrets are staged into a remote tmpfs-backed runtime directory so the remote
 # target can run the same scripts without leaving static secret files behind.
+# Each `up` refreshes that runtime snapshot from the repo secrets source of
+# truth, so the remote tmpfs always matches the current local secret files.
 # Use `down` to stop the stack and clean up the runtime secret staging.
 
 usage() {
@@ -200,17 +202,13 @@ stage_runtime_secrets() {
   local remote="$1"
   ssh "$remote" "mkdir -p '$remote_root_expanded' '$remote_root_expanded/out'"
   runtime_secret_dir="$(ssh "$remote" "if [[ -f '$runtime_state_file' ]]; then cat '$runtime_state_file'; fi" | tr -d '\r\n')"
-  if [[ -n "$runtime_secret_dir" ]] && ssh "$remote" "test -d '$runtime_secret_dir'"; then
-    if [[ -d "${repo_root}/secrets" ]]; then
-      rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
-    fi
-  else
+  if [[ -z "$runtime_secret_dir" ]] || ! ssh "$remote" "test -d '$runtime_secret_dir'"; then
     runtime_secret_dir="$(ssh "$remote" "mktemp -d /dev/shm/token-safe-secrets.XXXXXX")"
-    if [[ -d "${repo_root}/secrets" ]]; then
-      ssh "$remote" "mkdir -p '$runtime_secret_dir'"
-      rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
-    fi
     ssh "$remote" "printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
+  fi
+  if [[ -d "${repo_root}/secrets" ]]; then
+    ssh "$remote" "mkdir -p '$runtime_secret_dir'"
+    rsync -a --delete "${repo_root}/secrets/" "$remote":"$runtime_secret_dir/"
   fi
   ssh "$remote" "rm -rf '$remote_root_expanded/secrets' && ln -s '$runtime_secret_dir' '$remote_root_expanded/secrets' && printf '%s\n' '$runtime_secret_dir' > '$runtime_state_file'"
 }

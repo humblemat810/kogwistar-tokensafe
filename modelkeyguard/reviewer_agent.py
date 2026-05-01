@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from .analytics import KeycloakServiceAccount
-from .graph_state import GraphStateStore, iso_now
+from .graph_state import GraphStateStore, iso_now, resolve_graph_app_key
 from .services.history_ops import HISTORY_ACTIVE_WINDOW_KEY, HISTORY_INDEX_NS
 
 REVIEW_CHECKPOINT_NAMESPACE = "modelkeyguard.review.checkpoint"
@@ -473,8 +473,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.local:
         policy = json.loads(Path(args.policy).read_text(encoding="utf-8"))
         graph_path = Path(_env("MODELKEYGUARD_REVIEW_GRAPH_PATH", _env("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl")))
-        graph_key = _env("MODELKEYGUARD_GRAPH_KEY")
-        graph_state = GraphStateStore(graph_path, app_key=graph_key or None)
+        graph_state = GraphStateStore(graph_path, app_key=resolve_graph_app_key())
         print(json.dumps(compute_review_status(graph_state, policy), indent=2, sort_keys=True))
         return 0
 

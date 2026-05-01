@@ -8,7 +8,11 @@ import sys
 from pathlib import Path
 from typing import Any, Iterable
 
-from .sealed_payload import open_json, seal_json
+from .sealed_payload import (
+    GRAPH_KEY_SENTINEL_NODE_ID,
+    open_json,
+    seal_json,
+)
 from .settings import read_env_or_file
 
 DEFAULT_GRAPH_PATH = Path(os.getenv("MODELKEYGUARD_GRAPH_PATH", "out/modelkeyguard_graph.jsonl"))
@@ -132,6 +136,10 @@ class GraphStateStore:
             typ = rec["record_type"]
             if typ == "node":
                 self.nodes[rec["id"]] = GraphNode(rec["id"], rec["kind"], payload)
+                if rec["id"] == GRAPH_KEY_SENTINEL_NODE_ID:
+                    from .graph_key_contract import seed_graph_key_sentinel_from_storage_payload
+
+                    seed_graph_key_sentinel_from_storage_payload(payload, self.app_key)
             elif typ == "edge":
                 self.edges[rec["id"]] = GraphEdge(rec["id"], rec["kind"], rec["source"], rec["target"], payload)
             elif typ == "event":
@@ -145,6 +153,11 @@ class GraphStateStore:
             f.write(json.dumps(record, sort_keys=True) + "\n")
 
     def put_node(self, node_id: str, kind: str, payload: dict[str, Any]) -> None:
+        existing = self.nodes.get(node_id)
+        if node_id == GRAPH_KEY_SENTINEL_NODE_ID and existing is not None:
+            if existing.kind != kind or existing.payload != payload:
+                raise ValueError("graph key sentinel node cannot be overwritten")
+            return
         self.nodes[node_id] = GraphNode(node_id, kind, payload)
         self._append({"record_type": "node", "id": node_id, "kind": kind, "payload_sealed": seal_json(payload, self.app_key)})
 
@@ -301,8 +314,18 @@ class GraphStateStore:
 
             return KogwistarPostgresGraphStateStore.from_policy(policy, app_key=app_key)  # type: ignore[return-value]
         store = cls(path, app_key)
-        if store.nodes:
+        existing_nodes = [node_id for node_id in store.nodes if node_id != GRAPH_KEY_SENTINEL_NODE_ID]
+        if existing_nodes:
+            sentinel = store.nodes.get(GRAPH_KEY_SENTINEL_NODE_ID)
+            if sentinel is None:
+                raise ValueError("graph key sentinel node missing from existing graph state")
+            from .graph_key_contract import ensure_graph_key_sentinel_node
+
+            ensure_graph_key_sentinel_node(store, store.app_key)
             return store
+        from .graph_key_contract import ensure_graph_key_sentinel_node
+
+        ensure_graph_key_sentinel_node(store, store.app_key)
         store.put_node("policy:version:0001", "policy_version", {"version": 1, "source": "config/gateway_policy.json"})
         store.put_node("issuer:keycloak:modelguard", "issuer", {"name": policy.get("issuer", "keycloak:modelguard")})
         for user_id, user in policy.get("users", {}).items():

@@ -84,6 +84,16 @@ def test_003_sealed_payload_rejects_wrong_key():
         open_json(sealed, "key-b")
 
 
+def test_003a_sealed_payload_sentinel_check_runs_before_encrypt(monkeypatch):
+    def broken_open(*args, **kwargs):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("modelkeyguard.sealed_payload._open_json_impl", broken_open)
+
+    with pytest.raises(ValueError, match="sentinel payload did not decrypt to the expected text"):
+        seal_json({"secret": "x"}, "key-a")
+
+
 def test_004_sealed_payload_rejects_tampered_ciphertext():
     sealed = seal_json({"secret": "x"}, "key-a")
     sealed = dict(sealed)
