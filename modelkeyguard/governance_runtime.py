@@ -23,6 +23,18 @@ from .graph_state import GraphStateStore, resolve_graph_app_key
 
 USAGE_SCANNER_CHECKPOINT_NAMESPACE = "modelkeyguard.usage.scanner.checkpoint"
 USAGE_SCANNER_CHECKPOINT_KEY = "runtime"
+GOVERNANCE_SCANNER_HEALTH_NAMESPACE = "modelkeyguard.governance.scanner.health"
+
+DEFAULT_SCANNER_BACKOFF_INITIAL_SECONDS = 30.0
+DEFAULT_SCANNER_BACKOFF_MAX_SECONDS = 900.0
+DEFAULT_SCANNER_BREAKER_ENABLED = False
+DEFAULT_SCANNER_BREAKER_MAX_FAILURES = 3
+DEFAULT_SCANNER_ERROR_FAMILY_POLICY = {
+    "quota_limit": "retry",
+    "auth_denied": "retry",
+    "upstream_transient": "retry",
+    "runtime_internal": "retry",
+}
 
 
 def _env(name: str, default: str = "") -> str:
@@ -31,6 +43,33 @@ def _env(name: str, default: str = "") -> str:
 
 def _iso_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _coerce_bool(value: Any, default: bool) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    text = str(value or "").strip().lower()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def _coerce_float(value: Any, default: float) -> float:
+    try:
+        return float(value)
+    except Exception:
+        return default
+
+
+def _coerce_int(value: Any, default: int) -> int:
+    try:
+        return int(value)
+    except Exception:
+        return default
 
 
 def _parse_ts(value: Any) -> datetime:
@@ -235,6 +274,94 @@ def _runtime_mode(value: str) -> str:
     if mode not in {"sync", "async"}:
         raise ValueError(f"unsupported runtime mode: {value}")
     return mode
+
+
+@dataclass(frozen=True)
+class ScannerRuntimeConfig:
+    backoff_initial_seconds: float
+    backoff_max_seconds: float
+    breaker_enabled: bool
+    breaker_max_consecutive_failures: int
+    error_family_policy: dict[str, str]
+    projection_schema_version: int = 1
+
+
+def _merge_error_family_policy(raw: Any) -> dict[str, str]:
+    out = dict(DEFAULT_SCANNER_ERROR_FAMILY_POLICY)
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            family = str(key or "").strip()
+            mode = str(value or "").strip().lower()
+            if family and mode in {"retry", "terminal"}:
+                out[family] = mode
+    return out
+
+
+def load_scanner_runtime_config(*, policy: dict[str, Any], workflow_name: str) -> ScannerRuntimeConfig:
+    _ = workflow_name
+    scanner_cfg = policy.get("scanner") if isinstance(policy.get("scanner"), dict) else {}
+    backoff_cfg = scanner_cfg.get("backoff") if isinstance(scanner_cfg.get("backoff"), dict) else {}
+    breaker_cfg = scanner_cfg.get("breaker") if isinstance(scanner_cfg.get("breaker"), dict) else {}
+    retry_cfg = scanner_cfg.get("retry") if isinstance(scanner_cfg.get("retry"), dict) else {}
+    initial = _coerce_float(
+        _env(
+            "MODELKEYGUARD_SCANNER_BACKOFF_INITIAL_SECONDS",
+            str(backoff_cfg.get("initial_seconds", DEFAULT_SCANNER_BACKOFF_INITIAL_SECONDS)),
+        ),
+        DEFAULT_SCANNER_BACKOFF_INITIAL_SECONDS,
+    )
+    max_seconds = _coerce_float(
+        _env(
+            "MODELKEYGUARD_SCANNER_BACKOFF_MAX_SECONDS",
+            str(backoff_cfg.get("max_seconds", DEFAULT_SCANNER_BACKOFF_MAX_SECONDS)),
+        ),
+        DEFAULT_SCANNER_BACKOFF_MAX_SECONDS,
+    )
+    if max_seconds < initial:
+        max_seconds = initial
+    breaker_enabled = _coerce_bool(
+        _env(
+            "MODELKEYGUARD_SCANNER_BREAKER_ENABLED",
+            str(breaker_cfg.get("enabled", DEFAULT_SCANNER_BREAKER_ENABLED)),
+        ),
+        DEFAULT_SCANNER_BREAKER_ENABLED,
+    )
+    breaker_max = max(
+        1,
+        _coerce_int(
+            _env(
+                "MODELKEYGUARD_SCANNER_BREAKER_MAX_FAILURES",
+                str(breaker_cfg.get("max_consecutive_failures", DEFAULT_SCANNER_BREAKER_MAX_FAILURES)),
+            ),
+            DEFAULT_SCANNER_BREAKER_MAX_FAILURES,
+        ),
+    )
+    env_policy = _env("MODELKEYGUARD_SCANNER_ERROR_FAMILY_POLICY_JSON", "")
+    policy_blob: Any = retry_cfg.get("error_family_policy")
+    if env_policy:
+        try:
+            policy_blob = json.loads(env_policy)
+        except Exception:
+            pass
+    merged_policy = _merge_error_family_policy(policy_blob)
+    return ScannerRuntimeConfig(
+        backoff_initial_seconds=max(0.1, initial),
+        backoff_max_seconds=max(0.1, max_seconds),
+        breaker_enabled=breaker_enabled,
+        breaker_max_consecutive_failures=breaker_max,
+        error_family_policy=merged_policy,
+    )
+
+
+def classify_scanner_error(exc: Exception) -> str:
+    text = str(exc or "").lower()
+    if any(token in text for token in ("http 429", "quota_exceeded", "quota limit", "token_quota_exceeded", "key_quota_exceeded", "user_quota_exceeded")):
+        return "quota_limit"
+    if any(token in text for token in ("http 401", "http 403", "unauthorized", "forbidden", "missing_bearer_token", "invalid token", "permission_denied")):
+        return "auth_denied"
+    if any(token in text for token in ("http 500", "http 502", "http 503", "http 504", "timeout", "temporar", "unreachable", "connection reset")):
+        return "upstream_transient"
+    return "runtime_internal"
 
 
 def run_usage_analysis_runtime(
@@ -597,16 +724,135 @@ def _replace_named_projection(graph_state: GraphStateStore, namespace: str, key:
     graph_state.put_projection(f"{namespace}:{key}", payload)
 
 
+def load_scanner_loop_health(graph_state: GraphStateStore | None, *, workflow_name: str) -> dict[str, Any]:
+    fallback = {
+        "workflow_name": workflow_name,
+        "state": "run",
+        "last_error_family": "",
+        "last_error_message": "",
+        "consecutive_failures": 0,
+        "next_retry_at": "",
+        "breaker_tripped": False,
+        "last_success_ts": "",
+        "last_heartbeat_ts": "",
+        "projection_schema_version": 1,
+    }
+    if graph_state is None:
+        return fallback
+    payload = _get_named_projection(graph_state, GOVERNANCE_SCANNER_HEALTH_NAMESPACE, workflow_name) or {}
+    return {
+        "workflow_name": workflow_name,
+        "state": str(payload.get("state") or "run"),
+        "last_error_family": str(payload.get("last_error_family") or ""),
+        "last_error_message": str(payload.get("last_error_message") or ""),
+        "consecutive_failures": int(payload.get("consecutive_failures") or 0),
+        "next_retry_at": str(payload.get("next_retry_at") or ""),
+        "breaker_tripped": bool(payload.get("breaker_tripped") or False),
+        "last_success_ts": str(payload.get("last_success_ts") or ""),
+        "last_heartbeat_ts": str(payload.get("last_heartbeat_ts") or ""),
+        "projection_schema_version": int(payload.get("projection_schema_version") or 1),
+    }
+
+
+def save_scanner_loop_health(
+    graph_state: GraphStateStore | None,
+    *,
+    workflow_name: str,
+    state: str,
+    last_error_family: str,
+    last_error_message: str,
+    consecutive_failures: int,
+    next_retry_at: str,
+    breaker_tripped: bool,
+    last_success_ts: str,
+) -> dict[str, Any]:
+    payload = {
+        "workflow_name": workflow_name,
+        "state": str(state or "run"),
+        "last_error_family": str(last_error_family or ""),
+        "last_error_message": str(last_error_message or ""),
+        "consecutive_failures": int(max(0, consecutive_failures)),
+        "next_retry_at": str(next_retry_at or ""),
+        "breaker_tripped": bool(breaker_tripped),
+        "last_success_ts": str(last_success_ts or ""),
+        "last_heartbeat_ts": _iso_now(),
+        "projection_schema_version": 1,
+    }
+    if graph_state is not None:
+        _replace_named_projection(graph_state, GOVERNANCE_SCANNER_HEALTH_NAMESPACE, workflow_name, payload)
+    return payload
+
+
+def _scanner_backoff_seconds(*, config: ScannerRuntimeConfig, consecutive_failures: int) -> float:
+    step = max(0, int(consecutive_failures) - 1)
+    base = float(config.backoff_initial_seconds)
+    max_s = float(config.backoff_max_seconds)
+    return min(max_s, base * (2**step))
+
+
+def scanner_state_transition(
+    *,
+    workflow_name: str,
+    config: ScannerRuntimeConfig,
+    health: dict[str, Any],
+    run_error: Exception | None,
+) -> dict[str, Any]:
+    if run_error is None:
+        return {
+            "workflow_name": workflow_name,
+            "state": "run",
+            "last_error_family": "",
+            "last_error_message": "",
+            "consecutive_failures": 0,
+            "next_retry_at": "",
+            "breaker_tripped": False,
+            "last_success_ts": _iso_now(),
+            "retry_after_seconds": 0.0,
+            "terminal_stop": False,
+            "error_family_policy": "retry",
+        }
+
+    family = classify_scanner_error(run_error)
+    policy_mode = config.error_family_policy.get(family, "retry")
+    failures = int(health.get("consecutive_failures") or 0) + 1
+    retry_after = _scanner_backoff_seconds(config=config, consecutive_failures=failures)
+    next_retry_at = datetime.fromtimestamp(time.time() + retry_after, tz=timezone.utc).isoformat().replace("+00:00", "Z")
+    breaker_tripped = bool(
+        config.breaker_enabled
+        and policy_mode == "terminal"
+        and failures >= int(config.breaker_max_consecutive_failures)
+    )
+    return {
+        "workflow_name": workflow_name,
+        "state": "terminal_stop" if breaker_tripped else "backoff_wait",
+        "last_error_family": family,
+        "last_error_message": str(run_error),
+        "consecutive_failures": failures,
+        "next_retry_at": next_retry_at if not breaker_tripped else "",
+        "breaker_tripped": breaker_tripped,
+        "last_success_ts": str(health.get("last_success_ts") or ""),
+        "retry_after_seconds": float(max(0.1, retry_after)),
+        "terminal_stop": breaker_tripped,
+        "error_family_policy": policy_mode,
+    }
+
+
 def load_usage_scanner_checkpoint(graph_state: GraphStateStore | None) -> dict[str, Any]:
     if graph_state is None:
         return {
             "last_run_ts": "",
             "last_seen_request_id": "",
+            "last_heartbeat_ts": "",
+            "last_action": "",
+            "projection_schema_version": 1,
         }
     payload = _get_named_projection(graph_state, USAGE_SCANNER_CHECKPOINT_NAMESPACE, USAGE_SCANNER_CHECKPOINT_KEY) or {}
     return {
         "last_run_ts": str(payload.get("last_run_ts") or ""),
         "last_seen_request_id": str(payload.get("last_seen_request_id") or ""),
+        "last_heartbeat_ts": str(payload.get("last_heartbeat_ts") or ""),
+        "last_action": str(payload.get("last_action") or ""),
+        "projection_schema_version": int(payload.get("projection_schema_version") or 1),
     }
 
 
@@ -614,12 +860,20 @@ def save_usage_scanner_checkpoint(
     graph_state: GraphStateStore | None,
     *,
     latest_request_id: str,
+    last_action: str = "ran",
+    update_last_run: bool = True,
 ) -> dict[str, Any]:
+    now = _iso_now()
     payload = {
-        "last_run_ts": _iso_now(),
+        "last_run_ts": now if update_last_run else "",
         "last_seen_request_id": str(latest_request_id or ""),
+        "last_heartbeat_ts": now,
+        "last_action": str(last_action or ""),
         "projection_schema_version": 1,
     }
+    if not update_last_run and graph_state is not None:
+        prev = _get_named_projection(graph_state, USAGE_SCANNER_CHECKPOINT_NAMESPACE, USAGE_SCANNER_CHECKPOINT_KEY) or {}
+        payload["last_run_ts"] = str(prev.get("last_run_ts") or "")
     if graph_state is not None:
         _replace_named_projection(graph_state, USAGE_SCANNER_CHECKPOINT_NAMESPACE, USAGE_SCANNER_CHECKPOINT_KEY, payload)
     return payload

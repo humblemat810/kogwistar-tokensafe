@@ -4,11 +4,16 @@ from dataclasses import dataclass
 from typing import Any
 
 from modelkeyguard.governance_runtime import (
+    classify_scanner_error,
     evaluate_scanner_plugins,
+    load_scanner_loop_health,
+    load_scanner_runtime_config,
     load_usage_scanner_checkpoint,
     run_usage_analysis_runtime,
     run_usage_reviewer_runtime,
+    save_scanner_loop_health,
     save_usage_scanner_checkpoint,
+    scanner_state_transition,
     scanner_should_run,
 )
 
@@ -99,8 +104,105 @@ def test_usage_scanner_checkpoint_roundtrip():
     before = load_usage_scanner_checkpoint(graph)
     assert before["last_seen_request_id"] == ""
 
-    saved = save_usage_scanner_checkpoint(graph, latest_request_id="req-999")
+    saved = save_usage_scanner_checkpoint(graph, latest_request_id="req-999", last_action="ran", update_last_run=True)
     assert saved["last_seen_request_id"] == "req-999"
+    assert saved["last_action"] == "ran"
+    assert saved["last_run_ts"]
 
     after = load_usage_scanner_checkpoint(graph)
     assert after["last_seen_request_id"] == "req-999"
+
+    skipped = save_usage_scanner_checkpoint(graph, latest_request_id="req-999", last_action="skipped", update_last_run=False)
+    assert skipped["last_action"] == "skipped"
+    assert skipped["last_run_ts"] == saved["last_run_ts"]
+
+
+def test_scanner_loop_health_roundtrip():
+    graph = _FakeGraphState()
+    before = load_scanner_loop_health(graph, workflow_name="usage_reviewer")
+    assert before["state"] == "run"
+    assert before["consecutive_failures"] == 0
+
+    saved = save_scanner_loop_health(
+        graph,
+        workflow_name="usage_reviewer",
+        state="backoff_wait",
+        last_error_family="auth_denied",
+        last_error_message="HTTP 401",
+        consecutive_failures=2,
+        next_retry_at="2026-05-02T00:00:00Z",
+        breaker_tripped=False,
+        last_success_ts="2026-05-01T00:00:00Z",
+    )
+    assert saved["last_error_family"] == "auth_denied"
+    after = load_scanner_loop_health(graph, workflow_name="usage_reviewer")
+    assert after["consecutive_failures"] == 2
+    assert after["state"] == "backoff_wait"
+
+
+def test_classify_scanner_error_families():
+    assert classify_scanner_error(RuntimeError("review model call failed with HTTP 429: user_quota_exceeded")) == "quota_limit"
+    assert classify_scanner_error(RuntimeError("review model call failed with HTTP 401: missing_bearer_token")) == "auth_denied"
+    assert classify_scanner_error(RuntimeError("upstream timeout during model call")) == "upstream_transient"
+    assert classify_scanner_error(RuntimeError("unexpected resolver failure")) == "runtime_internal"
+
+
+def test_scanner_transition_success_resets_failures():
+    config = load_scanner_runtime_config(policy={}, workflow_name="usage_analysis")
+    out = scanner_state_transition(
+        workflow_name="usage_analysis",
+        config=config,
+        health={"consecutive_failures": 5, "last_success_ts": ""},
+        run_error=None,
+    )
+    assert out["state"] == "run"
+    assert out["consecutive_failures"] == 0
+    assert out["terminal_stop"] is False
+    assert out["last_success_ts"]
+
+
+def test_scanner_transition_backoff_without_breaker():
+    config = load_scanner_runtime_config(policy={}, workflow_name="usage_reviewer")
+    out = scanner_state_transition(
+        workflow_name="usage_reviewer",
+        config=config,
+        health={"consecutive_failures": 2, "last_success_ts": ""},
+        run_error=RuntimeError("HTTP 401 Unauthorized"),
+    )
+    assert out["state"] == "backoff_wait"
+    assert out["consecutive_failures"] == 3
+    assert out["retry_after_seconds"] >= 120.0
+    assert out["terminal_stop"] is False
+
+
+def test_scanner_transition_breaker_terminal_when_enabled(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BREAKER_ENABLED", "1")
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BREAKER_MAX_FAILURES", "3")
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_ERROR_FAMILY_POLICY_JSON", '{"auth_denied":"terminal"}')
+    config = load_scanner_runtime_config(policy={}, workflow_name="usage_reviewer")
+    out = scanner_state_transition(
+        workflow_name="usage_reviewer",
+        config=config,
+        health={"consecutive_failures": 2, "last_success_ts": ""},
+        run_error=RuntimeError("HTTP 401 Unauthorized"),
+    )
+    assert out["terminal_stop"] is True
+    assert out["state"] == "terminal_stop"
+    assert out["breaker_tripped"] is True
+
+
+def test_runtime_config_defaults_and_env_override(monkeypatch):
+    cfg_default = load_scanner_runtime_config(policy={}, workflow_name="usage_analysis")
+    assert cfg_default.backoff_initial_seconds == 30.0
+    assert cfg_default.backoff_max_seconds == 900.0
+    assert cfg_default.breaker_enabled is False
+
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BACKOFF_INITIAL_SECONDS", "45")
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BACKOFF_MAX_SECONDS", "600")
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BREAKER_ENABLED", "1")
+    monkeypatch.setenv("MODELKEYGUARD_SCANNER_BREAKER_MAX_FAILURES", "7")
+    cfg_override = load_scanner_runtime_config(policy={}, workflow_name="usage_analysis")
+    assert cfg_override.backoff_initial_seconds == 45.0
+    assert cfg_override.backoff_max_seconds == 600.0
+    assert cfg_override.breaker_enabled is True
+    assert cfg_override.breaker_max_consecutive_failures == 7

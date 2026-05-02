@@ -113,6 +113,19 @@ The script prints:
 If you want to force a review note even when the thresholds have not fired yet,
 pass `--force`.
 
+For loop-mode hardening (backoff/breaker/state semantics), see
+[`docs_governance_runtime.md`](../docs_governance_runtime.md). The reviewer
+script supports:
+
+- `--loop`
+- `--interval-seconds`
+- `--max-iterations`
+- `--scanner-backoff-initial-seconds`
+- `--scanner-backoff-max-seconds`
+- `--scanner-breaker-enabled`
+- `--scanner-breaker-max-failures`
+- `--scanner-error-family-policy-json`
+
 <p align="center">
   <img src="../assets/usage_monitor.png" alt="ModelKeyGuard usage monitor dashboard" width="980" />
 </p>

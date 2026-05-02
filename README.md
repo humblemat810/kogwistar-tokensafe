@@ -127,6 +127,7 @@ See [`docs_langchain_provider_native_smoke.md`](docs_langchain_provider_native_s
 
 See [`docs_schema_semantics.md`](docs_schema_semantics.md) for the current entity relationship and storage/projection schema (including Mermaid diagrams and Kogwistar-compatibility mapping).
 See [`docs_postgres_schema.md`](docs_postgres_schema.md) for the strict Postgres table-level view (PK/index/logical FK mapping + ERD source).
+See [`docs_governance_runtime.md`](docs_governance_runtime.md) for runtime-native scanner workflows, backoff/breaker safety, checkpoint/CDC semantics, and operator runbook details.
 
 
 ```text
@@ -143,6 +144,19 @@ ModelKeyGuard Gateway
 Provider API key resolved inside gateway only
 ```
 # Core concepts
+## Governance runtime loops
+
+The usage-analysis and reviewer scanners are two separate workflows sharing one runtime subsystem in [`modelkeyguard/governance_runtime.py`](modelkeyguard/governance_runtime.py).
+
+- default one-shot behavior remains unchanged
+- loop mode uses exponential backoff (`30s -> 60s -> 120s -> 300s`, cap `15m`)
+- circuit breaker is optional and off by default
+- loop health is persisted as named projections for deterministic restart behavior
+
+Use `--scanner-backoff-initial-seconds`, `--scanner-backoff-max-seconds`, `--scanner-breaker-enabled`, `--scanner-breaker-max-failures`, and `--scanner-error-family-policy-json` in both scanner scripts for operator overrides.
+
+For architecture and swimlane details, see [`docs_governance_runtime.md`](docs_governance_runtime.md).
+
 ## What is graph-native here?
 
 The app has one authoritative graph with three logical lanes. Hot serving state

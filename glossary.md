@@ -38,6 +38,18 @@ Rule of thumb: if you are in the OAuth world, think of Keycloak as the
 identity provider, the gateway as the policy and model gate, and `SAFE_TOKEN`
 as the ModelKeyGuard-issued token that a client sends to the model endpoint.
 
+## Governance runtime terms
+
+| Term | Meaning | Common confusion |
+| --- | --- | --- |
+| `scanner` | A loop-capable governance workflow (`usage_analysis` or `usage_reviewer`) that can run one-shot or in polling mode. | It is not the same as the authoritative graph data itself. |
+| `backoff_wait` | Loop state after a failed run where the next attempt is delayed by exponential backoff. | It is not a hard stop; it is a timed retry posture. |
+| `terminal_stop` | Loop state used when breaker policy is enabled and failure thresholds are exceeded. | This does not mean the whole gateway is down; it means that scanner loop exited intentionally. |
+| `circuit breaker` | Optional guard that halts a scanner after repeated terminal-policy failures. | Breaker is off by default; retry-only behavior is still valid. |
+| `checkpoint projection` | Rebuildable named projection storing scanner progress (`last_seen_request_id`, `last_run_ts`, heartbeat fields). | It is serving state, not an authoritative event log. |
+| `loop health projection` | Rebuildable named projection storing loop safety metadata (`consecutive_failures`, `next_retry_at`, `last_error_family`). | It is for deterministic restart/observability, not policy authority. |
+| `CDC window` | The delta between checkpoint and latest graph/history/usage records that scanner logic inspects. | It is not a database replication slot; it is application-level change-window semantics. |
+
 ## Core terms
 
 | Term | Meaning | Common confusion |
