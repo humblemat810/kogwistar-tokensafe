@@ -16,7 +16,13 @@
 
 <p align="center"><a href="#full-tutorial-ladder">Explore tutorials</a> • <a href="#60-second-quickstart">Quickstart</a> • <a href="tutorial/README.md">Docs index</a></p>
 
-ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities.
+ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities. **Mon**itor and **Guard** your **key**s
+
+Naming convention in this repo:
+
+- canonical technical name: **Kogwistar ModelKeyGuard**
+- Python package/import/CLI: `modelkeyguard`
+- brand/logo shorthand: **MonkeyGuard** (presentation/marketing only)
 
 Clients never receive the real OpenAI/Azure/Anthropic key. They receive a short-lived Keycloak token or local `kgw_*` token, call this gateway with an OpenAI-compatible  (Or Gemini/Ollama Compatible, or extend your routes), and the gateway verifies identity, checks [Kogwistar](https://github.com/humblemat810/kogwistar)-style ACL, checks named projections, resolves provider key material inside the gateway, forwards the request, and appends audit/usage graph events.
 

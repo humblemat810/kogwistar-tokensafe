@@ -10,6 +10,9 @@ It assumes you already created:
 - a provider key for the Ollama-shaped route
 - the safe token issued for `agent:doc-ingestor`
 
+If you just finished the previous tutorial, the handoff section is:
+[`keycloak_admin_first_setup.md#next-run-the-reviewer-agent`](keycloak_admin_first_setup.md#next-run-the-reviewer-agent).
+
 The reviewer is split into two parts:
 
 1. a query path that reads rebuildable named projections and history state
@@ -27,6 +30,13 @@ human or service account would:
 
 This walkthrough assumes you already minted `REVIEWER_SAFE_TOKEN` in
 [`keycloak_admin_first_setup.md`](keycloak_admin_first_setup.md).
+
+Handoff sanity check from the previous tutorial:
+
+```bash
+test -n "${REVIEWER_SAFE_TOKEN:-}" || echo "missing REVIEWER_SAFE_TOKEN"
+./scripts/get_agent_token.sh modelguard-usage-agent usage-agent-secret >/dev/null && echo "usage-agent token mint ok"
+```
 
 For the read-only review status query, the reviewer identity must have the
 `model.usage.read` role, or the equivalent read claim in your OAuth provider.

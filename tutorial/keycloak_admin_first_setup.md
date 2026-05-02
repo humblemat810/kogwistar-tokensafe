@@ -737,5 +737,22 @@ reviewer safe token minted for `agent:usage-reviewer`, not the doc-ingestor
 token from step 7. It reads review triggers from rebuildable named projections
 instead of from an authoritative review table.
 
+Before you jump to the next tutorial, confirm these are already done here:
+
+- Keycloak service account client `modelguard-usage-agent` exists
+- `modelguard-usage-agent` has `model.usage.read` role
+- ModelKeyGuard principal `agent:usage-reviewer` exists
+- `REVIEWER_SAFE_TOKEN` was minted for `agent:usage-reviewer`
+- a forwarded Ollama key is shared to `agent:usage-reviewer`
+
+Quick env handoff for the next tutorial:
+
+```bash
+export MODELKEYGUARD_GATEWAY_PUBLIC_URL='http://127.0.0.1:8789'
+export KEYCLOAK_URL='http://127.0.0.1:8080'
+export REVIEWER_SAFE_TOKEN="${REVIEWER_SAFE_TOKEN}"
+export KGW_OLLAMA_MODEL='gemma4:e2b'
+```
+
 If you follow the next tutorial directly, it will mint that reviewer token in
-its own step before running the reviewer helper.
+its own step before running the reviewer helper when you choose to do it there.
