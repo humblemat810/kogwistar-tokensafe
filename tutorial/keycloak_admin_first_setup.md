@@ -731,6 +731,8 @@ If you want to continue from this setup into the operational reviewer flow,
 use the next tutorial:
 
 - [`usage_reviewer_agent.md`](usage_reviewer_agent.md)
+- or the faster local governance ladder:
+  [`governance_quickstart_deterministic_jsonl.md`](governance_quickstart_deterministic_jsonl.md)
 
 That walkthrough uses the gateway's Ollama-shaped route with a separate
 reviewer safe token minted for `agent:usage-reviewer`, not the doc-ingestor

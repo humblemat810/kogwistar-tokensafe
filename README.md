@@ -31,6 +31,8 @@ For a plain-English explanation of the runnable shell entrypoints, see
 [`scripts/README.md`](scripts/README.md).
 For a plain-English glossary of the terms, tokens, and env vars that keep
 coming up in tutorials, see [`glossary.md`](glossary.md).
+For an architecture decision matrix versus adjacent tools, see
+[`docs_monkeyguard_vs_alternatives.md`](docs_monkeyguard_vs_alternatives.md).
 
 If you install the package from PyPI or a wheel, the default policy graph is
 bundled into the package, so the `modelkeyguard` CLI can still start without a
@@ -109,6 +111,20 @@ In case of key-leakage, your cloud credit exploded. Big providers such as Micros
 ### Outsourcing token as a business
 Just issue your keys and connect to your own payment portal
 
+## MonkeyGuard vs other solutions
+
+If you are deciding between MonkeyGuard and adjacent layers (API gateway, secret
+manager, policy engine, analytics), use:
+[`docs_monkeyguard_vs_alternatives.md`](docs_monkeyguard_vs_alternatives.md).
+
+Short version:
+
+- MonkeyGuard is strongest when you need provider-key mediation + request-path
+  quota/policy + governance review loops.
+- API gateway remains useful at the edge (ingress, TLS, traffic controls).
+- Secret manager remains useful for long-lived secret lifecycle.
+- Many production teams run these layers together.
+
 ## Full tutorial ladder
 
 For the fastest guide, start with the glanceable tutorial index:
@@ -125,6 +141,8 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 6. production deployment notes.
 
 See [`tutorial/slow_quickstart_cli_gui_parity.md`](tutorial/slow_quickstart_cli_gui_parity.md) for a slower, retry-safe CLI and GUI parity walkthrough.
+See [`tutorial/governance_quickstart_deterministic_jsonl.md`](tutorial/governance_quickstart_deterministic_jsonl.md) for a fast preseeded JSONL governance quickstart for both operators and coding agents.
+Then continue to [`tutorial/governance_quickstart_llm_migration.md`](tutorial/governance_quickstart_llm_migration.md) to migrate from deterministic reviewer mode to LLM-driven reviewer mode with isolated reviewer token/quota semantics.
 See [`tutorial/keycloak_admin_first_setup.md`](tutorial/keycloak_admin_first_setup.md) for the first real Keycloak-admin setup path: create `alice`, register `user:alice` and `agent:doc-ingestor`, set quotas, choose a provider key, and add a reviewer account. The next tutorial is [`tutorial/usage_reviewer_agent.md`](tutorial/usage_reviewer_agent.md).
 See [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md) for the copy-paste installed-Kogwistar managed Postgres setup, including no-JSONL graph artifact verification.
 See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_azure_real_setup.md) for final-dev guard setup with real Azure token pathway, PostgreSQL-backed state, and real smoke tests (completion + LangChain structured output).

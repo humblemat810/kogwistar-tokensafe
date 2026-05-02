@@ -13,6 +13,11 @@ It assumes you already created:
 If you just finished the previous tutorial, the handoff section is:
 [`keycloak_admin_first_setup.md#next-run-the-reviewer-agent`](keycloak_admin_first_setup.md#next-run-the-reviewer-agent).
 
+If you want a faster local-only ramp before this full walkthrough, start from:
+[`governance_quickstart_deterministic_jsonl.md`](governance_quickstart_deterministic_jsonl.md),
+then continue to:
+[`governance_quickstart_llm_migration.md`](governance_quickstart_llm_migration.md).
+
 The reviewer is split into two parts:
 
 1. a query path that reads rebuildable named projections and history state
