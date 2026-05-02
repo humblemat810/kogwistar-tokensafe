@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .analytics import KeycloakServiceAccount, UsageAnalyticsClient
+from .governance_runtime import run_usage_analysis_runtime
 
 
 def _env(name: str, default: str = "") -> str:
@@ -31,6 +32,7 @@ class UsageAnalysisAgent:
     user_subjects: list[str] = field(default_factory=list)
     principal_subjects: list[str] = field(default_factory=list)
     key_subjects: list[str] = field(default_factory=list)
+    runtime_mode: str = "sync"
 
     @classmethod
     def from_env(cls) -> "UsageAnalysisAgent":
@@ -66,17 +68,22 @@ class UsageAnalysisAgent:
                 "MODELKEYGUARD_ANALYTICS_SUBJECT_KEYS",
                 _env("MODELKEYGUARD_ANALYTICS_SUBJECT_KEY", "key:openai:prod"),
             ),
+            runtime_mode=_env("MODELKEYGUARD_RUNTIME_MODE", "sync"),
         )
 
     def run(self) -> dict[str, Any]:
-        # Breakpoint here if you want to add enrichment, scoring, alerting, or
-        # an LLM-driven decision step after raw usage data is collected.
-        return {
-            "base_url": self.client.base_url,
-            "time_range": self.time_range,
-            "bucket": self.bucket,
-            "results": self.collect(),
-        }
+        # Runtime-native execution path backed by Kogwistar WorkflowRuntime /
+        # AsyncWorkflowRuntime primitives.
+        return run_usage_analysis_runtime(
+            client=self.client,
+            base_url=self.client.base_url,
+            time_range=self.time_range,
+            bucket=self.bucket,
+            user_subjects=list(self.user_subjects),
+            principal_subjects=list(self.principal_subjects),
+            key_subjects=list(self.key_subjects),
+            runtime_mode=self.runtime_mode,
+        )
 
     def render(self) -> str:
         return json.dumps(self.run(), indent=2, sort_keys=True)

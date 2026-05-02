@@ -5,11 +5,20 @@ import argparse
 import json
 import os
 import sys
+import time
 
+from modelkeyguard.governance_runtime import (
+    evaluate_scanner_plugins,
+    recent_history_text,
+    run_usage_reviewer_runtime,
+    scanner_should_run,
+    try_load_policy,
+    try_open_graph_state,
+)
 from modelkeyguard.reviewer_agent import (
     DEFAULT_REVIEW_SYSTEM_PROMPT,
     ReviewStatusClient,
-    run_langchain_reviewer,
+    run_langchain_reviewer,  # kept as explicit dependency anchor for tutorial/tests
 )
 
 
@@ -54,6 +63,10 @@ def main() -> int:
     parser.add_argument("--advance-checkpoint", action="store_true", help="advance the named review checkpoint after a successful run")
     parser.add_argument("--reviewed-by", default=_env("MODELKEYGUARD_REVIEWED_BY", "reviewer-agent"))
     parser.add_argument("--system-prompt", default=DEFAULT_REVIEW_SYSTEM_PROMPT)
+    parser.add_argument("--runtime-mode", choices=["sync", "async"], default=_env("MODELKEYGUARD_RUNTIME_MODE", "sync"))
+    parser.add_argument("--loop", action="store_true", help="poll review status and run reviewer periodically")
+    parser.add_argument("--interval-seconds", type=float, default=float(_env("MODELKEYGUARD_SCANNER_INTERVAL_SECONDS", "30")))
+    parser.add_argument("--max-iterations", type=int, default=0, help="0 means unbounded when --loop is set")
     args = parser.parse_args()
 
     status_client = ReviewStatusClient.from_env()
@@ -65,14 +78,58 @@ def main() -> int:
         timeout_seconds=status_client.timeout_seconds,
     )
 
-    status = status_client.status()
-    print("review_status:")
-    print(json.dumps(status, indent=2, sort_keys=True))
+    policy = try_load_policy()
+    graph_state = try_open_graph_state()
+    iterations = 0
+    while True:
+        status = status_client.status()
+        print("review_status:")
+        print(json.dumps(status, indent=2, sort_keys=True))
 
-    if not args.force and not bool(status.get("should_review")):
-        print("reviewer_action: skipped (thresholds not met)")
-        return 0
+        plugins = evaluate_scanner_plugins(
+            policy=policy,
+            workflow_name="usage_reviewer",
+            status=status,
+            recent_text=recent_history_text(graph_state),
+        )
+        should_run, _reason = scanner_should_run(
+            status=status,
+            force=bool(args.force),
+            plugin_results=plugins,
+            usage_checkpoint=None,
+        )
+        if not should_run:
+            print("reviewer_action: skipped (thresholds not met)")
+        else:
+            result = _run_reviewer_once(args, status=status)
+            print("review_result:")
+            print(json.dumps(result, indent=2, sort_keys=True))
 
+            if args.advance_checkpoint:
+                try:
+                    checkpoint = status_client.checkpoint(
+                        {
+                            "reviewed_by": args.reviewed_by,
+                            "review_summary": result.get("text", ""),
+                            "status": status,
+                        }
+                    )
+                    print("checkpoint:")
+                    print(json.dumps(checkpoint, indent=2, sort_keys=True))
+                except Exception as exc:
+                    print(f"warning: review checkpoint not advanced: {exc}", file=sys.stderr)
+
+        iterations += 1
+        if not args.loop:
+            break
+        if args.max_iterations > 0 and iterations >= args.max_iterations:
+            break
+        time.sleep(max(0.1, float(args.interval_seconds)))
+
+    return 0
+
+
+def _run_reviewer_once(args: argparse.Namespace, *, status: dict[str, object]) -> dict[str, object]:
     candidates = _review_model_token_candidates()
     if not candidates:
         print("error: missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call", file=sys.stderr)
@@ -80,7 +137,7 @@ def main() -> int:
             "hint: export REVIEWER_SAFE_TOKEN (recommended), or KGW_TOKEN/SAFE_TOKEN/OPENAI_API_KEY/MODELKEYGUARD_BEARER_TOKEN",
             file=sys.stderr,
         )
-        return 2
+        raise SystemExit(2)
 
     result: dict[str, object] | None = None
     last_error: Exception | None = None
@@ -89,13 +146,14 @@ def main() -> int:
         if idx > 0:
             print(f"warning: retrying reviewer model call with token from {token_source}", file=sys.stderr)
         try:
-            result = run_langchain_reviewer(
+            result = run_usage_reviewer_runtime(
                 status=status,
                 base_url=args.base_url,
                 safe_token=token,
                 model=args.model,
                 system_prompt=args.system_prompt,
                 key_id=key_id,
+                runtime_mode=args.runtime_mode,
             )
             break
         except RuntimeError as exc:
@@ -107,24 +165,7 @@ def main() -> int:
         if last_error is not None:
             raise last_error
         raise RuntimeError("reviewer model call failed before producing a result")
-    print("review_result:")
-    print(json.dumps(result, indent=2, sort_keys=True))
-
-    if args.advance_checkpoint:
-        try:
-            checkpoint = status_client.checkpoint(
-                {
-                    "reviewed_by": args.reviewed_by,
-                    "review_summary": result.get("text", ""),
-                    "status": status,
-                }
-            )
-            print("checkpoint:")
-            print(json.dumps(checkpoint, indent=2, sort_keys=True))
-        except Exception as exc:
-            print(f"warning: review checkpoint not advanced: {exc}", file=sys.stderr)
-
-    return 0
+    return result
 
 
 if __name__ == "__main__":

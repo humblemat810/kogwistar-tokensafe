@@ -100,7 +100,7 @@ Support Keycloak/OAuth/OIDC access control. Users can adopt other OIDC providers
 #### Enemey of Microsoft, Google and AWS
 In case of key-leakage, your cloud credit exploded. Big providers such as Microsoft Azure, Google Cloud, AWS, never want you have it to control damage (and limit their revenue) in case of leakage. They earn less and are not incentivise to create such product in their cloud for years and now you have **Enterprise-Grade Quality Infrastructure** for free.
 
-### You can open your LLM token wrapper outsourcing business by reselling token usage with token limited keys
+### Outsourcing token as a business
 Just issue your keys and connect to your own payment portal
 
 ## Full tutorial ladder
