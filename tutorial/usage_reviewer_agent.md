@@ -113,6 +113,11 @@ The script prints:
 If you want to force a review note even when the thresholds have not fired yet,
 pass `--force`.
 
+<p align="center">
+  <img src="../assets/usage_monitor.png" alt="ModelKeyGuard usage monitor dashboard" width="980" />
+</p>
+<p align="center"><em>Usage monitor page (`/admin/usage`) used by operators alongside reviewer triggers.</em></p>
+
 ## 3. Acknowledge the checkpoint
 
 The checkpoint projection advances when the review has been acknowledged. That

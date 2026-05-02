@@ -487,6 +487,11 @@ provider secret.
 If you prefer the browser, open `http://127.0.0.1:8789/admin/keys` and the
 table view shows the same list.
 
+<p align="center">
+  <img src="../assets/keymanagementpanel.png" alt="ModelKeyGuard admin key management panel" width="980" />
+</p>
+<p align="center"><em>Same key registration flow in the admin UI (`/admin/keys`).</em></p>
+
 That gives you one provider route for the same agent, regardless of the backend
 flavor you pick.
 

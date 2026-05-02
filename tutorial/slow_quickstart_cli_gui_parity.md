@@ -105,6 +105,11 @@ GUI:
 - create/rotate/revoke keys using forms
 - first visit prompts admin login (`/admin/session`) using `MODELKEYGUARD_ADMIN_API_SECRET`
 
+<p align="center">
+  <img src="../assets/keymanagementpanel.png" alt="Admin key management panel in GUI parity flow" width="980" />
+</p>
+<p align="center"><em>GUI parity for key lifecycle operations (`/admin/keys`).</em></p>
+
 Parity:
 
 - both use the same backend routes: `/admin/keys*`
@@ -131,6 +136,11 @@ GUI:
 - view charts and event table
 - filter by subject and time range
 - use `http://127.0.0.1:8789/admin/history` to inspect exact encrypted request/response history with filters.
+
+<p align="center">
+  <img src="../assets/usage_monitor.png" alt="Usage monitor in GUI parity flow" width="980" />
+</p>
+<p align="center"><em>Interactive usage monitor (`/admin/usage`) for operator investigations.</em></p>
 
 Data API behind GUI:
 

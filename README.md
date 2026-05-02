@@ -18,7 +18,7 @@
 
 ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities.
 
-Clients never receive the real OpenAI/Azure/Anthropic key. They receive a short-lived Keycloak token or local `kgw_*` token, call this gateway with an OpenAI-compatible API, and the gateway verifies identity, checks Kogwistar-style ACL, checks named projections, resolves provider key material inside the gateway, forwards the request, and appends audit/usage graph events.
+Clients never receive the real OpenAI/Azure/Anthropic key. They receive a short-lived Keycloak token or local `kgw_*` token, call this gateway with an OpenAI-compatible  (Or Gemini/Ollama Compatible, or extend your routes), and the gateway verifies identity, checks [Kogwistar](https://github.com/humblemat810/kogwistar)-style ACL, checks named projections, resolves provider key material inside the gateway, forwards the request, and appends audit/usage graph events.
 
 Repository-wide invariants are recorded in [`REPO_INVARIANTS.md`](REPO_INVARIANTS.md).
 For a plain-English explanation of the runnable shell entrypoints, see
@@ -83,6 +83,25 @@ export MODELKEYGUARD_DRY_RUN=0
 export OPENAI_API_KEY='sk-...'
 ./scripts/start_gateway.sh
 ```
+
+## Features
+
+### Powered by [Kogwistar Operating system](https://github.com/humblemat810/kogwistar)
+
+Strong invariants and engineering semantics guaranteed by AI operating system, MonkeyGuard is a part of the Kogwistar operating ecosystem. Kogwistar is an operating system covering memory, runtime, substrate, primitives. The reviewer agent is powered by Kogwistar operating system primitives, runtime, hypergraph memory, access control and now Key protection governance. Kogwistar is already driving [OpenClaw Governance layer](https://github.com/humblemat810/cloistar), System boundaries are strongly covered by [pydantic-extension](https://github.com/humblemat810/pydantic-extension). Several application layers are provided such as [generic hypergraph document parser](https://github.com/humblemat810/kg-doc-parser), [LLM-wiki invented (at least 1 week) before Andrey Karpathy llm-wiki hype](https://github.com/humblemat810/kogwistar-llm-wiki) and a [full python stack htmx + pyodide simple chatbot](https://github.com/humblemat810/kogwistar-chat).
+
+Using Kogwistar AI Operating System means strong core adoption of CR only with rebuildable projection operable by both human and AI. Event, knowledge, workflow, Governance, Access control are all persisted as hypergraphs.
+
+### Enterprise Level Access control
+Support Keycloak/OAuth/OIDC access control. Users can adopt other OIDC providers.
+
+### You can pass short-lived key with quota limit
+
+#### Enemey of Microsoft, Google and AWS
+In case of key-leakage, your cloud credit exploded. Big providers such as Microsoft Azure, Google Cloud, AWS, never want you have it to control damage (and limit their revenue) in case of leakage. They earn less and are not incentivise to create such product in their cloud for years and now you have **Enterprise-Grade Quality Infrastructure** for free.
+
+### You can open your LLM token wrapper outsourcing business by reselling token usage with token limited keys
+Just issue your keys and connect to your own payment portal
 
 ## Full tutorial ladder
 
@@ -767,6 +786,11 @@ Raw keys are accepted only through password fields. They are sealed into graph p
 
 `/admin/keys` supports an optional per-key `upstream_url` override. This lets one gateway route different keys of the same provider (for example multiple Azure OpenAI resources) to different upstream base URLs without pinning all traffic to one global env var.
 
+<p align="center">
+  <img src="assets/keymanagementpanel.png" alt="ModelKeyGuard key management panel" width="980" />
+</p>
+<p align="center"><em>Admin key management panel for create/rotate/revoke and provider route controls.</em></p>
+
 ### Usage Ops and security monitoring
 
 New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and keep one shared governance flow internally.
@@ -792,6 +816,11 @@ New admin routes are grouped by domain routers (`provider_*`, `admin_*`) and kee
 - `POST /admin/review/checkpoint` advance the review checkpoint projection after a completed review
 - `POST /admin/review/run` manual/scheduled review trigger (`sample_size`, `lookback_minutes`, `checkpoint_path`)
 - `POST /admin/security-events` host security event intake (shared-secret protected)
+
+<p align="center">
+  <img src="assets/usage_monitor.png" alt="ModelKeyGuard usage monitoring dashboard" width="980" />
+</p>
+<p align="center"><em>Usage monitor view with quota/traffic telemetry and operator drill-down.</em></p>
 
 History config env defaults (overrideable at runtime by admin config API/UI):
 
