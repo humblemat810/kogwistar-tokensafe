@@ -1,0 +1,148 @@
+name: Publish PyPI (Dual Package Names)
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_to_pypi:
+        description: "Upload to PyPI (true/false). false builds and validates only."
+        required: true
+        default: "false"
+      package_version:
+        description: "Optional expected version gate (example: 0.4.1). Leave empty to skip check."
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package_name: ["kogwistar-modelkeyguard", "monkeyguard"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Optional version gate
+        if: ${{ github.event.inputs.package_version != '' }}
+        run: |
+          python - <<'PY'
+          import pathlib, re
+          wanted = "${{ github.event.inputs.package_version }}"
+          text = pathlib.Path("pyproject.toml").read_text(encoding="utf-8")
+          m = re.search(r'(?m)^version = "([^"]+)"$', text)
+          if not m:
+              raise SystemExit("could not find project version in pyproject.toml")
+          actual = m.group(1)
+          if actual != wanted:
+              raise SystemExit(f"version mismatch: pyproject={actual} expected={wanted}")
+          print(f"version gate passed: {actual}")
+          PY
+
+      - name: Build package for ${{ matrix.package_name }}
+        run: |
+          set -euo pipefail
+          tmp_dir="$(mktemp -d)"
+          mkdir -p "$tmp_dir/repo"
+          rsync -a --delete \
+            --exclude '.git' \
+            --exclude '.venv' \
+            --exclude '.venv-langchain-smoke' \
+            --exclude 'out' \
+            --exclude 'build' \
+            --exclude 'dist' \
+            ./ "$tmp_dir/repo/"
+          PACKAGE_NAME="${{ matrix.package_name }}" python - <<'PY' "$tmp_dir/repo/pyproject.toml"
+          import os
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path(sys.argv[1])
+          text = path.read_text(encoding="utf-8")
+          target = os.environ["PACKAGE_NAME"]
+          patched, n = re.subn(
+              r'(?m)^name = ".*"$',
+              f'name = "{target}"',
+              text,
+              count=1,
+          )
+          if n != 1:
+              raise SystemExit("failed to patch [project].name")
+          patched, m = re.subn(
+              r'(?m)^readme = ".*"$',
+              'readme = "README_PYPI.md"',
+              patched,
+              count=1,
+          )
+          if m != 1:
+              raise SystemExit("failed to patch [project].readme")
+          path.write_text(patched, encoding="utf-8")
+          print(f"patched package name -> {target}; readme -> README_PYPI.md")
+          PY
+          mkdir -p "out/dist/${{ matrix.package_name }}"
+          (
+            cd "$tmp_dir/repo"
+            python -m build --sdist --wheel --outdir "$GITHUB_WORKSPACE/out/dist/${{ matrix.package_name }}"
+            python -m twine check "$GITHUB_WORKSPACE/out/dist/${{ matrix.package_name }}"/*
+          )
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.package_name }}
+          path: out/dist/${{ matrix.package_name }}/*
+
+  publish-kogwistar-modelkeyguard:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.upload_to_pypi == 'true' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-kogwistar-modelkeyguard
+          path: dist
+
+      - name: Publish kogwistar-modelkeyguard
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN_KOGWISTAR_MODELKEYGUARD }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install twine
+          python -m twine upload dist/*
+
+  publish-monkeyguard:
+    needs: build
+    runs-on: ubuntu-latest
+    if: ${{ startsWith(github.ref, 'refs/tags/v') || github.event.inputs.upload_to_pypi == 'true' }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: dist-monkeyguard
+          path: dist
+
+      - name: Publish monkeyguard
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN_MONKEYGUARD }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install twine
+          python -m twine upload dist/*

@@ -39,6 +39,36 @@ bundled into the package, so the `modelkeyguard` CLI can still start without a
 repo checkout or a local `config/gateway_policy.json` file. You only need to
 override `MODELKEYGUARD_POLICY_PATH` if you want a custom policy file.
 
+Dual PyPI publishing is supported from the same source tree:
+
+- canonical package: `kogwistar-modelkeyguard`
+- alias package: `monkeyguard`
+
+Local dual-build helper:
+
+```bash
+./scripts/build_dual_pypi_dists.sh
+```
+
+GitHub Actions dual publish workflow:
+
+- [`.github/workflows/publish-pypi-dual.yml`](.github/workflows/publish-pypi-dual.yml)
+- required secrets:
+  - `PYPI_API_TOKEN_KOGWISTAR_MODELKEYGUARD`
+  - `PYPI_API_TOKEN_MONKEYGUARD`
+- release runbook:
+  - [`docs_pypi_publish.md`](docs_pypi_publish.md)
+
+For PyPI-only users who still want bash helpers, export PyPI-safe wrappers:
+
+```bash
+modelkeyguard export-scripts --dir ./modelkeyguard-scripts
+```
+
+This intentionally exports only wrappers that delegate to stable CLI commands.
+Repository-local operational scripts (`./scripts/*.sh`) still require a full
+repo checkout because they depend on compose/deploy files and local layout.
+
 ## 60-second quickstart
 ### step 0 (for restart only, skip if fresh run)
 turn off existing running resources occupying required resources

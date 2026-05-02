@@ -169,6 +169,43 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
     assert "copy_tree" in clone_script
 
 
+def test_all_repo_shell_scripts_are_executable():
+    repo_root = Path(__file__).resolve().parents[1]
+    scripts_dir = repo_root / "scripts"
+    shell_scripts = sorted(scripts_dir.glob("*.sh"))
+    assert shell_scripts, "expected at least one shell script under scripts/"
+    for script in shell_scripts:
+        assert os.access(script, os.X_OK), f"script is not executable: {script.name}"
+
+
+def test_dual_pypi_publish_uses_pypi_specific_readme_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow = (repo_root / ".github" / "workflows" / "publish-pypi-dual.yml").read_text(encoding="utf-8")
+    build_script = (repo_root / "scripts" / "build_dual_pypi_dists.sh").read_text(encoding="utf-8")
+    pypi_readme = (repo_root / "README_PYPI.md").read_text(encoding="utf-8")
+
+    assert 'readme = "README_PYPI.md"' in workflow
+    assert 'readme = "README_PYPI.md"' in build_script
+    assert "PyPI Install Scope" in pypi_readme
+    assert "does **not** bundle the repository operational script tree" in pypi_readme
+    assert "modelkeyguard export-scripts" in pypi_readme
+
+
+def test_dual_pypi_publish_has_operator_runbook():
+    repo_root = Path(__file__).resolve().parents[1]
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    runbook = (repo_root / "docs_pypi_publish.md").read_text(encoding="utf-8")
+
+    assert "docs_pypi_publish.md" in readme
+    assert "Publish PyPI (Dual Package Names)" in runbook
+    assert "PYPI_API_TOKEN_KOGWISTAR_MODELKEYGUARD" in runbook
+    assert "PYPI_API_TOKEN_MONKEYGUARD" in runbook
+    assert "./scripts/build_dual_pypi_dists.sh" in runbook
+    assert "upload_to_pypi=false" in runbook
+    assert "upload_to_pypi=true" in runbook
+    assert "README_PYPI.md" in runbook
+
+
 def test_compose_state_clone_script_pins_stop_copy_start_order():
     repo_root = Path(__file__).resolve().parents[1]
     clone_script = (repo_root / "scripts" / "compose_state_clone.sh").read_text(encoding="utf-8")

@@ -7,6 +7,7 @@ from .reviewer_agent import main as review_status_main
 from .cli import main as cli_main
 from .graph_tools import init_graph, inspect_graph
 from .registration import main as registration_main
+from .script_shims import export_pypi_safe_scripts
 
 
 def _forward_registration_admin_args(args: argparse.Namespace, rest: list[str]) -> list[str]:
@@ -36,6 +37,8 @@ def main(argv: list[str] | None = None) -> int:
     sub.add_parser("init-graph")
     sub.add_parser("inspect-graph")
     sub.add_parser("registration")
+    export_scripts = sub.add_parser("export-scripts")
+    export_scripts.add_argument("--dir", default="./modelkeyguard-scripts", help="target directory for generated PyPI-safe bash shims")
     args, rest = p.parse_known_args(argv)
     if args.cmd == "gateway":
         serve(args.host, args.port, args.policy)
@@ -52,6 +55,12 @@ def main(argv: list[str] | None = None) -> int:
         return inspect_graph()
     if args.cmd == "registration":
         return registration_main(_forward_registration_admin_args(args, rest))
+    if args.cmd == "export-scripts":
+        count, files = export_pypi_safe_scripts(args.dir)
+        print(f"exported {count} bash shims to {args.dir}")
+        for file in files:
+            print(str(file))
+        return 0
     p.print_help()
     return 2
 
