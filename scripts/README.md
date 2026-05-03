@@ -3,6 +3,36 @@
 This directory has a mix of runnable demos, deployment helpers, and smoke tests.
 The most useful bash entrypoints are below.
 
+## How To Run Scripts Reliably
+
+Preferred invocation pattern (works even if execute bits are lost by zip/copy):
+
+```bash
+bash ./scripts/<name>.sh
+```
+
+Direct invocation also works when executable bits are preserved:
+
+```bash
+./scripts/<name>.sh
+```
+
+If you checked out via a path that dropped permissions, restore once:
+
+```bash
+chmod +x ./scripts/*.sh
+```
+
+For pip/PyPI-only installs (without a full repo checkout), generate supported
+bash wrappers from the installed CLI:
+
+```bash
+modelkeyguard export-scripts --dir ./modelkeyguard-scripts
+```
+
+These are intentionally thin wrappers for PyPI-safe CLI commands only. For
+compose/deploy/full-operational scripts, use the repository `./scripts/` tree.
+
 ## Secret and stack setup
 
 | Script | What it does |

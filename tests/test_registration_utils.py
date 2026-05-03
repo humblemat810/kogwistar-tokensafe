@@ -861,6 +861,7 @@ def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypat
 
 
 def test_postgres_search_index_uses_postgres_table_not_sqlite(monkeypatch):
+    pytest.importorskip("sqlalchemy")
     statements: list[str] = []
     params_seen: list[dict[str, object]] = []
 

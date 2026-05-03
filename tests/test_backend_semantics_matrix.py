@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 
 import pytest
+pytest.importorskip("sqlalchemy")
 from sqlalchemy.exc import NotSupportedError
 
 from modelkeyguard.graph_state import GraphStateStore

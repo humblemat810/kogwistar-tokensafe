@@ -12,6 +12,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..registration import RegistrationError, RegistrationService
+from ..services.pricing_ops import load_pricing_projection
 
 
 def _json_request_body(schema: dict[str, Any], required: bool = True) -> dict[str, Any]:
@@ -101,6 +102,27 @@ TOKEN_ISSUE_BODY_SCHEMA: dict[str, Any] = {
         },
     },
     "required": ["principal_id"],
+}
+
+PRICING_UPSERT_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["key", "provider_model", "model"], "example": "provider_model"},
+        "subject": {"type": "string", "example": "ollama:gemma4:e2b"},
+        "price_per_1k_tokens_usd": {"type": "number", "example": 0.002},
+        "reason": {"type": "string", "example": "new hosted contract rate"},
+    },
+    "required": ["scope", "subject", "price_per_1k_tokens_usd"],
+}
+
+PRICING_REVOKE_BODY_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "scope": {"type": "string", "enum": ["key", "provider_model", "model"], "example": "provider_model"},
+        "subject": {"type": "string", "example": "ollama:gemma4:e2b"},
+        "reason": {"type": "string", "example": "deprecated route"},
+    },
+    "required": ["scope", "subject"],
 }
 
 
@@ -228,12 +250,36 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
         rows.sort(key=lambda r: (r.get("revision_ms") or 0, r["id"]))
         return rows
 
+    def _collect_pricing_rows(graph_state: Any, policy: dict[str, Any]) -> list[dict[str, Any]]:
+        projection = load_pricing_projection(
+            graph_state,
+            model_price_table=dict(policy.get("model_price_per_1k_tokens_usd") or {}),
+        )
+        rows: list[dict[str, Any]] = []
+        for row in list(projection.get("revisions") or []):
+            if not isinstance(row, dict):
+                continue
+            rows.append(
+                {
+                    "id": str(row.get("id", "")),
+                    "scope": str(row.get("scope", "")),
+                    "subject": str(row.get("subject", "")),
+                    "price_per_1k_tokens_usd": row.get("price_per_1k_tokens_usd"),
+                    "revoked": bool(row.get("revoked")),
+                    "revision_ms": int(row.get("revision_ms", 0) or 0),
+                    "reason": str(row.get("reason", "")),
+                }
+            )
+        rows.sort(key=lambda r: (r.get("revision_ms") or 0, r["id"]))
+        return rows
+
     def _policy_snapshot(request: Request) -> dict[str, Any]:
         graph_state = request.app.state.guard.graph_state
         users: list[dict[str, str]] = []
         applications: list[dict[str, str]] = []
         principals: list[dict[str, str]] = []
         quotas: list[dict[str, str]] = []
+        pricing: list[dict[str, str]] = []
 
         for node in graph_state.nodes.values():
             if node.kind == "end_user":
@@ -269,11 +315,24 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
                     "revision_ms": str(row.get("revision_ms", 0)),
                 }
             )
+        for row in _collect_pricing_rows(graph_state, request.app.state.policy):
+            pricing.append(
+                {
+                    "id": row["id"],
+                    "scope": str(row.get("scope", "")),
+                    "subject": str(row.get("subject", "")),
+                    "price_per_1k_tokens_usd": str(row.get("price_per_1k_tokens_usd", "")),
+                    "revoked": str(bool(row.get("revoked"))),
+                    "revision_ms": str(row.get("revision_ms", 0)),
+                    "reason": str(row.get("reason", "")),
+                }
+            )
 
         users.sort(key=lambda r: r["id"])
         applications.sort(key=lambda r: r["id"])
         principals.sort(key=lambda r: r["id"])
         quotas.sort(key=lambda r: (int(r.get("revision_ms") or 0), r["id"]))
+        pricing.sort(key=lambda r: (int(r.get("revision_ms") or 0), r["id"]))
 
         users_q = _query_text(request, "users_q").lower()
         apps_q = _query_text(request, "apps_q").lower()
@@ -282,8 +341,13 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
         quotas_subject_id = _query_text(request, "quotas_subject_id")
         quotas_name = _query_text(request, "quotas_name").lower()
         quotas_revoked = _query_text(request, "quotas_revoked").lower() or "any"
+        pricing_scope = _query_text(request, "pricing_scope").lower()
+        pricing_subject = _query_text(request, "pricing_subject")
+        pricing_revoked = _query_text(request, "pricing_revoked").lower() or "any"
         if quotas_revoked not in {"any", "true", "false"}:
             quotas_revoked = "any"
+        if pricing_revoked not in {"any", "true", "false"}:
+            pricing_revoked = "any"
 
         if users_q:
             users = [row for row in users if users_q in row["id"].lower() or users_q in row.get("display_name", "").lower()]
@@ -310,6 +374,13 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
         if quotas_revoked in {"true", "false"}:
             target = quotas_revoked == "true"
             quotas = [row for row in quotas if row.get("revoked", "").lower() == str(target).lower()]
+        if pricing_scope:
+            pricing = [row for row in pricing if row.get("scope", "").lower() == pricing_scope]
+        if pricing_subject:
+            pricing = [row for row in pricing if row.get("subject", "") == pricing_subject]
+        if pricing_revoked in {"true", "false"}:
+            target = pricing_revoked == "true"
+            pricing = [row for row in pricing if row.get("revoked", "").lower() == str(target).lower()]
 
         page_size = _query_int(request, "page_size", default_page_size, minimum=1, maximum=max_page_size)
 
@@ -334,6 +405,13 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             page_param="quotas_page",
             page_size=page_size,
             anchor="quotas",
+        )
+        pricing, pricing_paging = _paginate_rows(
+            request,
+            rows=pricing,
+            page_param="pricing_page",
+            page_size=page_size,
+            anchor="pricing",
         )
 
         for row in users:
@@ -363,6 +441,9 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             "quotas_subject_id": quotas_subject_id,
             "quotas_name": _query_text(request, "quotas_name"),
             "quotas_revoked": quotas_revoked,
+            "pricing_scope": _query_text(request, "pricing_scope"),
+            "pricing_subject": pricing_subject,
+            "pricing_revoked": pricing_revoked,
         }
 
         return {
@@ -370,11 +451,13 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             "applications": applications,
             "principals": principals,
             "quotas": quotas,
+            "pricing": pricing,
             "paging": {
                 "users": users_paging,
                 "applications": apps_paging,
                 "principals": principals_paging,
                 "quotas": quotas_paging,
+                "pricing": pricing_paging,
             },
             "filters": filters,
         }
@@ -394,6 +477,7 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
             applications=snapshot["applications"],
             principals=snapshot["principals"],
             quotas=snapshot["quotas"],
+            pricing=snapshot["pricing"],
             paging=snapshot["paging"],
             filters=snapshot["filters"],
             message=message,
@@ -535,6 +619,44 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
                     raise RegistrationError("lane_subject_id_quota_name_required")
                 qid = reg.revoke_quota(lane, subject_id, quota_name, reason=str(body.get("reason", "")).strip())
                 return _render_page(request, message=f"Quota revoked (append-only): {qid}")
+
+            if action == "pricing_upsert":
+                scope = str(body.get("scope", "")).strip()
+                subject = str(body.get("subject", "")).strip()
+                raw_price = body.get("price_per_1k_tokens_usd")
+                if not scope or not subject or raw_price in (None, ""):
+                    raise RegistrationError("pricing_scope_subject_price_required")
+                result = reg.append_pricing_revision(
+                    scope=scope,
+                    subject=subject,
+                    price_per_1k_tokens_usd=float(raw_price),
+                    revoked=False,
+                    reason=str(body.get("reason", "")).strip(),
+                    actor="admin:web",
+                    model_price_table=dict(request.app.state.policy.get("model_price_per_1k_tokens_usd") or {}),
+                )
+                return _render_page(
+                    request,
+                    message=f"Pricing revision added: {result.get('event_id', '')}",
+                )
+
+            if action == "pricing_revoke":
+                scope = str(body.get("scope", "")).strip()
+                subject = str(body.get("subject", "")).strip()
+                if not scope or not subject:
+                    raise RegistrationError("pricing_scope_subject_required")
+                result = reg.append_pricing_revision(
+                    scope=scope,
+                    subject=subject,
+                    revoked=True,
+                    reason=str(body.get("reason", "")).strip(),
+                    actor="admin:web",
+                    model_price_table=dict(request.app.state.policy.get("model_price_per_1k_tokens_usd") or {}),
+                )
+                return _render_page(
+                    request,
+                    message=f"Pricing revoked (append-only): {result.get('event_id', '')}",
+                )
 
             return _render_page(request, error="unsupported_action", status_code=400)
         except (RegistrationError, ValueError) as exc:
@@ -690,6 +812,54 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
                 return _render_page(request, error=str(exc), status_code=400)
             return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
 
+    @router.post("/admin/policy/pricing/upsert", openapi_extra={"requestBody": _json_request_body(PRICING_UPSERT_BODY_SCHEMA)})
+    async def admin_pricing_upsert(request: Request):
+        reg = _registration_service(request)
+        if not reg:
+            return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
+        body = await _payload(request)
+        scope = str(body.get("scope", "")).strip()
+        subject = str(body.get("subject", "")).strip()
+        raw_price = body.get("price_per_1k_tokens_usd")
+        if not scope or not subject or raw_price in (None, ""):
+            return JSONResponse(status_code=400, content={"error": {"message": "pricing_scope_subject_price_required"}})
+        try:
+            result = reg.append_pricing_revision(
+                scope=scope,
+                subject=subject,
+                price_per_1k_tokens_usd=float(raw_price),
+                revoked=False,
+                reason=str(body.get("reason", "")).strip(),
+                actor="admin:api",
+                model_price_table=dict(request.app.state.policy.get("model_price_per_1k_tokens_usd") or {}),
+            )
+            return {"ok": True, **result}
+        except RegistrationError as exc:
+            return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
+
+    @router.post("/admin/policy/pricing/revoke", openapi_extra={"requestBody": _json_request_body(PRICING_REVOKE_BODY_SCHEMA)})
+    async def admin_pricing_revoke(request: Request):
+        reg = _registration_service(request)
+        if not reg:
+            return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
+        body = await _payload(request)
+        scope = str(body.get("scope", "")).strip()
+        subject = str(body.get("subject", "")).strip()
+        if not scope or not subject:
+            return JSONResponse(status_code=400, content={"error": {"message": "pricing_scope_subject_required"}})
+        try:
+            result = reg.append_pricing_revision(
+                scope=scope,
+                subject=subject,
+                revoked=True,
+                reason=str(body.get("reason", "")).strip(),
+                actor="admin:api",
+                model_price_table=dict(request.app.state.policy.get("model_price_per_1k_tokens_usd") or {}),
+            )
+            return {"ok": True, **result}
+        except RegistrationError as exc:
+            return JSONResponse(status_code=400, content={"error": {"message": str(exc)}})
+
     @router.get("/admin/policy/quotas.json")
     def admin_list_quotas(
         request: Request,
@@ -729,6 +899,55 @@ def create_router(render_admin_policy_html: Callable[..., str]) -> APIRouter:
         end = start + safe_page_size
         return {
             "data": rows[start:end],
+            "paging": {
+                "page": safe_page,
+                "page_size": safe_page_size,
+                "total": total,
+                "total_pages": total_pages,
+                "shown_start": 0 if total == 0 else start + 1,
+                "shown_end": min(end, total),
+            },
+        }
+
+    @router.get("/admin/policy/pricing.json")
+    def admin_list_pricing(
+        request: Request,
+        scope: str | None = None,
+        subject: str | None = None,
+        revoked: str | None = None,
+        page: int = 1,
+        page_size: int = 100,
+    ):
+        graph_state = request.app.state.guard.graph_state
+        if not graph_state:
+            return JSONResponse(status_code=503, content={"error": {"message": "graph_state_unavailable"}})
+        rows = _collect_pricing_rows(graph_state, request.app.state.policy)
+        scope_filter = str(scope or "").strip().lower()
+        subject_filter = str(subject or "").strip()
+        revoked_filter = str(revoked or "").strip().lower()
+        if revoked_filter not in {"", "true", "false"}:
+            return JSONResponse(status_code=400, content={"error": {"message": "revoked_must_be_true_false"}})
+        if scope_filter:
+            rows = [row for row in rows if str(row.get("scope", "")).lower() == scope_filter]
+        if subject_filter:
+            rows = [row for row in rows if str(row.get("subject", "")) == subject_filter]
+        if revoked_filter:
+            target = revoked_filter == "true"
+            rows = [row for row in rows if bool(row.get("revoked")) is target]
+
+        safe_page_size = max(1, min(max_page_size, int(page_size)))
+        total = len(rows)
+        total_pages = max(1, ceil(total / safe_page_size)) if total else 1
+        safe_page = max(1, min(int(page), total_pages))
+        start = (safe_page - 1) * safe_page_size
+        end = start + safe_page_size
+        projection = load_pricing_projection(
+            graph_state,
+            model_price_table=dict(request.app.state.policy.get("model_price_per_1k_tokens_usd") or {}),
+        )
+        return {
+            "data": rows[start:end],
+            "active": projection.get("active", {}),
             "paging": {
                 "page": safe_page,
                 "page_size": safe_page_size,

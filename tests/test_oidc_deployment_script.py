@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -166,6 +167,43 @@ def test_single_source_gateway_runner_has_valid_bash_syntax():
     assert "out/.runtime-compose-data-dir" in clone_script
     assert "backup-dir" in clone_script
     assert "copy_tree" in clone_script
+
+
+def test_all_repo_shell_scripts_are_executable():
+    repo_root = Path(__file__).resolve().parents[1]
+    scripts_dir = repo_root / "scripts"
+    shell_scripts = sorted(scripts_dir.glob("*.sh"))
+    assert shell_scripts, "expected at least one shell script under scripts/"
+    for script in shell_scripts:
+        assert os.access(script, os.X_OK), f"script is not executable: {script.name}"
+
+
+def test_dual_pypi_publish_uses_pypi_specific_readme_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    workflow = (repo_root / ".github" / "workflows" / "publish-pypi-dual.yml").read_text(encoding="utf-8")
+    build_script = (repo_root / "scripts" / "build_dual_pypi_dists.sh").read_text(encoding="utf-8")
+    pypi_readme = (repo_root / "README_PYPI.md").read_text(encoding="utf-8")
+
+    assert 'readme = "README_PYPI.md"' in workflow
+    assert 'readme = "README_PYPI.md"' in build_script
+    assert "PyPI Install Scope" in pypi_readme
+    assert "does **not** bundle the repository operational script tree" in pypi_readme
+    assert "modelkeyguard export-scripts" in pypi_readme
+
+
+def test_dual_pypi_publish_has_operator_runbook():
+    repo_root = Path(__file__).resolve().parents[1]
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+    runbook = (repo_root / "docs_pypi_publish.md").read_text(encoding="utf-8")
+
+    assert "docs_pypi_publish.md" in readme
+    assert "Publish PyPI (Dual Package Names)" in runbook
+    assert "PYPI_API_TOKEN_KOGWISTAR_MODELKEYGUARD" in runbook
+    assert "PYPI_API_TOKEN_MONKEYGUARD" in runbook
+    assert "./scripts/build_dual_pypi_dists.sh" in runbook
+    assert "upload_to_pypi=false" in runbook
+    assert "upload_to_pypi=true" in runbook
+    assert "README_PYPI.md" in runbook
 
 
 def test_compose_state_clone_script_pins_stop_copy_start_order():
@@ -482,6 +520,109 @@ def test_usage_reviewer_agent_tutorial_and_script_pin_projection_backed_flow():
     assert "advance-checkpoint" in script
     assert "_reviewer_safe_token" in script
     assert "missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call" in script
+
+
+def test_governance_quickstart_tutorial_ladder_links_and_contract():
+    repo_root = Path(__file__).resolve().parents[1]
+    tutorial_index = (repo_root / "tutorial" / "README.md").read_text(encoding="utf-8")
+    keycloak_setup = (repo_root / "tutorial" / "keycloak_admin_first_setup.md").read_text(encoding="utf-8")
+    usage_reviewer = (repo_root / "tutorial" / "usage_reviewer_agent.md").read_text(encoding="utf-8")
+    deterministic = (repo_root / "tutorial" / "governance_quickstart_deterministic_jsonl.md").read_text(encoding="utf-8")
+    llm_migration = (repo_root / "tutorial" / "governance_quickstart_llm_migration.md").read_text(encoding="utf-8")
+    readme = (repo_root / "README.md").read_text(encoding="utf-8")
+
+    assert "governance_quickstart_deterministic_jsonl.md" in tutorial_index
+    assert "governance_quickstart_llm_migration.md" in tutorial_index
+    assert "docs_governance_runtime.md" in tutorial_index
+    assert "governance_quickstart_deterministic_jsonl.md" in keycloak_setup
+    assert "governance_quickstart_deterministic_jsonl.md" in usage_reviewer
+    assert "governance_quickstart_llm_migration.md" in usage_reviewer
+    assert "governance_quickstart_deterministic_jsonl.md" in readme
+    assert "governance_quickstart_llm_migration.md" in readme
+
+    assert "Human Operator Path" in deterministic
+    assert "Coding Agent Path" in deterministic
+    assert "modelkeyguard registration seed" in deterministic
+    assert "python -m modelkeyguard review-status --local --policy config/gateway_policy.json" in deterministic
+    assert "REVIEWER_SAFE_TOKEN" in deterministic
+    assert "GET /admin/review/status.json" in deterministic
+    assert "POST /admin/review/checkpoint" in deterministic
+    assert "usage_reviewer_agent.py --force --loop --max-iterations 1" in deterministic
+
+    assert "Human Operator Path" in llm_migration
+    assert "Coding Agent Path" in llm_migration
+    assert "scanner-breaker-enabled" in llm_migration
+    assert "scanner-error-family-policy-json" in llm_migration
+    assert "usage_reviewer_agent.md" in llm_migration
+
+
+def test_governance_quickstart_deterministic_local_smoke_required(tmp_path):
+    repo_root = Path(__file__).resolve().parents[1]
+    graph_path = tmp_path / "governance_quickstart_graph.jsonl"
+    audit_path = tmp_path / "governance_quickstart_audit.jsonl"
+    token_path = tmp_path / "governance_quickstart_token.txt"
+    env = os.environ.copy()
+    env.update(
+        {
+            "MODELKEYGUARD_ENV": "local",
+            "MODELKEYGUARD_STORE": "jsonl",
+            "MODELKEYGUARD_GRAPH_PATH": str(graph_path),
+            "MODELKEYGUARD_AUDIT_PATH": str(audit_path),
+            "MODELKEYGUARD_GRAPH_KEY": "test-governance-quickstart-key-32-bytes!!",
+            "MODELKEYGUARD_DRY_RUN": "1",
+        }
+    )
+
+    seed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "modelkeyguard",
+            "registration",
+            "seed",
+            "--token-output-file",
+            str(token_path),
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert seed.returncode == 0, seed.stderr
+    payload = json.loads(seed.stdout.strip().splitlines()[-1])
+    assert payload["user_id"] == "user:demo-saas-alice"
+    assert payload["principal_id"] == "agent:demo-saas-agent"
+    assert token_path.exists()
+    assert token_path.read_text(encoding="utf-8").strip().startswith("kgw_sk_")
+    assert graph_path.exists()
+    assert str(tmp_path) in str(graph_path)
+    assert str(tmp_path) in str(token_path)
+
+    review = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "modelkeyguard",
+            "review-status",
+            "--local",
+            "--policy",
+            "config/gateway_policy.json",
+        ],
+        cwd=repo_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert review.returncode == 0, review.stderr
+    status = json.loads(review.stdout)
+    assert status["reviewer"] == "modelkeyguard.reviewer_agent"
+    assert "checkpoint" in status
+    assert "summary" in status
+    assert "triggers" in status
+    assert "window" in status
+    assert isinstance(status["should_review"], bool)
 
 
 def test_remote_deployment_and_smoke_scripts_pin_required_workflow():

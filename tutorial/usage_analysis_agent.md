@@ -78,6 +78,19 @@ python scripts/usage_analysis_agent.py \
   --principal agent:doc-ingestor
 ```
 
+For loop-mode hardening and workflow semantics, see
+[`docs_governance_runtime.md`](../docs_governance_runtime.md). The usage script
+supports loop and safety controls:
+
+- `--loop`
+- `--interval-seconds`
+- `--max-iterations`
+- `--scanner-backoff-initial-seconds`
+- `--scanner-backoff-max-seconds`
+- `--scanner-breaker-enabled`
+- `--scanner-breaker-max-failures`
+- `--scanner-error-family-policy-json`
+
 ## 4. Minimal Python agent
 
 For real code, import the scaffold and let it read its own environment:

@@ -443,6 +443,150 @@ def test_admin_policy_quotas_json_supports_filters_and_paging(tmp_path, monkeypa
 
     bad = client.get("/admin/policy/quotas.json", headers=ADMIN_HEADERS, params={"revoked": "maybe"})
     assert bad.status_code == 400
+
+
+def test_admin_policy_pricing_api_and_page_support_append_only_revisions(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    graph = tmp_path / "graph.jsonl"
+    audit = tmp_path / "audit.jsonl"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(audit))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    upsert = client.post(
+        "/admin/policy/pricing/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "scope": "provider_model",
+            "subject": "ollama:gemma4:e2b",
+            "price_per_1k_tokens_usd": 0.004,
+            "reason": "hosted price",
+        },
+    )
+    assert upsert.status_code == 200
+    assert upsert.json()["ok"] is True
+
+    key_upsert = client.post(
+        "/admin/policy/pricing/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "scope": "key",
+            "subject": "key:fwd-ollama:gemma4-local",
+            "price_per_1k_tokens_usd": 0.0,
+            "reason": "local is free",
+        },
+    )
+    assert key_upsert.status_code == 200
+    pricing = client.get("/admin/policy/pricing.json", headers=ADMIN_HEADERS)
+    assert pricing.status_code == 200
+    body = pricing.json()
+    assert isinstance(body["data"], list)
+    assert body["active"]["provider_model"]["ollama:gemma4:e2b"] == 0.004
+    assert body["active"]["key"]["key:fwd-ollama:gemma4-local"] == 0.0
+
+    revoke = client.post(
+        "/admin/policy/pricing/revoke",
+        headers=ADMIN_HEADERS,
+        json={"scope": "provider_model", "subject": "ollama:gemma4:e2b", "reason": "retired"},
+    )
+    assert revoke.status_code == 200
+    after = client.get("/admin/policy/pricing.json", headers=ADMIN_HEADERS).json()
+    assert "ollama:gemma4:e2b" not in after["active"]["provider_model"]
+
+    page = client.get("/admin/policy", headers=ADMIN_HEADERS)
+    assert page.status_code == 200
+    assert "Pricing Upsert (Append-Only Revision)" in page.text
+    assert "Pricing Revisions" in page.text
+
+
+def test_admin_policy_pricing_upsert_validates_subject_shape(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    client = TestClient(create_app("config/gateway_policy.json"))
+    bad = client.post(
+        "/admin/policy/pricing/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "scope": "provider_model",
+            "subject": "invalid-no-colon",
+            "price_per_1k_tokens_usd": 0.2,
+        },
+    )
+    assert bad.status_code == 400
+    assert "provider_colon_model" in bad.json()["error"]["message"]
+
+
+def test_admin_policy_pricing_form_actions_support_upsert_and_revoke(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    upsert_form = client.post(
+        "/admin/policy",
+        headers=ADMIN_HEADERS | {"accept": "text/html"},
+        data={
+            "action": "pricing_upsert",
+            "scope": "model",
+            "subject": "gemma4:e2b",
+            "price_per_1k_tokens_usd": "0.005",
+            "reason": "form upsert test",
+        },
+    )
+    assert upsert_form.status_code == 200
+    assert "Pricing revision added:" in upsert_form.text
+
+    revoke_form = client.post(
+        "/admin/policy",
+        headers=ADMIN_HEADERS | {"accept": "text/html"},
+        data={
+            "action": "pricing_revoke",
+            "scope": "model",
+            "subject": "gemma4:e2b",
+            "reason": "form revoke test",
+        },
+    )
+    assert revoke_form.status_code == 200
+    assert "Pricing revoked (append-only):" in revoke_form.text
+
+
+def test_admin_policy_pricing_upsert_rejects_negative_price(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    client = TestClient(create_app("config/gateway_policy.json"))
+    bad = client.post(
+        "/admin/policy/pricing/upsert",
+        headers=ADMIN_HEADERS,
+        json={
+            "scope": "model",
+            "subject": "gemma4:e2b",
+            "price_per_1k_tokens_usd": -0.01,
+        },
+    )
+    assert bad.status_code == 400
+    assert bad.json()["error"]["message"] == "pricing_price_must_be_non_negative"
+
+
+def test_admin_policy_pricing_json_rejects_invalid_revoked_filter(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    client = TestClient(create_app("config/gateway_policy.json"))
+    bad = client.get("/admin/policy/pricing.json", headers=ADMIN_HEADERS, params={"revoked": "maybe"})
+    assert bad.status_code == 400
     assert bad.json()["error"]["message"] == "revoked_must_be_true_false"
 
 def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeypatch):
@@ -574,6 +718,9 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.get("/admin/policy/quotas.json").status_code == 401
     assert client.post("/admin/policy/quotas/upsert", json={}).status_code == 401
     assert client.post("/admin/policy/quotas/revoke", json={}).status_code == 401
+    assert client.get("/admin/policy/pricing.json").status_code == 401
+    assert client.post("/admin/policy/pricing/upsert", json={}).status_code == 401
+    assert client.post("/admin/policy/pricing/revoke", json={}).status_code == 401
     assert client.post("/admin/review/run", json={}).status_code == 401
 
 
@@ -677,6 +824,11 @@ def test_admin_policy_routes_expose_swagger_request_bodies(tmp_path, monkeypatch
     assert "subject_id" in quota_body["properties"]
     assert "quota_name" in quota_body["properties"]
     assert "token" in quota_body["properties"]["lane"]["enum"]
+    pricing_post = spec["paths"]["/admin/policy/pricing/upsert"]["post"]
+    pricing_body = pricing_post["requestBody"]["content"]["application/json"]["schema"]
+    assert "scope" in pricing_body["properties"]
+    assert "subject" in pricing_body["properties"]
+    assert "price_per_1k_tokens_usd" in pricing_body["properties"]
 
 
 def test_admin_session_login_logout_and_cookie_access(tmp_path, monkeypatch):

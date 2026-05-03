@@ -14,6 +14,7 @@ import hashlib
 
 from .graph_state import GraphStateStore, normalize_quota_period, resolve_store_backend
 from .policy_loader import load_policy_json
+from .services.pricing_ops import append_pricing_revision
 from .settings import read_env_or_file
 
 
@@ -182,6 +183,36 @@ class RemoteRegistrationService:
             str(result.get("on_behalf_of_user_id") or on_behalf_of_user_id or "") or None,
             str(result.get("application_id") or application_id or "") or None,
             str(result.get("namespace") or namespace),
+        )
+
+    def upsert_pricing(
+        self,
+        *,
+        scope: str,
+        subject: str,
+        price_per_1k_tokens_usd: float,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/admin/policy/pricing/upsert",
+            {
+                "scope": scope,
+                "subject": subject,
+                "price_per_1k_tokens_usd": float(price_per_1k_tokens_usd),
+                "reason": reason,
+            },
+        )
+
+    def revoke_pricing(self, *, scope: str, subject: str, reason: str = "") -> dict[str, Any]:
+        return self._request_json(
+            "POST",
+            "/admin/policy/pricing/revoke",
+            {
+                "scope": scope,
+                "subject": subject,
+                "reason": reason,
+            },
         )
 
     def _request_json(self, method: str, path: str, payload: dict[str, Any]) -> dict[str, Any]:
@@ -420,6 +451,31 @@ class RegistrationService:
             self.store.put_edge(f"edge:{node_id}:ISSUED_FOR_APPLICATION:{application_id}", "ISSUED_FOR_APPLICATION", node_id, application_id, {})
         self.store.append_event("SAFE_MODEL_TOKEN_ISSUED", node_id, {"token_id": jti, "principal_id": principal_id, "on_behalf_of_user_id": on_behalf_of_user_id, "application_id": application_id, "namespace": namespace, "scopes": scopes or ["model.invoke"]})
         return IssuedToken(raw_token, node_id, principal_id, on_behalf_of_user_id, application_id, namespace)
+
+    def append_pricing_revision(
+        self,
+        *,
+        scope: str,
+        subject: str,
+        price_per_1k_tokens_usd: float | None = None,
+        revoked: bool = False,
+        reason: str = "",
+        actor: str = "",
+        model_price_table: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        try:
+            return append_pricing_revision(
+                self.store,
+                scope=scope,
+                subject=subject,
+                price_per_1k_tokens_usd=price_per_1k_tokens_usd,
+                revoked=revoked,
+                reason=reason,
+                actor=actor,
+                model_price_table=model_price_table,
+            )
+        except ValueError as exc:
+            raise RegistrationError(str(exc)) from exc
 
     def write_usage_summary(self, path: str | Path) -> None:
         data = {

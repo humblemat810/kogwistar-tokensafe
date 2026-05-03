@@ -38,6 +38,18 @@ Keycloak usage-analysis agent via reusable Python client
 Keycloak usage reviewer agent with projection-backed review checkpoints
   -> usage_reviewer_agent.md
 
+Easy governance quickstart with preseeded JSONL (deterministic)
+  -> governance_quickstart_deterministic_jsonl.md
+
+Migrate deterministic reviewer to LLM-driven reviewer
+  -> governance_quickstart_llm_migration.md
+
+Governance runtime loop/backoff/breaker semantics and swimlane
+  -> ../docs_governance_runtime.md
+
+Compare MonkeyGuard with API gateways, secret managers, policy engines
+  -> ../docs_monkeyguard_vs_alternatives.md
+
 Keycloak usage-analysis agent smoke after fresh-up
   -> ../scripts/usage_analysis_agent_smoke.sh
 
@@ -60,6 +72,10 @@ Container hardening and private admin/public serving split
 | Require Keycloak/OIDC for model and admin endpoints | No | `kogwistar_postgres` | No | [keycloak_oidc_protect_everything.md](keycloak_oidc_protect_everything.md) |
 | Build a simple usage-analysis agent with Keycloak service-account auth | No | `kogwistar_postgres` | No | [usage_analysis_agent.md](usage_analysis_agent.md) |
 | Build the reviewer agent that queries review checkpoints and runs LangChain/Ollama through the gateway | No | `kogwistar_postgres` | No | [usage_reviewer_agent.md](usage_reviewer_agent.md) |
+| Fast local governance onboarding for operators and coding agents (preseeded JSONL, deterministic reviewer) | No | `jsonl` toy mode | No | [governance_quickstart_deterministic_jsonl.md](governance_quickstart_deterministic_jsonl.md) |
+| Migrate deterministic governance reviewer to LLM-driven reviewer with isolated reviewer token/quota semantics | Optional | `jsonl` toy mode default | No | [governance_quickstart_llm_migration.md](governance_quickstart_llm_migration.md) |
+| Understand scanner loop safety, backoff/breaker policy, and checkpoint/CDC semantics | No | Any | No | [../docs_governance_runtime.md](../docs_governance_runtime.md) |
+| Compare MonkeyGuard against adjacent solutions and choose layering strategy | No | Any | No | [../docs_monkeyguard_vs_alternatives.md](../docs_monkeyguard_vs_alternatives.md) |
 | Smoke the usage-analysis agent against a fresh-up compose stack | No | `kogwistar_postgres` | No | [../scripts/usage_analysis_agent_smoke.sh](../scripts/usage_analysis_agent_smoke.sh) |
 | Harden container deployment | Yes | `kogwistar_postgres` | No | [container_hardened_nonadmin_key_safety.md](container_hardened_nonadmin_key_safety.md) |
 

@@ -16,7 +16,13 @@
 
 <p align="center"><a href="#full-tutorial-ladder">Explore tutorials</a> • <a href="#60-second-quickstart">Quickstart</a> • <a href="tutorial/README.md">Docs index</a></p>
 
-ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities.
+ModelKeyGuard is a standalone service that turns provider model keys into graph-governed capabilities. **Mon**itor and **Guard** your **key**s
+
+Naming convention in this repo:
+
+- canonical technical name: **Kogwistar ModelKeyGuard**
+- Python package/import/CLI: `modelkeyguard`
+- brand/logo shorthand: **MonkeyGuard** (presentation/marketing only)
 
 Clients never receive the real OpenAI/Azure/Anthropic key. They receive a short-lived Keycloak token or local `kgw_*` token, call this gateway with an OpenAI-compatible  (Or Gemini/Ollama Compatible, or extend your routes), and the gateway verifies identity, checks [Kogwistar](https://github.com/humblemat810/kogwistar)-style ACL, checks named projections, resolves provider key material inside the gateway, forwards the request, and appends audit/usage graph events.
 
@@ -25,11 +31,50 @@ For a plain-English explanation of the runnable shell entrypoints, see
 [`scripts/README.md`](scripts/README.md).
 For a plain-English glossary of the terms, tokens, and env vars that keep
 coming up in tutorials, see [`glossary.md`](glossary.md).
+For an architecture decision matrix versus adjacent tools, see
+[`docs_monkeyguard_vs_alternatives.md`](docs_monkeyguard_vs_alternatives.md).
 
 If you install the package from PyPI or a wheel, the default policy graph is
 bundled into the package, so the `modelkeyguard` CLI can still start without a
 repo checkout or a local `config/gateway_policy.json` file. You only need to
 override `MODELKEYGUARD_POLICY_PATH` if you want a custom policy file.
+
+## Battery included
+Battery (the reviewer agent) included. The battery factory (Runtime with Kogwistar semantics) also included, the battery manufactoring infrastructure (AI operating system) also included.
+
+-----
+
+## Publish dual name
+
+Dual PyPI publishing is supported from the same source tree:
+
+- canonical package: `kogwistar-modelkeyguard`
+- alias package: `monkeyguard`
+
+Local dual-build helper:
+
+```bash
+./scripts/build_dual_pypi_dists.sh
+```
+
+GitHub Actions dual publish workflow:
+
+- [`.github/workflows/publish-pypi-dual.yml`](.github/workflows/publish-pypi-dual.yml)
+- required secrets:
+  - `PYPI_API_TOKEN_KOGWISTAR_MODELKEYGUARD`
+  - `PYPI_API_TOKEN_MONKEYGUARD`
+- release runbook:
+  - [`docs_pypi_publish.md`](docs_pypi_publish.md)
+
+For PyPI-only users who still want bash helpers, export PyPI-safe wrappers:
+
+```bash
+modelkeyguard export-scripts --dir ./modelkeyguard-scripts
+```
+
+This intentionally exports only wrappers that delegate to stable CLI commands.
+Repository-local operational scripts (`./scripts/*.sh`) still require a full
+repo checkout because they depend on compose/deploy files and local layout.
 
 ## 60-second quickstart
 ### step 0 (for restart only, skip if fresh run)
@@ -100,8 +145,22 @@ Support Keycloak/OAuth/OIDC access control. Users can adopt other OIDC providers
 #### Enemey of Microsoft, Google and AWS
 In case of key-leakage, your cloud credit exploded. Big providers such as Microsoft Azure, Google Cloud, AWS, never want you have it to control damage (and limit their revenue) in case of leakage. They earn less and are not incentivise to create such product in their cloud for years and now you have **Enterprise-Grade Quality Infrastructure** for free.
 
-### You can open your LLM token wrapper outsourcing business by reselling token usage with token limited keys
+### Outsourcing token as a business
 Just issue your keys and connect to your own payment portal
+
+## MonkeyGuard vs other solutions
+
+If you are deciding between MonkeyGuard and adjacent layers (API gateway, secret
+manager, policy engine, analytics), use:
+[`docs_monkeyguard_vs_alternatives.md`](docs_monkeyguard_vs_alternatives.md).
+
+Short version:
+
+- MonkeyGuard is strongest when you need provider-key mediation + request-path
+  quota/policy + governance review loops.
+- API gateway remains useful at the edge (ingress, TLS, traffic controls).
+- Secret manager remains useful for long-lived secret lifecycle.
+- Many production teams run these layers together.
 
 ## Full tutorial ladder
 
@@ -119,6 +178,8 @@ See [`docs_quickstart_and_tutorial.md`](docs_quickstart_and_tutorial.md) for:
 6. production deployment notes.
 
 See [`tutorial/slow_quickstart_cli_gui_parity.md`](tutorial/slow_quickstart_cli_gui_parity.md) for a slower, retry-safe CLI and GUI parity walkthrough.
+See [`tutorial/governance_quickstart_deterministic_jsonl.md`](tutorial/governance_quickstart_deterministic_jsonl.md) for a fast preseeded JSONL governance quickstart for both operators and coding agents.
+Then continue to [`tutorial/governance_quickstart_llm_migration.md`](tutorial/governance_quickstart_llm_migration.md) to migrate from deterministic reviewer mode to LLM-driven reviewer mode with isolated reviewer token/quota semantics.
 See [`tutorial/keycloak_admin_first_setup.md`](tutorial/keycloak_admin_first_setup.md) for the first real Keycloak-admin setup path: create `alice`, register `user:alice` and `agent:doc-ingestor`, set quotas, choose a provider key, and add a reviewer account. The next tutorial is [`tutorial/usage_reviewer_agent.md`](tutorial/usage_reviewer_agent.md).
 See [`tutorial/kogwistar_managed_postgres_setup.md`](tutorial/kogwistar_managed_postgres_setup.md) for the copy-paste installed-Kogwistar managed Postgres setup, including no-JSONL graph artifact verification.
 See [`tutorial/final_dev_guard_azure_real_setup.md`](tutorial/final_dev_guard_azure_real_setup.md) for final-dev guard setup with real Azure token pathway, PostgreSQL-backed state, and real smoke tests (completion + LangChain structured output).
@@ -127,6 +188,7 @@ See [`docs_langchain_provider_native_smoke.md`](docs_langchain_provider_native_s
 
 See [`docs_schema_semantics.md`](docs_schema_semantics.md) for the current entity relationship and storage/projection schema (including Mermaid diagrams and Kogwistar-compatibility mapping).
 See [`docs_postgres_schema.md`](docs_postgres_schema.md) for the strict Postgres table-level view (PK/index/logical FK mapping + ERD source).
+See [`docs_governance_runtime.md`](docs_governance_runtime.md) for runtime-native scanner workflows, backoff/breaker safety, checkpoint/CDC semantics, and operator runbook details.
 
 
 ```text
@@ -143,6 +205,19 @@ ModelKeyGuard Gateway
 Provider API key resolved inside gateway only
 ```
 # Core concepts
+## Governance runtime loops
+
+The usage-analysis and reviewer scanners are two separate workflows sharing one runtime subsystem in [`modelkeyguard/governance_runtime.py`](modelkeyguard/governance_runtime.py).
+
+- default one-shot behavior remains unchanged
+- loop mode uses exponential backoff (`30s -> 60s -> 120s -> 300s`, cap `15m`)
+- circuit breaker is optional and off by default
+- loop health is persisted as named projections for deterministic restart behavior
+
+Use `--scanner-backoff-initial-seconds`, `--scanner-backoff-max-seconds`, `--scanner-breaker-enabled`, `--scanner-breaker-max-failures`, and `--scanner-error-family-policy-json` in both scanner scripts for operator overrides.
+
+For architecture and swimlane details, see [`docs_governance_runtime.md`](docs_governance_runtime.md).
+
 ## What is graph-native here?
 
 The app has one authoritative graph with three logical lanes. Hot serving state
