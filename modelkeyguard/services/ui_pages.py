@@ -47,6 +47,7 @@ def render_admin_policy_page(
     applications: list[dict[str, str]],
     principals: list[dict[str, str]],
     quotas: list[dict[str, str]],
+    pricing: list[dict[str, str]],
     paging: dict[str, dict[str, Any]] | None = None,
     filters: dict[str, str] | None = None,
     message: str = "",
@@ -90,6 +91,10 @@ def render_admin_policy_page(
         f"<tr><td><code>{html_escape(row['id'])}</code></td><td>{html_escape(row.get('lane', ''))}</td><td><code>{html_escape(row.get('subject_id', ''))}</code></td><td>{html_escape(row.get('quota_name', ''))}</td><td>{html_escape(row.get('period', ''))}</td><td>{html_escape(row.get('max_usd', ''))}</td><td>{html_escape(row.get('max_tokens', ''))}</td><td>{html_escape(row.get('max_requests', ''))}</td><td>{html_escape(row.get('revoked', ''))}</td></tr>"
         for row in quotas
     ) or "<tr><td colspan='9'>No quota revisions</td></tr>"
+    pricing_rows = "".join(
+        f"<tr><td><code>{html_escape(row['id'])}</code></td><td>{html_escape(row.get('scope', ''))}</td><td><code>{html_escape(row.get('subject', ''))}</code></td><td>{html_escape(row.get('price_per_1k_tokens_usd', ''))}</td><td>{html_escape(row.get('revoked', ''))}</td><td>{html_escape(row.get('reason', ''))}</td></tr>"
+        for row in pricing
+    ) or "<tr><td colspan='6'>No pricing revisions</td></tr>"
 
     flash = ""
     if error:
@@ -123,14 +128,21 @@ def render_admin_policy_page(
         .replace("{{quotas_revoked_any_selected}}", "selected" if filters.get("quotas_revoked", "any") == "any" else "")
         .replace("{{quotas_revoked_true_selected}}", "selected" if filters.get("quotas_revoked") == "true" else "")
         .replace("{{quotas_revoked_false_selected}}", "selected" if filters.get("quotas_revoked") == "false" else "")
+        .replace("{{pricing_scope}}", html_escape(filters.get("pricing_scope", "")))
+        .replace("{{pricing_subject}}", html_escape(filters.get("pricing_subject", "")))
+        .replace("{{pricing_revoked_any_selected}}", "selected" if filters.get("pricing_revoked", "any") == "any" else "")
+        .replace("{{pricing_revoked_true_selected}}", "selected" if filters.get("pricing_revoked") == "true" else "")
+        .replace("{{pricing_revoked_false_selected}}", "selected" if filters.get("pricing_revoked") == "false" else "")
         .replace("{{users_pager}}", _render_pager(paging.get("users", {}), "Users"))
         .replace("{{applications_pager}}", _render_pager(paging.get("applications", {}), "Applications"))
         .replace("{{principals_pager}}", _render_pager(paging.get("principals", {}), "Principals"))
         .replace("{{quotas_pager}}", _render_pager(paging.get("quotas", {}), "Quota revisions"))
+        .replace("{{pricing_pager}}", _render_pager(paging.get("pricing", {}), "Pricing revisions"))
         .replace("{{users_rows}}", users_rows)
         .replace("{{applications_rows}}", app_rows)
         .replace("{{principals_rows}}", principal_rows)
         .replace("{{quotas_rows}}", quota_rows)
+        .replace("{{pricing_rows}}", pricing_rows)
     )
 
 

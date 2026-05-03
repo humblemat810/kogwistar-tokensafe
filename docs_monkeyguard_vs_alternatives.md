@@ -15,6 +15,17 @@ Use this as architecture guidance, not vendor criticism: most teams combine mult
 | Rebuildable named projections for hot-path serving | Yes | No | No | No | No | No |
 | Governance reviewer workflows (deterministic + LLM) | Yes | No | No | No | No | No |
 | Built-in Keycloak/OIDC integration | Yes | Varies by router | Varies by product | No | No | No |
+| Documentation depth for humans and coding agents (dev + ops) | Strong (tutorial ladder + runbooks + smoke paths) | Varies, often narrower | Varies | Low | Varies | Varies |
+
+## MonkeyGuard vs LLM gateway (operability-focused)
+
+| Capability | MonkeyGuard (ModelKeyGuard) | Typical LLM gateway |
+| --- | --- | --- |
+| Human onboarding docs (quickstart to production) | Strong guided ladder (local, OIDC, governance, production) | Varies by project |
+| Coding-agent onboarding docs | Explicit CLI/env contracts and script-first workflows | Often partial or implicit |
+| Development-time operability | Deterministic local JSONL path + smoke harnesses | Usually focused on routing features first |
+| Operations-time agent operability | Governance loops, checkpoint semantics, backoff/breaker runbooks | Usually needs custom add-ons |
+| Mixed human + automated operator workflow support | First-class in tutorials and admin/API parity | Varies |
 
 ## Native provider ecosystem comparison (OpenAI, Claude, Azure, AWS, GCP)
 

@@ -67,6 +67,22 @@
         <option value="false" {{quotas_revoked_false_selected}}>false</option>
       </select>
 
+      <label for="query_pricing_scope">Pricing Scope</label>
+      <small class="field-help">Filter pricing revisions by scope.</small>
+      <input id="query_pricing_scope" name="pricing_scope" value="{{pricing_scope}}" placeholder="key|provider_model|model">
+
+      <label for="query_pricing_subject">Pricing Subject</label>
+      <small class="field-help">Exact subject match (for example <code>key:openai:prod</code> or <code>ollama:gemma4:e2b</code>).</small>
+      <input id="query_pricing_subject" name="pricing_subject" value="{{pricing_subject}}" placeholder="key:openai:prod">
+
+      <label for="query_pricing_revoked">Pricing Revoked</label>
+      <small class="field-help">Show active, revoked, or all pricing revisions.</small>
+      <select id="query_pricing_revoked" name="pricing_revoked">
+        <option value="any" {{pricing_revoked_any_selected}}>any</option>
+        <option value="true" {{pricing_revoked_true_selected}}>true</option>
+        <option value="false" {{pricing_revoked_false_selected}}>false</option>
+      </select>
+
       <div class="filter-actions">
         <button>Apply filters</button>
         <a href="/admin/policy">Reset</a>
@@ -179,6 +195,43 @@
     </section>
 
     <section class="card">
+      <h2>Pricing Upsert (Append-Only Revision)</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="pricing_upsert">
+        <label for="pricing_upsert_scope">Scope</label>
+        <small class="field-help">Required. One of <code>key</code>, <code>provider_model</code>, <code>model</code>.</small>
+        <input id="pricing_upsert_scope" name="scope" placeholder="key|provider_model|model" required>
+        <label for="pricing_upsert_subject">Subject</label>
+        <small class="field-help">Required. For <code>provider_model</code> use <code>provider:model</code>.</small>
+        <input id="pricing_upsert_subject" name="subject" placeholder="ollama:gemma4:e2b" required>
+        <label for="pricing_upsert_price">Price per 1k tokens (USD)</label>
+        <small class="field-help">Required non-negative number, for example <code>0.002</code>.</small>
+        <input id="pricing_upsert_price" name="price_per_1k_tokens_usd" placeholder="0.002" required>
+        <label for="pricing_upsert_reason">Reason</label>
+        <small class="field-help">Optional revision note for auditability.</small>
+        <input id="pricing_upsert_reason" name="reason" placeholder="new contract rate">
+        <button>Upsert pricing</button>
+      </form>
+    </section>
+
+    <section class="card">
+      <h2>Pricing Revoke (Append-Only)</h2>
+      <form method="post" action="/admin/policy">
+        <input type="hidden" name="action" value="pricing_revoke">
+        <label for="pricing_revoke_scope">Scope</label>
+        <small class="field-help">Required. One of <code>key</code>, <code>provider_model</code>, <code>model</code>.</small>
+        <input id="pricing_revoke_scope" name="scope" placeholder="key|provider_model|model" required>
+        <label for="pricing_revoke_subject">Subject</label>
+        <small class="field-help">Required. Matches the same key used during upsert.</small>
+        <input id="pricing_revoke_subject" name="subject" placeholder="ollama:gemma4:e2b" required>
+        <label for="pricing_revoke_reason">Reason</label>
+        <small class="field-help">Optional reason shown in pricing revisions.</small>
+        <input id="pricing_revoke_reason" name="reason" placeholder="deprecated route">
+        <button>Revoke pricing</button>
+      </form>
+    </section>
+
+    <section class="card">
       <h2>Issue Safe Token (One-Time Reveal)</h2>
       <form method="post" action="/admin/policy/tokens">
         <label for="token_principal_id">Principal ID</label>
@@ -227,6 +280,13 @@
   <table>
     <thead><tr><th>ID</th><th>Lane</th><th>Subject</th><th>Quota Name</th><th>Period</th><th>Max USD</th><th>Max Tokens</th><th>Max Requests</th><th>Revoked</th></tr></thead>
     <tbody>{{quotas_rows}}</tbody>
+  </table>
+
+  <h2 id="pricing">Pricing Revisions</h2>
+  {{pricing_pager}}
+  <table>
+    <thead><tr><th>ID</th><th>Scope</th><th>Subject</th><th>Price / 1k tokens (USD)</th><th>Revoked</th><th>Reason</th></tr></thead>
+    <tbody>{{pricing_rows}}</tbody>
   </table>
 </body>
 </html>

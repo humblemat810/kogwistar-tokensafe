@@ -17,6 +17,7 @@ from .providers import AzureOpenAIAdapter, GeminiAdapter, OllamaAdapter, OpenAIA
 from .services import derive_prompt_heuristics, get_static_dir, render_admin_keys_page, render_admin_policy_page
 from .services.admin_auth import ADMIN_COOKIE_NAME, ADMIN_HEADER_NAME, admin_html_login_response, decode_admin_session, verify_admin_session
 from .services.history_ops import capture_history_record
+from .services.pricing_ops import resolve_price_per_1k_tokens_usd
 from .settings import AppSettings, read_env_or_file
 from .token_auth import TokenAuthError, TokenVerifier, TokenPrincipal
 from .policy_loader import load_policy_json
@@ -380,9 +381,22 @@ def _merge_upstream_base(upstream_url: str | None, custom_base: str | None) -> s
     return urllib.parse.urlunsplit((scheme, netloc, merged_path, route_url.query, ""))
 
 
-def estimate_cost_and_tokens(payload: dict[str, Any], policy: dict[str, Any]) -> tuple[float, int]:
+def estimate_cost_and_tokens(
+    payload: dict[str, Any],
+    policy: dict[str, Any],
+    *,
+    key_id: str = "",
+    provider: str = "",
+    graph_state: GraphStateStore | None = None,
+) -> tuple[float, int]:
     model = payload.get("model", "")
-    price = float(policy.get("model_price_per_1k_tokens_usd", {}).get(model, 0.002))
+    price, _source = resolve_price_per_1k_tokens_usd(
+        model=str(model),
+        key_id=key_id,
+        provider=provider,
+        policy=policy,
+        graph_state=graph_state,
+    )
     messages = payload.get("messages", [])
     chars = len(json.dumps(messages))
     max_tokens = int(payload.get("max_tokens", payload.get("max_completion_tokens", 512)) or 512)
@@ -768,7 +782,14 @@ def process_chat_completion(
         )
         return 403, {"error": {"message": "system_prompt_signature_mismatch", "system_prompt_hash": system_hash}}, {"content-type": "application/json"}
 
-    cost, estimated_tokens = estimate_cost_and_tokens(payload, policy)
+    key_provider = str((guard.keys.get(key_id).provider if guard.keys.get(key_id) else provider) or provider)
+    cost, estimated_tokens = estimate_cost_and_tokens(
+        payload,
+        policy,
+        key_id=key_id,
+        provider=key_provider or provider,
+        graph_state=guard.graph_state,
+    )
     base_event = build_base_event(principal_token, payload, key_id, "PENDING", "request_received", system_hash, source_ip)
     decision = guard.check(
         GuardRequest(

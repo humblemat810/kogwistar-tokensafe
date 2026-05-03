@@ -18,6 +18,8 @@ from modelkeyguard.gateway import (
     select_key,
     sha256_text,
 )
+from modelkeyguard.services.pricing_ops import append_pricing_revision
+from modelkeyguard.services.pricing_ops import resolve_price_per_1k_tokens_usd
 from modelkeyguard.graph_state import GraphStateStore, period_bucket
 from modelkeyguard.kogwistar_acl_adapter import MiniACLGraph, load_acl_graph
 from modelkeyguard.sealed_payload import open_json, seal_json
@@ -634,6 +636,117 @@ def test_070_estimate_cost_defaults_unknown_model_price():
     policy = json.loads(Path(POLICY).read_text())
     cost, tokens = estimate_cost_and_tokens({"model": "unknown", "messages": [], "max_tokens": 10}, policy)
     assert cost == round((tokens / 1000.0) * 0.002, 6)
+
+
+def test_070b_estimate_cost_prefers_key_then_provider_model_then_model(tmp_path, monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "test-pricing-precedence-key-32-bytes")
+    store = GraphStateStore.from_policy({"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}}, app_key="test-pricing-precedence-key-32-bytes")
+
+    append_pricing_revision(
+        store,
+        scope="model",
+        subject="gemma4:e2b",
+        price_per_1k_tokens_usd=0.010,
+        actor="pytest",
+        model_price_table={"gemma4:e2b": 0.010},
+    )
+    append_pricing_revision(
+        store,
+        scope="provider_model",
+        subject="ollama:gemma4:e2b",
+        price_per_1k_tokens_usd=0.004,
+        actor="pytest",
+        model_price_table={"gemma4:e2b": 0.010},
+    )
+    append_pricing_revision(
+        store,
+        scope="key",
+        subject="key:fwd-ollama:gemma4-local",
+        price_per_1k_tokens_usd=0.0,
+        actor="pytest",
+        model_price_table={"gemma4:e2b": 0.010},
+    )
+
+    payload = {"model": "gemma4:e2b", "messages": [{"role": "user", "content": "hello"}], "max_tokens": 100}
+    policy = {"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}}
+    key_cost, tokens = estimate_cost_and_tokens(
+        payload,
+        policy,
+        key_id="key:fwd-ollama:gemma4-local",
+        provider="ollama",
+        graph_state=store,
+    )
+    assert key_cost == 0.0
+    provider_cost, _ = estimate_cost_and_tokens(
+        payload,
+        policy,
+        key_id="key:fwd-ollama:gemma4-hosted",
+        provider="ollama",
+        graph_state=store,
+    )
+    assert provider_cost == round((tokens / 1000.0) * 0.004, 6)
+    model_cost, _ = estimate_cost_and_tokens(
+        payload,
+        policy,
+        key_id="key:fwd-other:gemma4-hosted",
+        provider="other",
+        graph_state=store,
+    )
+    assert model_cost == round((tokens / 1000.0) * 0.010, 6)
+
+
+def test_070c_pricing_projection_rebuild_survives_restart(tmp_path, monkeypatch):
+    graph_path = tmp_path / "graph.jsonl"
+    app_key = "test-pricing-rebuild-key-32-bytes"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph_path))
+    monkeypatch.setenv("MODELKEYGUARD_STORE", "jsonl")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", app_key)
+    store = GraphStateStore.from_policy({"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}}, app_key=app_key)
+    append_pricing_revision(
+        store,
+        scope="provider_model",
+        subject="ollama:gemma4:e2b",
+        price_per_1k_tokens_usd=0.004,
+        actor="pytest",
+        model_price_table={"gemma4:e2b": 0.010},
+    )
+    append_pricing_revision(
+        store,
+        scope="key",
+        subject="key:fwd-ollama:gemma4-local",
+        price_per_1k_tokens_usd=0.0,
+        actor="pytest",
+        model_price_table={"gemma4:e2b": 0.010},
+    )
+    # Simulate process restart by reloading from persisted graph file.
+    restarted = GraphStateStore(graph_path, app_key=app_key)
+
+    key_price, src1 = resolve_price_per_1k_tokens_usd(
+        model="gemma4:e2b",
+        key_id="key:fwd-ollama:gemma4-local",
+        provider="ollama",
+        policy={"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}},
+        graph_state=restarted,
+    )
+    pm_price, src2 = resolve_price_per_1k_tokens_usd(
+        model="gemma4:e2b",
+        key_id="key:fwd-ollama:gemma4-hosted",
+        provider="ollama",
+        policy={"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}},
+        graph_state=restarted,
+    )
+    model_price, src3 = resolve_price_per_1k_tokens_usd(
+        model="gemma4:e2b",
+        key_id="key:fwd-other:gemma4-hosted",
+        provider="other",
+        policy={"model_price_per_1k_tokens_usd": {"gemma4:e2b": 0.010}},
+        graph_state=restarted,
+    )
+    assert key_price == 0.0 and src1.startswith("key:")
+    assert pm_price == 0.004 and src2.startswith("provider_model:")
+    assert model_price == 0.010 and src3.startswith("model:")
 
 
 def test_071_extract_system_prompt_concatenates_only_system_messages():
