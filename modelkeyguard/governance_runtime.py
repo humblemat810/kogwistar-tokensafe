@@ -501,6 +501,29 @@ def run_usage_reviewer_runtime(
     conversation_engine = _InMemoryConversationEngine()
     mode = _runtime_mode(runtime_mode)
 
+    def _extract_review_result(final_state: Any) -> dict[str, Any]:
+        state = final_state if isinstance(final_state, dict) else {}
+        direct = state.get("review_result")
+        if isinstance(direct, dict):
+            return dict(direct)
+        keys = sorted(str(k) for k in state.keys()) if isinstance(state, dict) else []
+        raise RuntimeError(
+            "usage_reviewer runtime contract violation: missing dict final_state['review_result']; "
+            f"final_state_keys={keys}"
+        )
+
+    def _raise_if_run_failed(run_result: Any) -> None:
+        status = str(getattr(run_result, "status", "") or "").strip().lower()
+        if status in {"", "succeeded", "success"}:
+            return
+        final_state = getattr(run_result, "final_state", {})
+        details = ""
+        if isinstance(final_state, dict):
+            op_log = final_state.get("op_log")
+            if isinstance(op_log, list) and op_log:
+                details = f"; op_log={op_log}"
+        raise RuntimeError(f"usage_reviewer runtime step failed: status={status}{details}")
+
     if mode == "sync":
         resolver = MappingStepResolver()
 
@@ -537,7 +560,8 @@ def run_usage_reviewer_runtime(
             turn_node_id="usage-reviewer-turn",
             initial_state={},
         )
-        return dict(out.final_state.get("review_result") or {})
+        _raise_if_run_failed(out)
+        return _extract_review_result(out.final_state)
 
     resolver_async = AsyncMappingStepResolver()
 
@@ -578,7 +602,8 @@ def run_usage_reviewer_runtime(
         )
 
     out_async = asyncio.run(_run_async())
-    return dict(out_async.final_state.get("review_result") or {})
+    _raise_if_run_failed(out_async)
+    return _extract_review_result(out_async.final_state)
 
 
 def try_load_policy(path: str | None = None) -> dict[str, Any]:

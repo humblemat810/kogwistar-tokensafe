@@ -10,6 +10,8 @@ from typing import Any
 import urllib.error
 import urllib.request
 
+import pytest
+
 from modelkeyguard.graph_state import GraphStateStore
 from modelkeyguard.reviewer_agent import (
     REVIEW_CHECKPOINT_KEY,
@@ -339,6 +341,109 @@ def test_usage_reviewer_agent_deduplicates_token_candidates(monkeypatch):
         ("KGW_TOKEN", "same-token"),
         ("MODELKEYGUARD_BEARER_TOKEN", "other-token"),
     ]
+
+
+def test_usage_reviewer_agent_raises_when_runtime_returns_empty(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "usage_reviewer_agent.py"
+    spec = importlib.util.spec_from_file_location("usage_reviewer_agent_for_test_empty_runtime", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("REVIEWER_SAFE_TOKEN", "reviewer-token")
+    monkeypatch.delenv("KGW_TOKEN", raising=False)
+    monkeypatch.delenv("SAFE_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("MODELKEYGUARD_BEARER_TOKEN", raising=False)
+
+    monkeypatch.setattr(module, "run_usage_reviewer_runtime", lambda **kwargs: {})
+
+    args = module.argparse.Namespace(
+        base_url="http://127.0.0.1:8789",
+        model="gemma4:e2b",
+        system_prompt="sys",
+        runtime_mode="sync",
+    )
+    with pytest.raises(RuntimeError) as exc:
+        module._run_reviewer_once(
+            args,
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+        )
+    assert "contract violation" in str(exc.value)
+
+
+def test_usage_reviewer_agent_main_one_shot_error_does_not_retry(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "usage_reviewer_agent.py"
+    spec = importlib.util.spec_from_file_location("usage_reviewer_agent_for_test_one_shot", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("REVIEWER_SAFE_TOKEN", "reviewer-token")
+
+    monkeypatch.setattr(
+        module.ReviewStatusClient,
+        "from_env",
+        lambda: module.ReviewStatusClient(base_url="http://127.0.0.1:8789", bearer_token="bearer"),
+    )
+    monkeypatch.setattr(
+        module.ReviewStatusClient,
+        "status",
+        lambda self: {
+            "should_review": True,
+            "summary": {"dangerous_keyword_hits": 1},
+            "window": {"latest_request_id": "req-1"},
+        },
+    )
+    monkeypatch.setattr(module, "run_usage_reviewer_runtime", lambda **kwargs: (_ for _ in ()).throw(RuntimeError("HTTP 500 upstream")))
+
+    sleep_calls: list[float] = []
+
+    def _fake_sleep(seconds: float):
+        sleep_calls.append(float(seconds))
+
+    monkeypatch.setattr(module.time, "sleep", _fake_sleep)
+    monkeypatch.setattr(module.sys, "argv", [str(script_path)])
+    code = module.main()
+    assert code == 1
+    assert sleep_calls == []
+
+
+def test_usage_reviewer_agent_reports_model_key_ambiguous_hint(monkeypatch):
+    repo_root = Path(__file__).resolve().parents[1]
+    script_path = repo_root / "scripts" / "usage_reviewer_agent.py"
+    spec = importlib.util.spec_from_file_location("usage_reviewer_agent_for_test_model_key_hint", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    monkeypatch.setenv("REVIEWER_SAFE_TOKEN", "reviewer-token")
+    monkeypatch.delenv("MODELKEYGUARD_KEY_ID", raising=False)
+    monkeypatch.setattr(
+        module,
+        "run_usage_reviewer_runtime",
+        lambda **kwargs: (_ for _ in ()).throw(
+            RuntimeError("{'message': 'model_key_ambiguous'} (status code: 403)")
+        ),
+    )
+
+    args = module.argparse.Namespace(
+        base_url="http://127.0.0.1:8789",
+        model="gemma4:e2b",
+        system_prompt="sys",
+        runtime_mode="sync",
+    )
+
+    with pytest.raises(RuntimeError) as exc:
+        module._run_reviewer_once(
+            args,
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+        )
+    msg = str(exc.value)
+    assert "model_key_ambiguous" in msg
+    assert "MODELKEYGUARD_KEY_ID" in msg
 
 
 def test_review_status_client_falls_back_to_admin_secret_on_bearer_401(monkeypatch):

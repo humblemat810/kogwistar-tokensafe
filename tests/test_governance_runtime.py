@@ -76,6 +76,93 @@ def test_reviewer_runtime_sync_and_async_are_shape_equivalent(monkeypatch):
     assert sync_out["text"] == "review-ok"
 
 
+def test_reviewer_runtime_contract_violation_when_result_not_top_level_sync(monkeypatch):
+    class _Out:
+        final_state = {"u": {"review_result": {"text": "nested-sync", "model": "m"}}}
+
+    monkeypatch.setattr("modelkeyguard.governance_runtime.WorkflowRuntime.run", lambda self, **kwargs: _Out())
+    try:
+        run_usage_reviewer_runtime(
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+            base_url="http://127.0.0.1:8789",
+            safe_token="safe-token",
+            model="gemma4:e2b",
+            system_prompt="sys",
+            runtime_mode="sync",
+        )
+    except RuntimeError as exc:
+        assert "contract violation" in str(exc)
+    else:
+        raise AssertionError("expected strict reviewer runtime contract violation")
+
+
+def test_reviewer_runtime_contract_violation_when_result_not_top_level_async(monkeypatch):
+    class _Out:
+        final_state = {"u": {"review_result": {"text": "nested-async", "model": "m"}}}
+
+    async def _fake_run(self, **kwargs):
+        return _Out()
+
+    monkeypatch.setattr("modelkeyguard.governance_runtime.AsyncWorkflowRuntime.run", _fake_run)
+    try:
+        run_usage_reviewer_runtime(
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+            base_url="http://127.0.0.1:8789",
+            safe_token="safe-token",
+            model="gemma4:e2b",
+            system_prompt="sys",
+            runtime_mode="async",
+        )
+    except RuntimeError as exc:
+        assert "contract violation" in str(exc)
+    else:
+        raise AssertionError("expected strict reviewer runtime contract violation")
+
+
+def test_reviewer_runtime_surfaces_step_failure_sync(monkeypatch):
+    def _boom(**kwargs):
+        raise RuntimeError("boom-llm-sync")
+
+    monkeypatch.setattr("modelkeyguard.reviewer_agent.run_langchain_reviewer", _boom)
+    try:
+        run_usage_reviewer_runtime(
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+            base_url="http://127.0.0.1:8789",
+            safe_token="safe-token",
+            model="gemma4:e2b",
+            system_prompt="sys",
+            runtime_mode="sync",
+        )
+    except RuntimeError as exc:
+        text = str(exc)
+        assert "runtime step failed" in text
+        assert "boom-llm-sync" in text
+    else:
+        raise AssertionError("expected runtime step failure to surface")
+
+
+def test_reviewer_runtime_surfaces_step_failure_async(monkeypatch):
+    def _boom(**kwargs):
+        raise RuntimeError("boom-llm-async")
+
+    monkeypatch.setattr("modelkeyguard.reviewer_agent.run_langchain_reviewer", _boom)
+    try:
+        run_usage_reviewer_runtime(
+            status={"should_review": True, "summary": {"dangerous_keyword_hits": 1}, "window": {"latest_request_id": "req-1"}},
+            base_url="http://127.0.0.1:8789",
+            safe_token="safe-token",
+            model="gemma4:e2b",
+            system_prompt="sys",
+            runtime_mode="async",
+        )
+    except RuntimeError as exc:
+        text = str(exc)
+        assert "runtime step failed" in text
+        assert "boom-llm-async" in text
+    else:
+        raise AssertionError("expected runtime step failure to surface")
+
+
 def test_scanner_plugins_topic_keyword_and_trigger_decision():
     status = {"should_review": False, "summary": {"dangerous_keyword_hits": 0}, "window": {"latest_request_id": "req-2"}}
     policy = {"scanner_plugins": {"usage_analysis": ["topic_keywords"], "topic_keywords": ["terrorist attacks"]}}

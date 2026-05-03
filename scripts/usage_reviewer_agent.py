@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+"""Run the governance usage reviewer against the ModelKeyGuard gateway.
+
+This CLI has two independent auth paths:
+
+1) Review-status path (`/admin/review/status.json`):
+   - Uses `MODELKEYGUARD_BEARER_TOKEN`, or
+   - `MODELKEYGUARD_ADMIN_API_SECRET`, or
+   - Keycloak service-account minting via `MODELKEYGUARD_OIDC_USAGE_CLIENT_SECRET`.
+
+2) Reviewer model-call path (`/api/chat`):
+   - Uses `REVIEWER_SAFE_TOKEN` (preferred), then token fallbacks.
+
+Output shape is stable for automation:
+- `review_status`
+- `review_result`
+- optional `reviewer_loop_health` and `checkpoint`
+"""
+
 from __future__ import annotations
 
 import argparse
@@ -155,6 +173,12 @@ def main() -> int:
                 )
                 print("review_result:")
                 print(json.dumps(result, indent=2, sort_keys=True))
+                if not str(result.get("text") or "").strip():
+                    print(
+                        "warning: reviewer model call succeeded but returned empty text; "
+                        "check model/key routing or tighten the review prompt.",
+                        file=sys.stderr,
+                    )
                 print("reviewer_loop_health:")
                 print(json.dumps(health, indent=2, sort_keys=True))
 
@@ -204,6 +228,8 @@ def main() -> int:
                 )
                 if bool(transition["terminal_stop"]):
                     return 2
+                if not args.loop:
+                    return 1
                 time.sleep(float(transition["retry_after_seconds"]))
                 iterations += 1
                 if args.max_iterations > 0 and iterations >= args.max_iterations:
@@ -246,9 +272,18 @@ def _run_reviewer_once(args: argparse.Namespace, *, status: dict[str, object]) -
                 key_id=key_id,
                 runtime_mode=args.runtime_mode,
             )
+            if not isinstance(result, dict) or not result:
+                raise RuntimeError("usage_reviewer runtime contract violation: empty review_result payload")
             break
         except RuntimeError as exc:
             last_error = exc
+            exc_text = str(exc)
+            if "model_key_ambiguous" in exc_text and not key_id.strip():
+                raise RuntimeError(
+                    "review model call failed: model_key_ambiguous. "
+                    "Set MODELKEYGUARD_KEY_ID to a specific provider key "
+                    "(for example key:fwd-ollama:gemma4-e2b:3) for this reviewer run."
+                ) from exc
             if "HTTP 401" not in str(exc):
                 raise
             continue

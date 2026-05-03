@@ -39,6 +39,13 @@ bundled into the package, so the `modelkeyguard` CLI can still start without a
 repo checkout or a local `config/gateway_policy.json` file. You only need to
 override `MODELKEYGUARD_POLICY_PATH` if you want a custom policy file.
 
+## Battery included
+Battery (the reviewer agent) included. The battery factory (Runtime with Kogwistar semantics) also included, the battery manufactoring infrastructure (AI operating system) also included.
+
+-----
+
+## Publish dual name
+
 Dual PyPI publishing is supported from the same source tree:
 
 - canonical package: `kogwistar-modelkeyguard`
