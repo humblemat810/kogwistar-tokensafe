@@ -42,6 +42,7 @@ def create_router() -> APIRouter:
             max_age=ttl,
             httponly=True,
             samesite="lax",
+            secure=request.app.state.settings.env.lower() in {"prod", "production"},
             path="/",
         )
         return response

@@ -653,6 +653,22 @@ def _principal_has_admin_role(principal: TokenPrincipal, required_role: str) -> 
     return required_role in allowed
 
 
+def _admin_cookie_request_is_same_origin(request: Any, gateway_public_url: str, env: str) -> bool:
+    """Origin gate for unsafe admin requests authenticated only by a cookie."""
+    if request.method.upper() in {"GET", "HEAD", "OPTIONS", "TRACE"}:
+        return True
+    source = request.headers.get("origin") or request.headers.get("referer")
+    if not source:
+        # Development clients/tests frequently omit Origin; production must not.
+        return env.lower() not in {"prod", "production"}
+    try:
+        expected = urllib.parse.urlsplit(gateway_public_url)
+        actual = urllib.parse.urlsplit(source)
+        return (actual.scheme, actual.netloc) == (expected.scheme, expected.netloc)
+    except ValueError:
+        return False
+
+
 def _upstream_url_allowed(url: str) -> bool:
     """Reject unsafe provider targets before sending credentials.
 
@@ -1476,14 +1492,20 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             if header_val and header_val == settings.admin_api_secret:
                 return await call_next(request)
             if admin_session and str(admin_session.get("source") or "secret") in {"secret", "oidc"}:
+                if not _admin_cookie_request_is_same_origin(request, settings.gateway_public_url, settings.env):
+                    return JSONResponse(status_code=403, content={"error": {"message": "admin_csrf_origin_required"}})
                 return await call_next(request)
 
         if settings.admin_auth_mode == "keycloak":
             if admin_session and str(admin_session.get("source") or "secret") == "oidc":
+                if not _admin_cookie_request_is_same_origin(request, settings.gateway_public_url, settings.env):
+                    return JSONResponse(status_code=403, content={"error": {"message": "admin_csrf_origin_required"}})
                 return await call_next(request)
 
         if is_usage_route and settings.admin_auth_mode in {"secret", "secret_or_keycloak"}:
             if admin_session and str(admin_session.get("source") or "secret") in {"secret", "oidc"}:
+                if not _admin_cookie_request_is_same_origin(request, settings.gateway_public_url, settings.env):
+                    return JSONResponse(status_code=403, content={"error": {"message": "admin_csrf_origin_required"}})
                 return await call_next(request)
 
         wants_html = (

@@ -914,9 +914,10 @@ def test_admin_oidc_browser_login_redirects_and_issues_session_cookie(tmp_path, 
         }
         claims = {
             "sub": "user:admin",
-            "preferred_username": "admin",
-            "iss": "http://keycloak.example/realms/modelguard",
-            "realm_access": {"roles": ["oidc-admin"]},
+                "preferred_username": "admin",
+                "iss": "http://keycloak.example/realms/modelguard",
+                "aud": ["modelguard-admin-web"],
+                "realm_access": {"roles": ["oidc-admin"]},
         }
         header = base64.urlsafe_b64encode(json.dumps(payload).encode("utf-8")).decode("ascii").rstrip("=")
         body = base64.urlsafe_b64encode(json.dumps(claims).encode("utf-8")).decode("ascii").rstrip("=")
@@ -1202,3 +1203,18 @@ def test_admin_policy_quota_upsert_accepts_token_lane_for_issued_safe_token(tmp_
     )
     assert resp.status_code == 200
     assert resp.json()["quota_policy_id"].startswith(f"quota:token:{token_id}:lifetime")
+
+
+def test_browser_oidc_role_is_bound_to_its_client_and_audience():
+    from modelkeyguard.services.admin_oidc import _has_required_role
+
+    foreign_role = {
+        "aud": ["modelguard-admin-web"],
+        "resource_access": {"unrelated-client": {"roles": ["model.admin"]}},
+    }
+    own_role = {
+        "aud": ["modelguard-admin-web"],
+        "resource_access": {"modelguard-admin-web": {"roles": ["model.admin"]}},
+    }
+    assert not _has_required_role(foreign_role, "model.admin", "modelguard-admin-web")
+    assert _has_required_role(own_role, "model.admin", "modelguard-admin-web")

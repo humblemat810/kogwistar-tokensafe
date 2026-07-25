@@ -106,7 +106,7 @@ class AppSettings:
             review_pipeline=read_env_or_file("MODELKEYGUARD_REVIEW_PIPELINE", "legacy_adapter") or "legacy_adapter",
             browser_oidc_client_id=read_env_or_file("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web") or "modelguard-admin-web",
             admin_session_ttl_seconds=int(read_env_or_file("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS", "3600") or "3600"),
-            require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=False),
+            require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=not is_dev_mode(env)),
             history_enabled=bool_env("MODELKEYGUARD_HISTORY_ENABLED", default=True),
             history_retention_days=int(read_env_or_file("MODELKEYGUARD_HISTORY_RETENTION_DAYS", "30") or "30"),
             history_max_active_records=int(read_env_or_file("MODELKEYGUARD_HISTORY_MAX_ACTIVE_RECORDS", "10000") or "10000"),
@@ -149,10 +149,16 @@ class AppSettings:
                 errors.append("KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE or KEYCLOAK_INTROSPECTION_CLIENT_SECRET must be configured for production")
             if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
                 errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
-            if self.admin_auth_mode in {"secret", "secret_or_keycloak"} and self.admin_api_secret == "dev-modelkeyguard-admin-secret":
+            # This signs browser OIDC sessions and state even in keycloak-only
+            # mode, so it must never retain a predictable fallback.
+            if self.admin_api_secret == "dev-modelkeyguard-admin-secret":
                 errors.append("MODELKEYGUARD_ADMIN_API_SECRET_FILE or MODELKEYGUARD_ADMIN_API_SECRET must be configured for production")
-            if self.admin_auth_mode in {"secret", "secret_or_keycloak"} and len(self.admin_api_secret) < 16:
-                errors.append("MODELKEYGUARD_ADMIN_API_SECRET must be at least 16 characters")
+            if len(self.admin_api_secret) < 32:
+                errors.append("MODELKEYGUARD_ADMIN_API_SECRET must be at least 32 characters")
+            if self.gateway_public_url.startswith("http://") and not bool_env("MODELKEYGUARD_ALLOW_INSECURE_ADMIN_HTTP", default=False):
+                errors.append("MODELKEYGUARD_GATEWAY_PUBLIC_URL must use https:// in production (or explicitly set MODELKEYGUARD_ALLOW_INSECURE_ADMIN_HTTP=1 for isolated internal networks)")
+            if not self.require_model_list_auth:
+                errors.append("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH must be enabled in production")
         elif self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
             errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
         if self.admin_session_ttl_seconds <= 0:

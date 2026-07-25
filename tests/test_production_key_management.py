@@ -73,12 +73,16 @@ def test_settings_production_rejects_insecure_keycloak_defaults(monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "x" * 40)
     monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.internal")
+    monkeypatch.setenv("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", "0")
     monkeypatch.delenv("MODELKEYGUARD_ALLOW_INSECURE_KEYCLOAK", raising=False)
     monkeypatch.delenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", raising=False)
     settings = AppSettings.from_env()
     errors = settings.validate_for_startup()
     assert any("KEYCLOAK_URL must use https" in e for e in errors)
     assert any("KEYCLOAK_INTROSPECTION_CLIENT_SECRET" in e for e in errors)
+    assert any("MODELKEYGUARD_ADMIN_API_SECRET" in e for e in errors)
+    assert any("MODELKEYGUARD_GATEWAY_PUBLIC_URL must use https" in e for e in errors)
+    assert any("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH" in e for e in errors)
 
 
 def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):

@@ -23,6 +23,7 @@ def create_router() -> APIRouter:
             client_id=settings.browser_oidc_client_id,
             gateway_public_url=settings.gateway_public_url,
             ttl_seconds=int(settings.admin_session_ttl_seconds),
+            secure_cookies=settings.env.lower() in {"prod", "production"},
         )
 
     @router.get("/admin/oidc/callback")
@@ -39,6 +40,7 @@ def create_router() -> APIRouter:
             client_id=settings.browser_oidc_client_id,
             required_role=settings.admin_required_role,
             ttl_seconds=int(settings.admin_session_ttl_seconds),
+            secure_cookies=settings.env.lower() in {"prod", "production"},
         )
         if isinstance(response, JSONResponse) and response.status_code >= 400:
             return response

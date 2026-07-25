@@ -106,6 +106,7 @@ def admin_oidc_login_response(
     client_id: str,
     gateway_public_url: str,
     ttl_seconds: int,
+    secure_cookies: bool = False,
 ) -> Response:
     browser_gateway_url = _browser_gateway_url(request, gateway_public_url)
     browser_keycloak_url = _browser_keycloak_url(request, keycloak_public_url or keycloak_url, keycloak_local_url=keycloak_local_url)
@@ -128,6 +129,7 @@ def admin_oidc_login_response(
         max_age=ttl_seconds,
         httponly=True,
         samesite="lax",
+        secure=secure_cookies,
         path="/",
     )
     return response
@@ -145,6 +147,7 @@ def admin_oidc_callback_response(
     client_id: str,
     required_role: str,
     ttl_seconds: int,
+    secure_cookies: bool = False,
 ) -> Response:
     state_cookie = request.cookies.get(ADMIN_OIDC_COOKIE_NAME)
     state_payload = parse_login_state(secret, state_cookie)
@@ -166,7 +169,7 @@ def admin_oidc_callback_response(
     )
     access_token = str(payload.get("access_token") or "")
     claims = decode_access_token_claims(access_token)
-    if not _has_required_role(claims, required_role):
+    if not _has_required_role(claims, required_role, client_id):
         return JSONResponse(status_code=403, content={"error": {"message": "admin_role_required", "required_role": required_role}})
     next_target = str(state_payload.get("next") or next_path or "/admin/usage")
     if not next_target.startswith("/admin/"):
@@ -189,6 +192,7 @@ def admin_oidc_callback_response(
         max_age=ttl_seconds,
         httponly=True,
         samesite="lax",
+        secure=secure_cookies,
         path="/",
     )
     response.delete_cookie(ADMIN_OIDC_COOKIE_NAME, path="/")
@@ -249,17 +253,19 @@ def _fetch_json(url: str) -> dict[str, Any]:
         return json.loads(resp.read().decode("utf-8"))
 
 
-def _has_required_role(claims: dict[str, Any], required_role: str) -> bool:
+def _has_required_role(claims: dict[str, Any], required_role: str, client_id: str) -> bool:
+    audiences = claims.get("aud", [])
+    if isinstance(audiences, str):
+        audiences = [audiences]
+    if not isinstance(audiences, list) or client_id not in {str(item) for item in audiences}:
+        return False
     realm_roles = claims.get("realm_access", {}).get("roles", [])
     if isinstance(realm_roles, list) and required_role in [str(r) for r in realm_roles]:
         return True
     resource_access = claims.get("resource_access", {})
-    if isinstance(resource_access, dict):
-        for value in resource_access.values():
-            roles = value.get("roles", []) if isinstance(value, dict) else []
-            if required_role in [str(r) for r in roles]:
-                return True
-    return False
+    value = resource_access.get(client_id, {}) if isinstance(resource_access, dict) else {}
+    roles = value.get("roles", []) if isinstance(value, dict) else []
+    return required_role in [str(role) for role in roles]
 
 
 def _sign_payload(secret: str, payload: dict[str, Any]) -> str:
