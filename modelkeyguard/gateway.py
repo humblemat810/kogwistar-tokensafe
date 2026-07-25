@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import hashlib
+import asyncio
+import base64
 import json
 import os
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import httpx
 from pathlib import Path
+from dataclasses import dataclass
 from typing import Any
 
 from .core import ModelKey, ModelKeyGuard, Principal, Request as GuardRequest
@@ -26,8 +30,126 @@ DEFAULT_POLICY = Path(os.getenv("MODELKEYGUARD_POLICY_PATH", "config/gateway_pol
 AUDIT_PATH = Path(os.getenv("MODELKEYGUARD_AUDIT_PATH", "out/audit.jsonl"))
 
 
+@dataclass
+class UpstreamStream:
+    secret: str
+    raw: bytes
+    provider: str
+    target_url: str
+    content_type: str
+    request_id: str
+    key_id: str
+    model: str
+    decision: Any
+    estimated_cost: float
+    estimated_tokens: int
+    policy: dict[str, Any]
+    graph_state: GraphStateStore | None
+    idempotency_scope: str | None = None
+    opened_client: Any = None
+    opened_response: Any = None
+
+
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+_IDEMPOTENCY_NAMESPACE = "modelkeyguard_idempotency"
+
+
+def _idempotency_read(guard: ModelKeyGuard, scope: str) -> dict[str, Any] | None:
+    cache = getattr(guard, "_idempotency_cache", {})
+    local = cache.get(scope)
+    if isinstance(local, dict) and float(local.get("expires", 0)) > time.time():
+        return dict(local)
+    state = getattr(guard, "graph_state", None)
+    getter = getattr(state, "get_named_projection", None)
+    if callable(getter):
+        row = getter(_IDEMPOTENCY_NAMESPACE, sha256_text(scope))
+        payload = row.get("payload") if isinstance(row, dict) and isinstance(row.get("payload"), dict) else row
+        if isinstance(payload, dict) and float(payload.get("expires", 0)) > time.time():
+            result = dict(payload)
+            encoded = result.pop("body_b64", None)
+            if isinstance(encoded, str):
+                result["body"] = base64.b64decode(encoded.encode("ascii"))
+            cache[scope] = result
+            setattr(guard, "_idempotency_cache", cache)
+            return result
+    return None
+
+
+def _idempotency_write(guard: ModelKeyGuard, scope: str, record: dict[str, Any], *, claim: bool = False) -> bool:
+    state = getattr(guard, "graph_state", None)
+    if claim:
+        cas = getattr(state, "compare_and_swap_named_projections", None)
+        getter = getattr(state, "get_named_projection", None)
+        if callable(cas) and callable(getter):
+            namespace_key = sha256_text(scope)
+            current = getter(_IDEMPOTENCY_NAMESPACE, namespace_key)
+            current_payload = current.get("payload") if isinstance(current, dict) and isinstance(current.get("payload"), dict) else current
+            if isinstance(current_payload, dict) and float(current_payload.get("expires", 0)) > time.time():
+                return False
+            update: dict[str, Any] = {"namespace": _IDEMPOTENCY_NAMESPACE, "key": namespace_key, "payload": dict(record)}
+            if isinstance(current, dict) and "payload" in current:
+                expected_a = int(current.get("last_authoritative_seq", 0))
+                expected_m = int(current.get("last_materialized_seq", 0))
+                update.update(
+                    expected_last_authoritative_seq=expected_a,
+                    expected_last_materialized_seq=expected_m,
+                    last_authoritative_seq=expected_a + 1,
+                    last_materialized_seq=expected_m + 1,
+                )
+            else:
+                update["expected_payload_hash"] = current
+            try:
+                if not bool(cas([update])):
+                    return False
+            except Exception:
+                return False
+    cache = getattr(guard, "_idempotency_cache", None) or {}
+    if claim:
+        cache[scope] = dict(record)
+        setattr(guard, "_idempotency_cache", cache)
+        return True
+
+    # State transitions preserve projection versions and use CAS; unconditional
+    # replace would permit a second worker/restart to clobber a newer outcome.
+    getter = getattr(state, "get_named_projection", None)
+    cas = getattr(state, "compare_and_swap_named_projections", None)
+    replacer = getattr(state, "replace_named_projection", None)
+    payload = dict(record)
+    body = payload.pop("body", None)
+    if isinstance(body, bytes):
+        payload["body_b64"] = base64.b64encode(body).decode("ascii")
+    if callable(getter) and callable(cas):
+        projection_key = sha256_text(scope)
+        attempts = max(1, int(os.getenv("MODELKEYGUARD_IDEMPOTENCY_CAS_RETRIES", "3")))
+        for _attempt in range(attempts):
+            current = getter(_IDEMPOTENCY_NAMESPACE, projection_key)
+            existing = current.get("payload") if isinstance(current, dict) and isinstance(current.get("payload"), dict) else (current if isinstance(current, dict) else {})
+            merged = dict(existing)
+            merged.update(payload)
+            update: dict[str, Any] = {"namespace": _IDEMPOTENCY_NAMESPACE, "key": projection_key, "payload": merged}
+            if isinstance(current, dict) and "payload" in current:
+                ea, em = int(current.get("last_authoritative_seq", 0)), int(current.get("last_materialized_seq", 0))
+                update.update(expected_last_authoritative_seq=ea, expected_last_materialized_seq=em, last_authoritative_seq=ea + 1, last_materialized_seq=em + 1)
+            else:
+                update["expected_payload_hash"] = current if isinstance(current, dict) else None
+            try:
+                if bool(cas([update])):
+                    cache[scope] = dict(merged)
+                    if isinstance(body, bytes):
+                        cache[scope]["body"] = body
+                    setattr(guard, "_idempotency_cache", cache)
+                    return True
+            except Exception:
+                break
+        return False
+    cache[scope] = dict(record)
+    setattr(guard, "_idempotency_cache", cache)
+    if callable(replacer):
+        replacer(_IDEMPOTENCY_NAMESPACE, sha256_text(scope), payload)
+    return True
 
 
 def extract_system_prompt(messages: list[dict[str, Any]]) -> str:
@@ -417,6 +539,11 @@ def provider_usage(data: bytes, provider: str) -> tuple[int, int] | None:
             total = int(usage.get("totalTokenCount") or 0)
             return total, total
     if not isinstance(usage, dict):
+        if provider == "ollama" and isinstance(payload, dict) and any(k in payload for k in ("prompt_eval_count", "eval_count")):
+            prompt = int(payload.get("prompt_eval_count") or 0)
+            completion = int(payload.get("eval_count") or 0)
+            total = int(payload.get("eval_count_total") or (prompt + completion))
+            return total, total
         return None
     if provider == "gemini":
         total = int(usage.get("totalTokenCount") or 0)
@@ -570,6 +697,142 @@ def forward_provider(
     return result
 
 
+def _upstream_headers(secret: str, provider: str, content_type: str) -> dict[str, str]:
+    headers = {"content-type": content_type}
+    if provider == "azure_openai":
+        headers["api-key"] = secret
+    elif provider == "gemini":
+        headers["x-goog-api-key"] = secret
+    else:
+        headers["authorization"] = f"Bearer {secret}"
+    return headers
+
+
+def _usage_from_stream_chunk(chunk: bytes, provider: str) -> dict[str, Any] | None:
+    text = chunk.decode("utf-8", errors="ignore").strip()
+    candidates = [text]
+    if text.startswith("data:"):
+        candidates.insert(0, text[5:].strip())
+    for candidate in candidates:
+        if not candidate or candidate == "[DONE]":
+            continue
+        try:
+            obj = json.loads(candidate)
+        except Exception:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        usage = obj.get("usage") or obj.get("usageMetadata")
+        if isinstance(usage, dict):
+            return usage
+        response = obj.get("response")
+        if isinstance(response, dict) and isinstance(response.get("usage"), dict):
+            return response["usage"]
+        if provider == "ollama" and any(key in obj for key in ("prompt_eval_count", "eval_count")):
+            prompt = int(obj.get("prompt_eval_count") or 0)
+            completion = int(obj.get("eval_count") or 0)
+            return {"prompt_tokens": prompt, "completion_tokens": completion, "total_tokens": prompt + completion}
+    return None
+
+
+async def _open_upstream_stream(stream: UpstreamStream) -> tuple[Any, Any]:
+    timeout = float(os.getenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", "180"))
+    client = httpx.AsyncClient(timeout=timeout)
+    request = client.build_request(
+        "POST", stream.target_url, content=stream.raw, headers=_upstream_headers(stream.secret, stream.provider, stream.content_type)
+    )
+    try:
+        response = await client.send(request, stream=True)
+    except Exception:
+        await client.aclose()
+        raise
+    return client, response
+
+
+async def _stream_upstream(
+    stream: UpstreamStream,
+    *,
+    on_chunk: Any,
+    on_complete: Any,
+    on_uncertain: Any,
+) -> Any:
+    """Forward upstream bytes as they arrive; settle only after terminal EOF."""
+    usage: dict[str, Any] | None = None
+    usage_scan = bytearray()
+    capture = bytearray()
+    max_capture = int(os.getenv("MODELKEYGUARD_HISTORY_MAX_STREAM_BYTES", "1048576"))
+    client = stream.opened_client
+    response = stream.opened_response
+    if client is None or response is None:
+        client, response = await _open_upstream_stream(stream)
+    try:
+        upstream_rejected = response.status_code >= 400 and response.status_code < 500
+        if response.status_code >= 500:
+            await on_uncertain(response.status_code)
+            error_body = await response.aread()
+            if len(capture) < max_capture:
+                capture.extend(error_body[: max_capture - len(capture)])
+            return bytes(capture), None, response.status_code
+        elif upstream_rejected:
+            await on_complete(response.status_code, None, True)
+            rejected_body = await response.aread()
+            if len(capture) < max_capture:
+                capture.extend(rejected_body[: max_capture - len(capture)])
+            return bytes(capture), None, response.status_code
+        async for chunk in response.aiter_raw():
+            if not chunk:
+                continue
+            if len(capture) < max_capture:
+                capture.extend(chunk[: max_capture - len(capture)])
+            usage = _usage_from_stream_chunk(chunk, stream.provider) or usage
+            usage_scan.extend(chunk)
+            if len(usage_scan) > 131072:
+                del usage_scan[:-65536]
+            for line in bytes(usage_scan).splitlines():
+                usage = _usage_from_stream_chunk(line, stream.provider) or usage
+            await on_chunk(chunk)
+        if response.status_code >= 500 or upstream_rejected:
+            return bytes(capture), usage, response.status_code
+        await on_complete(response.status_code, usage, False)
+        return bytes(capture), usage, response.status_code
+    except asyncio.CancelledError:
+        # Client disconnect must not cancel upstream accounting.  Clear the
+        # cancellation on this worker, drain to EOF (bounded by a dedicated
+        # timeout), then settle or mark uncertain.  No chunks are enqueued
+        # after disconnect, preventing an unbounded orphan queue.
+        task = asyncio.current_task()
+        if task is not None and hasattr(task, "uncancel"):
+            task.uncancel()
+        drain_timeout = float(os.getenv("MODELKEYGUARD_PROVIDER_DRAIN_TIMEOUT_SECONDS", "180"))
+        try:
+            async with asyncio.timeout(drain_timeout):
+                async for chunk in response.aiter_raw():
+                    if not chunk:
+                        continue
+                    if len(capture) < max_capture:
+                        capture.extend(chunk[: max_capture - len(capture)])
+                    usage = _usage_from_stream_chunk(chunk, stream.provider) or usage
+                    usage_scan.extend(chunk)
+                    if len(usage_scan) > 131072:
+                        del usage_scan[:-65536]
+                    for line in bytes(usage_scan).splitlines():
+                        usage = _usage_from_stream_chunk(line, stream.provider) or usage
+            if response.status_code >= 500:
+                await on_uncertain(response.status_code)
+            else:
+                await on_complete(response.status_code, usage, response.status_code < 400)
+            return bytes(capture), usage, response.status_code
+        except Exception:
+            await on_uncertain(499)
+            return bytes(capture), usage, 499
+    except Exception:
+        await on_uncertain(502)
+        return bytes(capture), usage, 502
+    finally:
+        if client is not None:
+            await client.aclose()
+
+
 def _llm_joblib_cache_enabled() -> bool:
     return os.getenv("MODELKEYGUARD_LLM_CALL_CACHE", "0").strip().lower() in {"1", "true", "yes", "joblib"}
 
@@ -709,6 +972,8 @@ def process_chat_completion(
     history_meta: dict[str, Any] | None = None,
     requested_key_id: str | None = None,
     idempotency_key: str | None = None,
+    streaming: bool = False,
+    dry_run: bool | None = None,
 ) -> tuple[int, dict[str, Any] | bytes, dict[str, str]]:
     meta = history_meta if history_meta is not None else {}
 
@@ -798,24 +1063,34 @@ def process_chat_completion(
     rehydrate_runtime_key(guard, key_id)
 
     idem_key = str(idempotency_key or "").strip()
-    idem_cache = getattr(guard, "_idempotency_cache", None)
-    if idem_cache is None:
-        idem_cache = {}
-        setattr(guard, "_idempotency_cache", idem_cache)
+    idem_cache = getattr(guard, "_idempotency_cache", None) or {}
+    setattr(guard, "_idempotency_cache", idem_cache)
     idem_scope = f"{principal_token.namespace}:{principal_token.principal_id}:{provider}:{key_id}:{idem_key}"
     idem_hash = sha256_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
     if idem_key:
-        cached = idem_cache.get(idem_scope)
+        cached = _idempotency_read(guard, idem_scope)
         if cached and float(cached.get("expires", 0)) > time.time():
             if cached.get("payload_hash") != idem_hash:
                 return 409, {"error": {"message": "idempotency_key_reused_with_different_payload"}}, {"content-type": "application/json"}
             if cached.get("state") == "uncertain":
                 return 502, {"error": {"message": "idempotency_outcome_uncertain"}}, {"content-type": "application/json"}
+            if cached.get("state") in {"reserved", "forwarding"}:
+                return 409, {"error": {"message": "idempotency_request_in_progress"}}, {"content-type": "application/json"}
+            if cached.get("state") == "settled" and cached.get("replayable") is False:
+                return 409, {"error": {"message": "idempotency_stream_result_not_replayable"}}, {"content-type": "application/json"}
             cached_body = cached.get("body")
             if isinstance(cached_body, bytes):
                 return int(cached.get("status", 200)), cached_body, dict(cached.get("headers") or {})
             return int(cached.get("status", 200)), cached_body, dict(cached.get("headers") or {})
-        idem_cache[idem_scope] = {"payload_hash": idem_hash, "state": "forwarding", "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))}
+        claimed = _idempotency_write(
+            guard,
+            idem_scope,
+            {"payload_hash": idem_hash, "state": "forwarding", "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+            claim=True,
+        )
+        if not claimed:
+            return 409, {"error": {"message": "idempotency_request_in_progress"}}, {"content-type": "application/json"}
+        idem_cache = getattr(guard, "_idempotency_cache", idem_cache)
 
     messages = payload.get("messages", [])
     system_prompt = extract_system_prompt(messages) if isinstance(messages, list) else ""
@@ -900,9 +1175,31 @@ def process_chat_completion(
         _set_meta(http_status=decision.http_status)
         return decision.http_status, {"error": {"message": decision.reason, "acl_reason": decision.acl_reason, "remaining": decision.remaining}}, {"content-type": "application/json"}
 
+    if not guard.reserve_admission(
+        GuardRequest(
+            principal=Principal(principal_token.principal_id, principal_token.kind, principal_token.groups),
+            key_id=key_id,
+            model=str(model),
+            namespace=principal_token.namespace,
+            estimated_cost_usd=cost,
+            estimated_tokens=estimated_tokens,
+            request_id=decision.request_id,
+            token_id=principal_token.token_id,
+            on_behalf_of_user_id=principal_token.on_behalf_of_user_id,
+        ),
+        decision,
+    ):
+        if idem_key:
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "released"})
+        _set_meta(http_status=429, decision="BLOCKED", reason="quota_reservation_conflict")
+        return 429, {"error": {"message": "quota_reservation_conflict"}}, {"content-type": "application/json"}
+
     try:
         secret = resolve_secret(decision.secret_ref or "", guard)
     except KeyLifecycleError as e:
+        guard.update_reservation(decision.request_id, "released")
+        if idem_key:
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "released"})
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(decision.request_id, "SECRET_RESOLUTION_DENIED", {"reason": str(e), "key_id": decision.key_id})
         _set_meta(
@@ -914,13 +1211,13 @@ def process_chat_completion(
         )
         return 403, {"error": {"message": str(e)}}, {"content-type": "application/json"}
 
-    dry_run_mode = os.getenv("MODELKEYGUARD_DRY_RUN", "1") == "1"
+    dry_run_mode = (os.getenv("MODELKEYGUARD_DRY_RUN", "1") == "1") if dry_run is None else bool(dry_run)
     if not secret:
         if dry_run_mode:
-            guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+            guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens, usage_authoritative=False)
             dry_body = dry_run_response(str(model), principal_token.principal_id, key_id, event)
             if idem_key:
-                idem_cache[idem_scope].update({"state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
+                _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
             _set_meta(http_status=200)
             return 200, dry_body, {"content-type": "application/json"}
         if guard.graph_state:
@@ -929,6 +1226,9 @@ def process_chat_completion(
                 "SECRET_RESOLUTION_DENIED",
                 {"reason": "provider_secret_missing", "key_id": decision.key_id},
             )
+        guard.update_reservation(decision.request_id, "released")
+        if idem_key:
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "released"})
         _set_meta(
             http_status=403,
             decision="BLOCKED",
@@ -937,10 +1237,10 @@ def process_chat_completion(
         return 403, {"error": {"message": "provider_secret_missing", "key_id": decision.key_id}}, {"content-type": "application/json"}
 
     if dry_run_mode:
-        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens, usage_authoritative=False)
         dry_body = dry_run_response(str(model), principal_token.principal_id, key_id, event)
         if idem_key:
-            idem_cache[idem_scope].update({"state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
         _set_meta(http_status=200)
         return 200, dry_body, {"content-type": "application/json"}
 
@@ -948,6 +1248,36 @@ def process_chat_completion(
     provider_body = forward_body or raw_body or json.dumps(payload).encode("utf-8")
     if requested_key_id:
         provider_body = _strip_modelkeyguard_control_fields(payload)
+
+    if streaming:
+        # Admission and audit are committed before opening upstream.  The
+        # response generator owns terminal settlement and remains responsible
+        # for draining upstream after a client disconnect.
+        guard.update_reservation(decision.request_id, "forwarding")
+        if guard.graph_state:
+            guard.graph_state.append_access_conversation_event(
+                decision.request_id,
+                "QUOTA_RESERVATION_FORWARDING",
+                {"key_id": key_id, "provider": provider, "estimated_tokens": estimated_tokens},
+            )
+        stream = UpstreamStream(
+            secret=secret,
+            raw=provider_body,
+            provider=provider,
+            target_url=resolved_upstream_url or default_upstream_url(provider),
+            content_type=forward_content_type,
+            request_id=decision.request_id,
+            key_id=key_id,
+            model=str(model),
+            decision=decision,
+            estimated_cost=cost,
+            estimated_tokens=estimated_tokens,
+            policy=policy,
+            graph_state=guard.graph_state,
+            idempotency_scope=idem_scope if idem_key else None,
+        )
+        _set_meta(http_status=200, decision="FORWARDING")
+        return 200, stream, {"content-type": "text/event-stream"}
 
     status, headers, body = forward_provider(
         secret,
@@ -967,12 +1297,13 @@ def process_chat_completion(
             fallback_cost=cost,
             fallback_tokens=estimated_tokens,
         )
-        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=actual_cost, actual_tokens=actual_tokens)
+        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=actual_cost, actual_tokens=actual_tokens, usage_authoritative=usage_authoritative)
         _set_meta(http_status=status, decision="ALLOWED", usage_authoritative=usage_authoritative)
         if idem_key:
-            idem_cache[idem_scope].update({"state": "settled", "status": status, "headers": dict(headers), "body": body})
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "settled", "status": status, "headers": dict(headers), "body": body})
     elif 400 <= status < 500:
         # Provider rejected before inference: no usage debit.
+        guard.update_reservation(decision.request_id, "released")
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(
                 decision.request_id,
@@ -982,9 +1313,14 @@ def process_chat_completion(
         _set_meta(http_status=status, decision="UPSTREAM_REJECTED")
         if idem_key:
             idem_cache.pop(idem_scope, None)
+            state = getattr(guard, "graph_state", None)
+            clearer = getattr(state, "clear_named_projection", None)
+            if callable(clearer):
+                clearer(_IDEMPOTENCY_NAMESPACE, sha256_text(idem_scope))
     else:
         # Timeout/5xx outcome may have reached provider. Preserve an explicit
         # uncertain state; never pretend estimated cost is actual usage.
+        guard.update_reservation(decision.request_id, "uncertain")
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(
                 decision.request_id,
@@ -993,7 +1329,7 @@ def process_chat_completion(
             )
         _set_meta(http_status=status, decision="UNCERTAIN", reason="upstream_outcome_unknown")
         if idem_key:
-            idem_cache[idem_scope]["state"] = "uncertain"
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "uncertain"})
     return status, body, headers
 
 
@@ -1053,7 +1389,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             if required and provided == required:
                 return await call_next(request)
 
-        is_usage_route = path in {"/admin/usage", "/admin/usage.json", "/admin/review/status.json"}
+        is_usage_route = path in {"/admin/usage", "/admin/usage.json"}
 
         if settings.admin_auth_mode in {"keycloak", "secret_or_keycloak"}:
             try:
@@ -1239,6 +1575,8 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             history_meta=history_meta,
             requested_key_id=x_modelkeyguard_key_id,
             idempotency_key=request.headers.get("idempotency-key"),
+            streaming=adapter.should_stream(payload, route_model=route_model, deployment=deployment, operation=operation),
+            dry_run=app.state.settings.dry_run,
         )
 
         content_type = headers.get("content-type", "application/json")
@@ -1250,27 +1588,189 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             _capture_history(metadata={**history_meta, "http_status": status}, response_raw=response.body)
             return response
 
-        if adapter.should_stream(payload, route_model=route_model, deployment=deployment, operation=operation):
-            source_chunks = adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
+        if adapter.should_stream(payload, route_model=route_model, deployment=deployment, operation=operation) and isinstance(data, (UpstreamStream, dict)):
             max_capture = int(os.getenv("MODELKEYGUARD_HISTORY_MAX_STREAM_BYTES", "1048576"))
+            if isinstance(data, UpstreamStream):
+                try:
+                    data.opened_client, data.opened_response = await _open_upstream_stream(data)
+                except Exception as exc:
+                    app.state.guard.update_reservation(data.request_id, "uncertain")
+                    if data.graph_state:
+                        data.graph_state.append_access_conversation_event(
+                            data.request_id,
+                            "QUOTA_RESERVATION_UNCERTAIN",
+                            {"reason": "upstream_open_failed", "error": exc.__class__.__name__, "provider": data.provider},
+                        )
+                    if data.idempotency_scope:
+                        _idempotency_write(
+                            app.state.guard,
+                            data.idempotency_scope,
+                            {"state": "uncertain", "status": 502, "replayable": False, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+                        )
+                    return JSONResponse(status_code=502, content={"error": {"message": "provider_upstream_unreachable"}})
+                if data.opened_response.status_code >= 400:
+                    rejected_status = int(data.opened_response.status_code)
+                    rejected_body = await data.opened_response.aread()
+                    rejected_content_type = data.opened_response.headers.get("content-type", "application/json")
+                    await data.opened_response.aclose()
+                    await data.opened_client.aclose()
+                    app.state.guard.update_reservation(data.request_id, "released" if rejected_status < 500 else "uncertain")
+                    if data.idempotency_scope:
+                        if rejected_status < 500:
+                            cache = getattr(app.state.guard, "_idempotency_cache", {})
+                            cache.pop(data.idempotency_scope, None)
+                            state = getattr(app.state.guard, "graph_state", None)
+                            clearer = getattr(state, "clear_named_projection", None)
+                            if callable(clearer):
+                                clearer(_IDEMPOTENCY_NAMESPACE, sha256_text(data.idempotency_scope))
+                        else:
+                            _idempotency_write(
+                                app.state.guard,
+                                data.idempotency_scope,
+                                {"state": "uncertain", "status": rejected_status, "replayable": False, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+                            )
+                    return Response(content=rejected_body, status_code=rejected_status, media_type=rejected_content_type)
 
             async def bounded_stream():
+                # Bound pending output: slow clients must backpressure upstream;
+                # after disconnect, producer drains without retaining chunks.
+                queue_limit = max(1, int(os.getenv("MODELKEYGUARD_STREAM_QUEUE_CHUNKS", "32")))
+                queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=queue_limit)
+                terminal: dict[str, Any] = {}
+                disconnected = asyncio.Event()
+
+                async def on_chunk(chunk: bytes) -> None:
+                    if disconnected.is_set():
+                        return
+                    if not terminal.get("streaming_started") and isinstance(data, UpstreamStream):
+                        terminal["streaming_started"] = True
+                        app.state.guard.update_reservation(data.request_id, "streaming")
+                        if data.graph_state:
+                            data.graph_state.append_access_conversation_event(
+                                data.request_id,
+                                "QUOTA_RESERVATION_STREAMING",
+                                {"provider": data.provider, "key_id": data.key_id},
+                            )
+                    while not disconnected.is_set():
+                        try:
+                            await asyncio.wait_for(queue.put(bytes(chunk)), timeout=0.5)
+                            return
+                        except asyncio.TimeoutError:
+                            continue
+
+                async def on_complete(http_status: int, usage: dict[str, Any] | None, released: bool) -> None:
+                    terminal.update(http_status=http_status, usage=usage, released=released, settled=not released)
+                    if isinstance(data, UpstreamStream):
+                        data.graph_state and app.state.guard.update_reservation(data.request_id, "released" if released else "settled")
+
+                async def on_uncertain(http_status: int) -> None:
+                    terminal.update(http_status=http_status, uncertain=True)
+                    if isinstance(data, UpstreamStream):
+                        data.graph_state and app.state.guard.update_reservation(data.request_id, "uncertain")
+
+                async def run_upstream() -> None:
+                    try:
+                        if isinstance(data, UpstreamStream):
+                            body, usage, upstream_status = await _stream_upstream(
+                                data, on_chunk=on_chunk, on_complete=on_complete, on_uncertain=on_uncertain
+                            )
+                        else:
+                            body = b""
+                            for synthetic_chunk in adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment, operation=operation):
+                                body += bytes(synthetic_chunk)
+                                await on_chunk(bytes(synthetic_chunk))
+                            usage = data.get("usage") if isinstance(data, dict) else None
+                            upstream_status = status
+                            await on_complete(upstream_status, usage, False)
+                        terminal.setdefault("body", body)
+                        terminal.setdefault("usage", usage)
+                        terminal.setdefault("http_status", upstream_status)
+                    finally:
+                        while True:
+                            try:
+                                queue.put_nowait(None)
+                                break
+                            except asyncio.QueueFull:
+                                if not disconnected.is_set():
+                                    await queue.put(None)
+                                    break
+                                try:
+                                    queue.get_nowait()
+                                except asyncio.QueueEmpty:
+                                    continue
+
+                task = asyncio.create_task(run_upstream())
                 captured: list[bytes] = []
                 captured_bytes = 0
                 try:
-                    for chunk in source_chunks:
+                    while True:
+                        chunk = await queue.get()
+                        if chunk is None:
+                            break
                         if captured_bytes < max_capture:
-                            raw_chunk = bytes(chunk)
                             room = max_capture - captured_bytes
-                            captured.append(raw_chunk[:room])
-                            captured_bytes += min(len(raw_chunk), room)
+                            captured.append(chunk[:room])
+                            captured_bytes += min(len(chunk), room)
                         yield chunk
+                    await task
                 finally:
-                    reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
-                    reconstructed_raw = json.dumps(reconstructed, sort_keys=True).encode("utf-8")
+                    disconnected.set()
+                    if not task.done():
+                        # Do not abandon an upstream request on client disconnect.
+                        while not task.done():
+                            try:
+                                await asyncio.shield(task)
+                            except asyncio.CancelledError:
+                                current = asyncio.current_task()
+                                if current is not None and hasattr(current, "uncancel"):
+                                    current.uncancel()
+                        # Preserve settlement/history after the disconnected
+                        # client has been detached; response output is simply
+                        # discarded by ASGI.
+                    body = bytes(b"".join(captured))
+                    usage = terminal.get("usage")
+                    usage_authoritative: bool | None = None
+                    if terminal.get("settled") and not terminal.get("uncertain") and isinstance(data, UpstreamStream):
+                        usage_body = json.dumps({"usage": usage}).encode("utf-8") if usage else body
+                        actual_cost, actual_tokens, authoritative = settled_cost(
+                            usage_body,
+                            provider=data.provider,
+                            model=data.model,
+                            key_id=data.key_id,
+                            policy=data.policy,
+                            graph_state=data.graph_state,
+                            fallback_cost=data.estimated_cost,
+                            fallback_tokens=data.estimated_tokens,
+                        )
+                        usage_authoritative = authoritative
+                        data.decision and app.state.guard.record_usage(
+                            data.decision,
+                            estimated_cost_usd=data.estimated_cost,
+                            actual_cost_usd=actual_cost,
+                            actual_tokens=actual_tokens,
+                            usage_authoritative=usage_authoritative,
+                        )
+                        if data.graph_state:
+                            data.graph_state.append_access_conversation_event(
+                                data.request_id,
+                                "QUOTA_RESERVATION_SETTLED",
+                                {"usage_authoritative": authoritative, "actual_tokens": actual_tokens, "actual_cost_usd": actual_cost},
+                            )
+                        if data.idempotency_scope:
+                            _idempotency_write(
+                                app.state.guard,
+                                data.idempotency_scope,
+                                {"state": "settled", "replayable": False, "status": terminal.get("http_status", 200), "headers": {"content-type": adapter.stream_media_type}, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+                            )
+                    elif isinstance(data, UpstreamStream) and data.idempotency_scope:
+                        _idempotency_write(
+                            app.state.guard,
+                            data.idempotency_scope,
+                            {"state": "uncertain" if terminal.get("uncertain") else "released", "status": terminal.get("http_status", 502), "headers": {"content-type": adapter.stream_media_type}, "body": body, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+                        )
                     _capture_history(
-                        metadata={**history_meta, "http_status": status},
-                        response_raw=reconstructed_raw,
+                        metadata={**history_meta, "http_status": terminal.get("http_status", status), "usage_authoritative": usage_authoritative, "usage_estimated": usage_authoritative is False},
+                        response_raw=body,
                         stream_chunks=captured,
                     )
             return StreamingResponse(

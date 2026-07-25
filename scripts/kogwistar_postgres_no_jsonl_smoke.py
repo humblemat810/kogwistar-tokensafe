@@ -54,7 +54,8 @@ def main() -> int:
     with tempfile.TemporaryDirectory(prefix="mkg-kogwistar-pg-") as run_dir_raw:
         run_dir = Path(run_dir_raw)
         graph_path = run_dir / "must_not_exist_graph.jsonl"
-        os.chdir(run_dir)
+        # Keep caller cwd unchanged: Windows cannot remove a directory that is
+        # still the process current directory when TemporaryDirectory exits.
         os.environ.update(
             {
                 "MODELKEYGUARD_STORE": "kogwistar_postgres",
@@ -177,6 +178,12 @@ def main() -> int:
                 sort_keys=True,
             )
         )
+        # Windows keeps SQLite/temp paths locked while SQLAlchemy pools live;
+        # release every graph runtime before TemporaryDirectory cleanup.
+        for candidate in (store, reloaded, retry_loaded):
+            close = getattr(candidate, "close", None)
+            if callable(close):
+                close()
     return 0
 
 

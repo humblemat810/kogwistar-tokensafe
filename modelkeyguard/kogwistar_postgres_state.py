@@ -402,6 +402,24 @@ class KogwistarPostgresGraphStateStore:
         self._rt = self._build_runtime()
         self.load()
 
+    def close(self) -> None:
+        """Release SQLAlchemy pools held by smoke/tests and process shutdown."""
+        seen: set[int] = set()
+        for owner in (self._rt.engine, self._rt.meta, getattr(self._rt.engine, "backend", None)):
+            engine = getattr(owner, "engine", None)
+            if engine is None or id(engine) in seen:
+                continue
+            seen.add(id(engine))
+            dispose = getattr(engine, "dispose", None)
+            if callable(dispose):
+                result = dispose()
+                if hasattr(result, "__await__"):
+                    try:
+                        import asyncio
+                        asyncio.run(result)
+                    except RuntimeError:
+                        pass
+
     def _build_runtime(self) -> _KogwistarRuntime:
         enforce_installed_kogwistar_only()
         try:

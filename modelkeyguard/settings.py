@@ -72,6 +72,7 @@ class AppSettings:
     history_max_active_bytes: int
     kogwistar_embed_dim: int
     kogwistar_enforce_installed_only: bool
+    review_pipeline: str = "legacy_adapter"
 
     @classmethod
     def from_env(cls) -> "AppSettings":
@@ -102,6 +103,7 @@ class AppSettings:
             admin_auth_mode=read_env_or_file("MODELKEYGUARD_ADMIN_AUTH_MODE", "secret") or "secret",
             admin_required_role=read_env_or_file("MODELKEYGUARD_ADMIN_REQUIRED_ROLE", "model.admin") or "model.admin",
             usage_required_role=read_env_or_file("MODELKEYGUARD_USAGE_REQUIRED_ROLE", "model.usage.read") or "model.usage.read",
+            review_pipeline=read_env_or_file("MODELKEYGUARD_REVIEW_PIPELINE", "legacy_adapter") or "legacy_adapter",
             browser_oidc_client_id=read_env_or_file("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web") or "modelguard-admin-web",
             admin_session_ttl_seconds=int(read_env_or_file("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS", "3600") or "3600"),
             require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=False),
@@ -115,7 +117,11 @@ class AppSettings:
 
     def validate_for_startup(self) -> list[str]:
         errors: list[str] = []
+        if self.review_pipeline not in {"legacy_adapter", "graph"}:
+            errors.append("MODELKEYGUARD_REVIEW_PIPELINE must be legacy_adapter or graph")
         if self.env.lower() in {"prod", "production"}:
+            if self.dry_run:
+                errors.append("MODELKEYGUARD_DRY_RUN must be false in production")
             if not self.graph_key:
                 errors.append("MODELKEYGUARD_GRAPH_KEY_FILE or MODELKEYGUARD_GRAPH_KEY must be configured for production")
             elif self.graph_key == "dev-modelkeyguard-change-me":

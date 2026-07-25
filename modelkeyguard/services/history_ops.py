@@ -339,7 +339,7 @@ def _projection_get(graph_state: GraphStateStore, namespace: str, key: str) -> d
     if hasattr(graph_state, "get_named_projection"):
         rec = getattr(graph_state, "get_named_projection")(namespace, key)
         if isinstance(rec, dict):
-            payload = rec.get("payload")
+            payload = rec.get("payload") if "payload" in rec else rec
             return dict(payload) if isinstance(payload, dict) else None
         return None
     payload = graph_state.projections.get(f"{namespace}:{key}")

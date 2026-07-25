@@ -21,6 +21,9 @@ def create_router() -> APIRouter:
         payload = await _parse_payload(request)
         reviewed_by = str(payload.get("reviewed_by") or "reviewer-agent")
         review_summary = str(payload.get("review_summary") or "")
+        # Never accept a caller-supplied status/window.  Recompute from the
+        # authoritative graph so an authenticated caller cannot inject a
+        # future cursor and suppress subsequent reviews.
         checkpoint = advance_review_checkpoint(
             request.app.state.guard.graph_state,
             request.app.state.policy,

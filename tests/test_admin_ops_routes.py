@@ -779,8 +779,23 @@ def test_admin_usage_routes_can_accept_keycloak_usage_role(tmp_path, monkeypatch
 
     assert client.get("/admin/usage", headers={"authorization": "Bearer kc-usage"}).status_code == 200
     assert client.get("/admin/usage.json", headers={"authorization": "Bearer kc-usage"}).status_code == 200
+    assert client.get("/admin/review/status.json", headers={"authorization": "Bearer kc-usage"}).status_code == 403
+    assert client.get("/admin/review/status.json", headers={"authorization": "Bearer kc-admin"}).status_code == 200
     assert client.get("/admin/keys", headers={"authorization": "Bearer kc-usage"}).status_code == 403
     assert client.get("/admin/policy", headers={"authorization": "Bearer kc-usage"}).status_code == 403
+
+
+def test_admin_review_run_can_select_graph_authoritative_pipeline(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_REVIEW_PIPELINE", "graph")
+    client = TestClient(create_app("config/gateway_policy.json"))
+    response = client.post("/admin/review/run", headers=ADMIN_HEADERS, json={})
+    assert response.status_code == 200
+    assert response.json()["pipeline"] == "graph"
+    assert response.json()["automatic_retry"] is False
 
 
 def test_admin_routes_can_allow_secret_or_keycloak(tmp_path, monkeypatch):

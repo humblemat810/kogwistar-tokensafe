@@ -10,6 +10,7 @@ from typing import Any
 
 from .alert_rules import AlertEngine, LLMUsageReviewer, load_jsonl
 from .graph_state import GraphStateStore
+from .reviewer_agent import advance_review_checkpoint
 
 
 def review_once(
@@ -42,6 +43,7 @@ def review_once(
     result = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "event_type": "MODEL_USAGE_REVIEW_BATCH_COMPLETED",
+        "pipeline": "legacy-audit-adapter",
         "events_seen": len(events),
         "alerts": alerts,
         "reviews": reviews,
@@ -52,6 +54,21 @@ def review_once(
         f.write(json.dumps(result, sort_keys=True) + "\n")
     graph.put_node(f"review_batch:{int(time.time())}", "review_batch", result)
     graph.append_event("MODEL_USAGE_REVIEW_BATCH_COMPLETED", "review_worker", result)
+    # Keep legacy audit scheduling on the same graph cursor as the reviewer
+    # agent.  This prevents the two entrypoints from reviewing the same window
+    # twice while preserving the legacy output contract.
+    if events:
+        latest_ts, latest_request_id = max((_parse_ts(e.get("ts")), str(e.get("request_id") or "")) for e in events)
+        advance_review_checkpoint(
+            graph,
+            policy,
+            reviewed_by="review_worker",
+            review_summary="legacy audit adapter batch",
+            status={
+                "checkpoint": {},
+                "window": {"latest_ts": latest_ts.isoformat().replace("+00:00", "Z"), "latest_request_id": latest_request_id},
+            },
+        )
     if checkpoint_path and events:
         latest = max((_parse_ts(e.get("ts")), str(e.get("request_id") or "")) for e in events)
         _save_checkpoint(checkpoint_path, *latest)

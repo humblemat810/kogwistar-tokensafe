@@ -2,6 +2,7 @@ import json
 import time
 import urllib.error
 
+import httpx
 import pytest
 
 from modelkeyguard import gateway
@@ -491,6 +492,35 @@ def test_openai_streaming_chat_completions_supported(tmp_path, monkeypatch):
         headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
     )
     assert response.status_code == 200
+    assert "data: [DONE]" in response.text
+
+
+def test_openai_real_async_upstream_stream_route_settles_after_eof(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+
+    class OneChunk(httpx.AsyncByteStream):
+        async def __aiter__(self):
+            yield b'data: {"choices":[{"delta":{"content":"hello"}}]}\n\n'
+            yield b'data: {"usage":{"prompt_tokens":2,"completion_tokens":1,"total_tokens":3}}\n\n'
+            yield b"data: [DONE]\n\n"
+
+    transport = httpx.MockTransport(lambda request: httpx.Response(200, stream=OneChunk(), headers={"content-type": "text/event-stream"}))
+    real_client = httpx.AsyncClient
+    monkeypatch.setattr(gateway.httpx, "AsyncClient", lambda **kwargs: real_client(transport=transport, **kwargs))
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(tmp_path / "audit.jsonl"))
+    monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "0")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-provider-secret")
+    client = TestClient(create_app("config/gateway_policy.json"))
+
+    response = client.post(
+        "/v1/chat/completions",
+        json={**_payload(), "stream": True},
+        headers={"Authorization": "Bearer kgw_demo_doc_ingestor"},
+    )
+    assert response.status_code == 200
+    assert "hello" in response.text
     assert "data: [DONE]" in response.text
 
 

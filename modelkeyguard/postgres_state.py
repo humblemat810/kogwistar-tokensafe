@@ -163,6 +163,75 @@ class PostgresGraphStateStore:
             )
         self.projections[f"{namespace}:{key}"] = payload
 
+    def compare_and_swap_named_projections(self, updates: list[dict[str, Any]]) -> bool:
+        """Atomically compare and replace several projections in one transaction.
+
+        Rows lock in deterministic namespace/key order.  Every compare runs before
+        any write, so one stale lane aborts the complete admission update.
+        """
+        if not updates:
+            return True
+        rows = sorted(updates, key=lambda item: (str(item["namespace"]), str(item["key"])))
+        if len({(str(item["namespace"]), str(item["key"])) for item in rows}) != len(rows):
+            raise ValueError("duplicate named projection key")
+        staged: list[tuple[dict[str, Any], tuple[Any, ...] | None]] = []
+        with self._connect() as conn, conn.cursor() as cur:
+            for item in rows:
+                namespace, key = str(item["namespace"]), str(item["key"])
+                cur.execute(
+                    """select payload_sealed, last_authoritative_seq,
+                              last_materialized_seq
+                       from named_projections
+                       where namespace=%s and key=%s
+                       for update""",
+                    (namespace, key),
+                )
+                current = cur.fetchone()
+                expected_hash = item.get("expected_payload_hash")
+                expected_a = item.get("expected_last_authoritative_seq")
+                expected_m = item.get("expected_last_materialized_seq")
+                if expected_hash is not None:
+                    if current is None or open_json(dict(current[0]), self.app_key) != expected_hash:
+                        return False
+                elif expected_a is None and expected_m is None:
+                    if current is not None:
+                        return False
+                elif current is None or int(current[1]) != int(expected_a) or int(current[2]) != int(expected_m):
+                    return False
+                staged.append((item, current))
+
+            for item, _current in staged:
+                namespace, key = str(item["namespace"]), str(item["key"])
+                payload = dict(item["payload"])
+                sealed = seal_json(payload, self.app_key)
+                authoritative = int(item.get("last_authoritative_seq", 0))
+                materialized = int(item.get("last_materialized_seq", 0))
+                schema_version = int(item.get("projection_schema_version", PROJECTION_SCHEMA_VERSION))
+                status = str(item.get("materialization_status", "ready"))
+                cur.execute(
+                    """insert into named_projections(
+                             namespace,key,payload_sealed,last_authoritative_seq,
+                             last_materialized_seq,projection_schema_version,
+                             materialization_status,updated_at_ms)
+                       values (%s,%s,%s::jsonb,%s,%s,%s,%s,
+                               (extract(epoch from clock_timestamp()) * 1000)::bigint)
+                       on conflict(namespace,key) do update set
+                         payload_sealed=excluded.payload_sealed,
+                         last_authoritative_seq=excluded.last_authoritative_seq,
+                         last_materialized_seq=excluded.last_materialized_seq,
+                         projection_schema_version=excluded.projection_schema_version,
+                         materialization_status=excluded.materialization_status,
+                         updated_at_ms=excluded.updated_at_ms""",
+                    (namespace, key, json.dumps(sealed), authoritative, materialized, schema_version, status),
+                )
+                cur.execute(
+                    "insert into graph_records(record_type,id,kind,payload_sealed) values ('projection',%s,%s,%s::jsonb)",
+                    (f"{namespace}:{key}", namespace, json.dumps(sealed)),
+                )
+        for item, _current in staged:
+            self.projections[f"{item['namespace']}:{item['key']}"] = dict(item["payload"])
+        return True
+
     def list_named_projections(self, namespace: str) -> list[dict[str, Any]]:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute(

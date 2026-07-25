@@ -59,6 +59,17 @@ def _ts_to_iso(value: datetime) -> str:
     return value.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _cursor(row: dict[str, Any]) -> tuple[datetime, str]:
+    return _parse_ts(row.get("ts")), str(row.get("request_id") or "")
+
+
+def _after_checkpoint(row: dict[str, Any], checkpoint: dict[str, Any]) -> bool:
+    return _cursor(row) > (
+        _parse_ts(checkpoint.get("last_reviewed_ts")),
+        str(checkpoint.get("last_reviewed_request_id") or ""),
+    )
+
+
 def _ollama_chat_review(
     *,
     base_url: str,
@@ -359,26 +370,18 @@ def compute_review_status(graph_state: GraphStateStore, policy: dict[str, Any]) 
     checkpoint_ts = _parse_ts(checkpoint.get("last_reviewed_ts"))
     history_rows = _history_rows(graph_state)
     usage_rows = _usage_rows(graph_state)
-    history_after = [row for row in history_rows if _parse_ts(row.get("ts")) > checkpoint_ts]
-    usage_after = [row for row in usage_rows if _parse_ts(row.get("ts")) > checkpoint_ts]
+    history_after = [row for row in history_rows if _after_checkpoint(row, checkpoint)]
+    usage_after = [row for row in usage_rows if _after_checkpoint(row, checkpoint)]
 
     keywords = _review_keywords(rules)
     keyword_hits = _dangerous_keyword_hits(history_after, keywords)
     conversation_count = len({str(row.get("request_id") or "") for row in history_after if str(row.get("request_id") or "")})
     usd_used = round(sum(float(row.get("actual_cost_usd") or 0.0) for row in usage_after), 8)
     token_used = int(sum(int(row.get("actual_tokens") or 0) for row in usage_after))
-    latest_ts = max(
-        [checkpoint_ts]
-        + [_parse_ts(row.get("ts")) for row in history_after]
-        + [_parse_ts(row.get("ts")) for row in usage_after]
-    )
-    latest_history = history_after[-1] if history_after else None
-    latest_usage = usage_after[-1] if usage_after else None
-    latest_request_id = ""
-    if latest_history:
-        latest_request_id = str(latest_history.get("request_id") or "")
-    elif latest_usage:
-        latest_request_id = str(latest_usage.get("request_id") or "")
+    candidates = history_after + usage_after
+    latest_row = max(candidates, key=_cursor) if candidates else None
+    latest_ts = _parse_ts(latest_row.get("ts")) if latest_row else checkpoint_ts
+    latest_request_id = str(latest_row.get("request_id") or "") if latest_row else str(checkpoint.get("last_reviewed_request_id") or "")
 
     token_threshold = _review_threshold(rules, "token_used_since_last_review", 50000)
     dollar_threshold = _review_threshold(rules, "dollar_used_since_last_review", 1.0)
@@ -453,7 +456,21 @@ def advance_review_checkpoint(
     review_summary: str = "",
     status: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    status = status or compute_review_status(graph_state, policy)
+    computed_status = compute_review_status(graph_state, policy)
+    if status is None:
+        status = computed_status
+    else:
+        # Callers may provide a precomputed status for compatibility, but a
+        # cursor beyond the authoritative graph is never accepted.
+        supplied_window = status.get("window") if isinstance(status, dict) else None
+        computed_window = computed_status.get("window") if isinstance(computed_status, dict) else None
+        supplied_ts = supplied_window.get("latest_ts") if isinstance(supplied_window, dict) else None
+        computed_ts = computed_window.get("latest_ts") if isinstance(computed_window, dict) else None
+        if supplied_ts and computed_ts:
+            supplied_cursor = (_parse_ts(supplied_ts), str(supplied_window.get("latest_request_id") or ""))
+            computed_cursor = (_parse_ts(computed_ts), str(computed_window.get("latest_request_id") or ""))
+            if supplied_cursor > computed_cursor:
+                status = computed_status
     checkpoint = status.get("checkpoint") if isinstance(status.get("checkpoint"), dict) else {}
     latest_ts = str(status.get("window", {}).get("latest_ts") or checkpoint.get("last_reviewed_ts") or iso_now())
     latest_request_id = str(status.get("window", {}).get("latest_request_id") or checkpoint.get("last_reviewed_request_id") or "")

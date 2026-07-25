@@ -139,23 +139,18 @@ def test_graph_payload_is_sealed_at_rest(tmp_path):
     assert store.secret_payload_plaintext_is_not_stored("sk-should-not-appear")
 
 
-def test_missing_policy_file_bootstraps_empty_guard(tmp_path, monkeypatch):
+def test_missing_custom_policy_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
-    guard, policy = build_guard(tmp_path / "does-not-exist.json")
-    assert policy == {}
-    assert guard.graph_state is not None
-    # Base policy seed nodes still exist for graph invariants.
-    assert "policy:version:0001" in guard.graph_state.nodes
-    assert "issuer:keycloak:modelguard" in guard.graph_state.nodes
+    with pytest.raises(FileNotFoundError, match="policy_file_not_found"):
+        build_guard(tmp_path / "does-not-exist.json")
 
 
-def test_blank_policy_file_bootstraps_token_verifier(tmp_path, monkeypatch):
+def test_blank_policy_file_fails_closed(tmp_path, monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
     blank = tmp_path / "blank_policy.json"
     blank.write_text("", encoding="utf-8")
-    verifier = TokenVerifier(blank)
-    with pytest.raises(TokenAuthError):
-        verifier.verify_token("missing-token")
+    with pytest.raises(ValueError, match="policy_file_empty"):
+        TokenVerifier(blank)
 
 
 def test_keycloak_introspection_secret_supports_file_env(tmp_path, monkeypatch):

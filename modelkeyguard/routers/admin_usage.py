@@ -8,6 +8,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from ..review_worker import review_once
+from ..reviewer_agent import compute_review_status
 from ..services.ui_pages import render_admin_usage_page
 from ..services.usage_ops import build_usage_monitor_dataset, load_usage_events
 
@@ -55,6 +56,10 @@ def create_router() -> APIRouter:
                 payload = {}
         except Exception:
             payload = {}
+
+        if request.app.state.settings.review_pipeline == "graph":
+            status = compute_review_status(request.app.state.guard.graph_state, request.app.state.policy)
+            return JSONResponse(status_code=200, content={"pipeline": "graph", "status": status, "automatic_retry": False})
 
         sample_size = int(payload.get("sample_size") or os.getenv("MODELKEYGUARD_REVIEW_SAMPLE_SIZE", "200"))
         run_llm_review = bool(

@@ -119,6 +119,18 @@ def test_advance_review_checkpoint_updates_projection(tmp_path, monkeypatch):
     assert stored["last_reviewed_request_id"] == "req-new"
 
 
+def test_advance_review_checkpoint_rejects_future_supplied_cursor(tmp_path):
+    graph = GraphStateStore(tmp_path / "graph.jsonl", app_key="test-reviewer-key-32-bytes-minimum!")
+    policy = json.loads(Path("config/gateway_policy.json").read_text(encoding="utf-8"))
+    checkpoint = advance_review_checkpoint(
+        graph,
+        policy,
+        status={"checkpoint": {}, "window": {"latest_ts": "2999-01-01T00:00:00Z", "latest_request_id": "forged"}},
+    )
+    assert checkpoint["last_reviewed_ts"] != "2999-01-01T00:00:00Z"
+    assert checkpoint["last_reviewed_request_id"] != "forged"
+
+
 def test_review_status_cli_local_mode_matches_core(tmp_path, monkeypatch, capsys):
     now = datetime.now(timezone.utc)
     graph_path = tmp_path / "graph.jsonl"

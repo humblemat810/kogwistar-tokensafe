@@ -14,6 +14,7 @@ authors = [{ name = "Peter Chan", email = "humblemat@gmail.com" }]
 dependencies = [
   "kogwistar>=0.2.4",
   "fastapi>=0.115",
+  "httpx>=0.27",
   "uvicorn[standard]>=0.30",
   "python-multipart>=0.0.9",
   "cryptography>=42",
