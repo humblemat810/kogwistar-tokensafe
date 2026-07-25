@@ -21,13 +21,11 @@ def create_router() -> APIRouter:
         payload = await _parse_payload(request)
         reviewed_by = str(payload.get("reviewed_by") or "reviewer-agent")
         review_summary = str(payload.get("review_summary") or "")
-        status = payload.get("status") if isinstance(payload.get("status"), dict) else None
         checkpoint = advance_review_checkpoint(
             request.app.state.guard.graph_state,
             request.app.state.policy,
             reviewed_by=reviewed_by,
             review_summary=review_summary,
-            status=status,
         )
         return JSONResponse(status_code=200, content={"ok": True, "checkpoint": checkpoint})
 

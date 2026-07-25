@@ -61,7 +61,12 @@ class TokenVerifier:
         self.realm = os.getenv("KEYCLOAK_REALM", "modelguard")
         self.introspection_client_id = os.getenv("KEYCLOAK_INTROSPECTION_CLIENT_ID", "modelguard-gateway")
         self.introspection_client_secret = read_env_or_file("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "gateway-secret") or "gateway-secret"
-        self.require_keycloak = os.getenv("MODELKEYGUARD_REQUIRE_KEYCLOAK", "0") == "1"
+        # Auth mode is the source of truth.  The legacy strict flag remains a
+        # compatible alias, but must never be weakened by a local-token fallback.
+        configured_mode = os.getenv("MODELKEYGUARD_AUTH_MODE", "local").strip().lower()
+        strict_flag = os.getenv("MODELKEYGUARD_REQUIRE_KEYCLOAK", "0").strip().lower() in {"1", "true", "yes", "on"}
+        self.auth_mode = configured_mode
+        self.require_keycloak = strict_flag or configured_mode == "keycloak"
 
     def verify_authorization_header(self, header: str | None) -> TokenPrincipal:
         return self.verify_token(self._bearer_token_from_header(header))
@@ -85,7 +90,7 @@ class TokenVerifier:
         kc = self._verify_keycloak_token(token)
         if kc:
             return kc
-        if local:
+        if local and self.auth_mode == "local_or_keycloak":
             return local
         raise TokenAuthError("invalid_or_inactive_token")
 

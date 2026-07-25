@@ -161,12 +161,21 @@ def test_admin_review_status_and_checkpoint_routes(tmp_path, monkeypatch):
     checkpoint = client.post(
         "/admin/review/checkpoint",
         headers=ADMIN_HEADERS,
-        json={"reviewed_by": "pytest-reviewer", "review_summary": "checkpoint advanced", "status": body},
+        json={
+            "reviewed_by": "pytest-reviewer",
+            "review_summary": "checkpoint advanced",
+            "status": {
+                "checkpoint": {"last_reviewed_ts": "2999-01-01T00:00:00Z"},
+                "window": {"latest_ts": "2999-01-01T00:00:00Z", "latest_request_id": "forged"},
+            },
+        },
     )
     assert checkpoint.status_code == 200
     checkpoint_body = checkpoint.json()
     assert checkpoint_body["ok"] is True
     assert checkpoint_body["checkpoint"]["reviewed_by"] == "pytest-reviewer"
+    assert checkpoint_body["checkpoint"]["last_reviewed_ts"] != "2999-01-01T00:00:00Z"
+    assert checkpoint_body["checkpoint"]["last_reviewed_request_id"] == "req-admin-review"
     assert graph_state.projections["modelkeyguard.review.checkpoint:runtime"]["reviewed_by"] == "pytest-reviewer"
 
 
@@ -722,6 +731,8 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.post("/admin/policy/pricing/upsert", json={}).status_code == 401
     assert client.post("/admin/policy/pricing/revoke", json={}).status_code == 401
     assert client.post("/admin/review/run", json={}).status_code == 401
+    assert client.get("/admin/review/status.json").status_code == 401
+    assert client.post("/admin/review/checkpoint", json={}).status_code == 401
 
 
 def test_admin_routes_can_require_keycloak_admin_role(tmp_path, monkeypatch):

@@ -604,10 +604,10 @@ def test_065_expired_local_token_is_rejected(tmp_path):
         TokenVerifier(p).verify_token("expired")
 
 
-def test_066_require_keycloak_allows_local_fallback_when_keycloak_unavailable(monkeypatch):
+def test_066_require_keycloak_rejects_local_fallback_when_keycloak_unavailable(monkeypatch):
     monkeypatch.setenv("MODELKEYGUARD_REQUIRE_KEYCLOAK", "1")
-    token = TokenVerifier(POLICY).verify_token("kgw_demo_doc_ingestor")
-    assert token.principal_id == "agent:doc-ingestor"
+    with pytest.raises(TokenAuthError, match="invalid_or_inactive_token"):
+        TokenVerifier(POLICY).verify_token("kgw_demo_doc_ingestor")
 
 
 # ---------------------------------------------------------------------------

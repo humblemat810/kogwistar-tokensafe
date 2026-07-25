@@ -571,7 +571,8 @@ def run_usage_reviewer_runtime(
 
     @resolver_async.register("review")
     async def _review_async(_ctx: Any):
-        result = run_langchain_reviewer(
+        result = await asyncio.to_thread(
+            run_langchain_reviewer,
             status=status,
             base_url=base_url,
             safe_token=safe_token,
@@ -608,10 +609,10 @@ def run_usage_reviewer_runtime(
 
 def try_load_policy(path: str | None = None) -> dict[str, Any]:
     policy_path = path or _env("MODELKEYGUARD_POLICY_PATH", "config/gateway_policy.json")
-    try:
-        return json.loads(Path(policy_path).read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    payload = json.loads(Path(policy_path).read_text(encoding="utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("policy_root_must_be_json_object")
+    return payload
 
 
 def _topic_keywords_plugin(payload: dict[str, Any]) -> dict[str, Any]:

@@ -404,6 +404,50 @@ def estimate_cost_and_tokens(
     return round((estimated_tokens / 1000.0) * price, 6), estimated_tokens
 
 
+def provider_usage(data: bytes, provider: str) -> tuple[int, int] | None:
+    """Extract authoritative token usage when provider returned it."""
+    try:
+        payload = json.loads(data.decode("utf-8"))
+    except Exception:
+        return None
+    usage = payload.get("usage") if isinstance(payload, dict) else None
+    if not isinstance(usage, dict) and provider == "gemini":
+        usage = payload.get("usageMetadata") if isinstance(payload, dict) else None
+        if isinstance(usage, dict):
+            total = int(usage.get("totalTokenCount") or 0)
+            return total, total
+    if not isinstance(usage, dict):
+        return None
+    if provider == "gemini":
+        total = int(usage.get("totalTokenCount") or 0)
+        return total, total
+    prompt = int(usage.get("prompt_tokens") or usage.get("input_tokens") or 0)
+    completion = int(usage.get("completion_tokens") or usage.get("output_tokens") or 0)
+    total = int(usage.get("total_tokens") or (prompt + completion))
+    return total, total
+
+
+def settled_cost(
+    response_body: bytes,
+    *,
+    provider: str,
+    model: str,
+    key_id: str,
+    policy: dict[str, Any],
+    graph_state: GraphStateStore | None,
+    fallback_cost: float,
+    fallback_tokens: int,
+) -> tuple[float, int, bool]:
+    usage = provider_usage(response_body, provider)
+    if usage is None:
+        return fallback_cost, fallback_tokens, False
+    total, tokens = usage
+    price, _ = resolve_price_per_1k_tokens_usd(
+        model=model, key_id=key_id, provider=provider, policy=policy, graph_state=graph_state
+    )
+    return round((total / 1000.0) * price, 6), tokens, True
+
+
 def append_audit(event: dict[str, Any]) -> None:
     AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
     with AUDIT_PATH.open("a", encoding="utf-8") as f:
@@ -664,6 +708,7 @@ def process_chat_completion(
     forward_content_type: str = "application/json",
     history_meta: dict[str, Any] | None = None,
     requested_key_id: str | None = None,
+    idempotency_key: str | None = None,
 ) -> tuple[int, dict[str, Any] | bytes, dict[str, str]]:
     meta = history_meta if history_meta is not None else {}
 
@@ -751,6 +796,26 @@ def process_chat_completion(
     # rehydrate at request time before guard.check. This keeps restart/eviction
     # behavior robust while preserving graph as source of truth.
     rehydrate_runtime_key(guard, key_id)
+
+    idem_key = str(idempotency_key or "").strip()
+    idem_cache = getattr(guard, "_idempotency_cache", None)
+    if idem_cache is None:
+        idem_cache = {}
+        setattr(guard, "_idempotency_cache", idem_cache)
+    idem_scope = f"{principal_token.namespace}:{principal_token.principal_id}:{provider}:{key_id}:{idem_key}"
+    idem_hash = sha256_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    if idem_key:
+        cached = idem_cache.get(idem_scope)
+        if cached and float(cached.get("expires", 0)) > time.time():
+            if cached.get("payload_hash") != idem_hash:
+                return 409, {"error": {"message": "idempotency_key_reused_with_different_payload"}}, {"content-type": "application/json"}
+            if cached.get("state") == "uncertain":
+                return 502, {"error": {"message": "idempotency_outcome_uncertain"}}, {"content-type": "application/json"}
+            cached_body = cached.get("body")
+            if isinstance(cached_body, bytes):
+                return int(cached.get("status", 200)), cached_body, dict(cached.get("headers") or {})
+            return int(cached.get("status", 200)), cached_body, dict(cached.get("headers") or {})
+        idem_cache[idem_scope] = {"payload_hash": idem_hash, "state": "forwarding", "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))}
 
     messages = payload.get("messages", [])
     system_prompt = extract_system_prompt(messages) if isinstance(messages, list) else ""
@@ -853,8 +918,11 @@ def process_chat_completion(
     if not secret:
         if dry_run_mode:
             guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+            dry_body = dry_run_response(str(model), principal_token.principal_id, key_id, event)
+            if idem_key:
+                idem_cache[idem_scope].update({"state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
             _set_meta(http_status=200)
-            return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
+            return 200, dry_body, {"content-type": "application/json"}
         if guard.graph_state:
             guard.graph_state.append_access_conversation_event(
                 decision.request_id,
@@ -870,8 +938,11 @@ def process_chat_completion(
 
     if dry_run_mode:
         guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
+        dry_body = dry_run_response(str(model), principal_token.principal_id, key_id, event)
+        if idem_key:
+            idem_cache[idem_scope].update({"state": "settled", "status": 200, "headers": {"content-type": "application/json"}, "body": dry_body})
         _set_meta(http_status=200)
-        return 200, dry_run_response(str(model), principal_token.principal_id, key_id, event), {"content-type": "application/json"}
+        return 200, dry_body, {"content-type": "application/json"}
 
     resolved_upstream_url = _merge_upstream_base(upstream_url, _key_upstream_override(policy, guard, key_id))
     provider_body = forward_body or raw_body or json.dumps(payload).encode("utf-8")
@@ -885,8 +956,44 @@ def process_chat_completion(
         url=resolved_upstream_url,
         content_type=forward_content_type,
     )
-    guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=cost, actual_tokens=estimated_tokens)
-    _set_meta(http_status=status, decision="ALLOWED")
+    if 200 <= status < 300:
+        actual_cost, actual_tokens, usage_authoritative = settled_cost(
+            body,
+            provider=provider,
+            model=str(model),
+            key_id=key_id,
+            policy=policy,
+            graph_state=guard.graph_state,
+            fallback_cost=cost,
+            fallback_tokens=estimated_tokens,
+        )
+        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=actual_cost, actual_tokens=actual_tokens)
+        _set_meta(http_status=status, decision="ALLOWED", usage_authoritative=usage_authoritative)
+        if idem_key:
+            idem_cache[idem_scope].update({"state": "settled", "status": status, "headers": dict(headers), "body": body})
+    elif 400 <= status < 500:
+        # Provider rejected before inference: no usage debit.
+        if guard.graph_state:
+            guard.graph_state.append_access_conversation_event(
+                decision.request_id,
+                "QUOTA_RESERVATION_RELEASED",
+                {"reason": "provider_rejected", "http_status": status, "key_id": key_id},
+            )
+        _set_meta(http_status=status, decision="UPSTREAM_REJECTED")
+        if idem_key:
+            idem_cache.pop(idem_scope, None)
+    else:
+        # Timeout/5xx outcome may have reached provider. Preserve an explicit
+        # uncertain state; never pretend estimated cost is actual usage.
+        if guard.graph_state:
+            guard.graph_state.append_access_conversation_event(
+                decision.request_id,
+                "QUOTA_RESERVATION_UNCERTAIN",
+                {"reason": "upstream_outcome_unknown", "http_status": status, "key_id": key_id},
+            )
+        _set_meta(http_status=status, decision="UNCERTAIN", reason="upstream_outcome_unknown")
+        if idem_key:
+            idem_cache[idem_scope]["state"] = "uncertain"
     return status, body, headers
 
 
@@ -1131,6 +1238,7 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             forward_content_type=adapter.forward_content_type(payload, route_model=route_model, deployment=deployment, operation=operation),
             history_meta=history_meta,
             requested_key_id=x_modelkeyguard_key_id,
+            idempotency_key=request.headers.get("idempotency-key"),
         )
 
         content_type = headers.get("content-type", "application/json")
@@ -1143,16 +1251,30 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
             return response
 
         if adapter.should_stream(payload, route_model=route_model, deployment=deployment, operation=operation):
-            chunks = list(adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment, operation=operation))
-            reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
-            reconstructed_raw = json.dumps(reconstructed, sort_keys=True).encode("utf-8")
-            _capture_history(
-                metadata={**history_meta, "http_status": status},
-                response_raw=reconstructed_raw,
-                stream_chunks=chunks,
-            )
+            source_chunks = adapter.stream_chunks(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
+            max_capture = int(os.getenv("MODELKEYGUARD_HISTORY_MAX_STREAM_BYTES", "1048576"))
+
+            async def bounded_stream():
+                captured: list[bytes] = []
+                captured_bytes = 0
+                try:
+                    for chunk in source_chunks:
+                        if captured_bytes < max_capture:
+                            raw_chunk = bytes(chunk)
+                            room = max_capture - captured_bytes
+                            captured.append(raw_chunk[:room])
+                            captured_bytes += min(len(raw_chunk), room)
+                        yield chunk
+                finally:
+                    reconstructed = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)
+                    reconstructed_raw = json.dumps(reconstructed, sort_keys=True).encode("utf-8")
+                    _capture_history(
+                        metadata={**history_meta, "http_status": status},
+                        response_raw=reconstructed_raw,
+                        stream_chunks=captured,
+                    )
             return StreamingResponse(
-                iter(chunks),
+                bounded_stream(),
                 media_type=adapter.stream_media_type,
             )
         response_payload = adapter.success_payload(data, model, payload, route_model=route_model, deployment=deployment, operation=operation)

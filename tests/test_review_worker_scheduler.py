@@ -63,3 +63,24 @@ def test_review_once_lookback_and_checkpoint_are_idempotent(tmp_path, monkeypatc
         checkpoint_path=checkpoint,
     )
     assert second["events_seen"] == 0
+
+
+def test_review_once_checkpoint_cursor_keeps_same_timestamp_events(tmp_path, monkeypatch):
+    ts = _iso(datetime.now(timezone.utc) - timedelta(minutes=1))
+    audit = tmp_path / "audit.jsonl"
+    out = tmp_path / "review_results.jsonl"
+    checkpoint = tmp_path / "review_checkpoint.json"
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(tmp_path / "graph.jsonl"))
+    _write_jsonl(audit, [
+        {"ts": ts, "request_id": "a", "decision": "ALLOWED", "reason": "allowed"},
+        {"ts": ts, "request_id": "b", "decision": "ALLOWED", "reason": "allowed"},
+    ])
+    first = review_once(audit, Path("config/gateway_policy.json"), out, run_llm_review=False, checkpoint_path=checkpoint)
+    assert first["events_seen"] == 2
+    _write_jsonl(audit, [
+        {"ts": ts, "request_id": "a", "decision": "ALLOWED", "reason": "allowed"},
+        {"ts": ts, "request_id": "b", "decision": "ALLOWED", "reason": "allowed"},
+        {"ts": ts, "request_id": "c", "decision": "ALLOWED", "reason": "allowed"},
+    ])
+    second = review_once(audit, Path("config/gateway_policy.json"), out, run_llm_review=False, checkpoint_path=checkpoint)
+    assert second["events_seen"] == 1

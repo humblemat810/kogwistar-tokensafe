@@ -5,6 +5,7 @@ from datetime import datetime, timezone, timedelta
 import json
 import os
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -20,6 +21,7 @@ DEFAULT_APP_KEY = "dev-modelkeyguard-change-me"
 QUOTA_POLICY_PROJECTION_PREFIX = "quota_policy_projection"
 SUPPORTED_STORE_BACKENDS = {"jsonl", "postgres", "kogwistar_postgres"}
 SUPPORTED_QUOTA_PERIODS = {"10s", "hour", "day", "week", "month", "infinite", "lifetime"}
+_PROJECTION_CAS_LOCK = threading.RLock()
 
 
 def utc_now() -> datetime:
@@ -181,6 +183,12 @@ class GraphStateStore:
         self.projections[projection_id] = payload
         self._append({"record_type": "projection", "id": projection_id, "kind": "quota_total", "payload_sealed": seal_json(payload, self.app_key)})
 
+    def get_named_projection(self, namespace: str, key: str) -> dict[str, Any] | None:
+        return self.projections.get(f"{namespace}:{key}")
+
+    def replace_named_projection(self, namespace: str, key: str, payload: dict[str, Any]) -> None:
+        self.put_projection(f"{namespace}:{key}", payload)
+
     def edges_from(self, source: str, kind: str | None = None) -> Iterable[GraphEdge]:
         for e in self.edges.values():
             if e.source == source and (kind is None or e.kind == kind):
@@ -307,6 +315,20 @@ class GraphStateStore:
             return True
         return forbidden not in self.path.read_text(encoding="utf-8")
 
+    def compare_and_swap_named_projections(self, updates: list[dict[str, Any]]) -> bool:
+        """Process-atomic CAS adapter for JSONL/in-memory state."""
+        with _PROJECTION_CAS_LOCK:
+            for item in updates:
+                current = self.projections.get(f"{item['namespace']}:{item['key']}")
+                expected = item.get("expected_payload_hash")
+                if expected is None and current is not None:
+                    return False
+                if expected is not None and current != expected:
+                    return False
+            for item in updates:
+                self.put_projection(f"{item['namespace']}:{item['key']}", dict(item["payload"]))
+        return True
+
     @classmethod
     def from_policy(cls, policy: dict[str, Any], path: str | Path | None = None, app_key: str | None = None) -> "GraphStateStore":
         store = resolve_store_backend()
@@ -350,6 +372,7 @@ class GraphStateStore:
                         **quota,
                     },
                 )
+
                 store.put_edge(f"edge:{user_id}:HAS_QUOTA_POLICY:{qid}", "HAS_QUOTA_POLICY", user_id, qid, {})
         for token, entry in policy.get("local_tokens", {}).items():
             principal_id = entry["principal_id"]

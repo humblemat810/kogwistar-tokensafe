@@ -23,12 +23,17 @@ def review_once(
 ) -> dict[str, Any]:
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     events = load_jsonl(audit_path)
-    checkpoint_ts = _load_checkpoint_ts(checkpoint_path) if checkpoint_path else None
+    checkpoint = _load_checkpoint(checkpoint_path) if checkpoint_path else None
     if lookback_minutes:
         since = datetime.now(timezone.utc) - timedelta(minutes=lookback_minutes)
         events = [e for e in events if _parse_ts(e.get("ts")) >= since]
-    if checkpoint_ts:
-        events = [e for e in events if _parse_ts(e.get("ts")) > checkpoint_ts]
+    if checkpoint:
+        checkpoint_ts, checkpoint_request_id = checkpoint
+        events = [
+            e for e in events
+            if (_parse_ts(e.get("ts")), str(e.get("request_id") or ""))
+            > (checkpoint_ts, checkpoint_request_id)
+        ]
     if sample_size and len(events) > sample_size:
         events = events[-sample_size:]
     graph = GraphStateStore.from_policy(policy)
@@ -48,7 +53,8 @@ def review_once(
     graph.put_node(f"review_batch:{int(time.time())}", "review_batch", result)
     graph.append_event("MODEL_USAGE_REVIEW_BATCH_COMPLETED", "review_worker", result)
     if checkpoint_path and events:
-        _save_checkpoint_ts(checkpoint_path, max(_parse_ts(e.get("ts")) for e in events))
+        latest = max((_parse_ts(e.get("ts")), str(e.get("request_id") or "")) for e in events)
+        _save_checkpoint(checkpoint_path, *latest)
     return result
 
 
@@ -95,7 +101,7 @@ def _parse_ts(value: Any) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
-def _load_checkpoint_ts(path: Path) -> datetime | None:
+def _load_checkpoint(path: Path) -> tuple[datetime, str] | None:
     if not path.exists():
         return None
     try:
@@ -105,12 +111,15 @@ def _load_checkpoint_ts(path: Path) -> datetime | None:
     value = payload.get("last_ts")
     if not value:
         return None
-    return _parse_ts(value)
+    return _parse_ts(value), str(payload.get("last_request_id") or "")
 
 
-def _save_checkpoint_ts(path: Path, ts: datetime) -> None:
+def _save_checkpoint(path: Path, ts: datetime, request_id: str = "") -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps({"last_ts": ts.isoformat().replace("+00:00", "Z")}, sort_keys=True), encoding="utf-8")
+    payload = {"last_ts": ts.isoformat().replace("+00:00", "Z"), "last_request_id": request_id}
+    temp = path.with_name(f".{path.name}.tmp-{os.getpid()}" )
+    temp.write_text(json.dumps(payload, sort_keys=True), encoding="utf-8")
+    os.replace(temp, path)
 
 if __name__ == "__main__":
     raise SystemExit(main())

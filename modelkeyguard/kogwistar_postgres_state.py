@@ -664,6 +664,17 @@ class KogwistarPostgresGraphStateStore:
         )
         self.projections[f"{namespace}:{key}"] = payload
 
+    def compare_and_swap_named_projections(self, updates: list[dict[str, Any]]) -> bool:
+        """Delegate atomic multi-projection CAS to installed Kogwistar meta store."""
+        fn = getattr(self._rt.meta, "compare_and_swap_named_projections", None)
+        if not callable(fn):
+            raise RuntimeError("installed Kogwistar meta store lacks multi-projection CAS")
+        ok = bool(fn(updates))
+        if ok:
+            for item in updates:
+                self.projections[f"{item['namespace']}:{item['key']}"] = dict(item["payload"])
+        return ok
+
     def list_named_projections(self, namespace: str) -> list[dict[str, Any]]:
         return self._rt.meta.list_named_projections(namespace)
 

@@ -15,7 +15,7 @@ _DEFAULT_POLICY_PATHS = {
 def _read_json_object(path: Path) -> dict[str, Any]:
     text = path.read_text(encoding="utf-8").strip()
     if not text:
-        return {}
+        raise ValueError("policy_file_empty")
     data = json.loads(text)
     if not isinstance(data, dict):
         raise ValueError("policy_root_must_be_json_object")
@@ -39,15 +39,15 @@ def load_policy_json(path: str | Path) -> dict[str, Any]:
                 checkout_default = _checkout_default_policy_path()
                 if checkout_default.exists():
                     return _read_json_object(checkout_default)
-                return {}
+                raise FileNotFoundError(f"policy_file_not_found: {p}")
             if not text:
                 checkout_default = _checkout_default_policy_path()
                 if checkout_default.exists():
                     return _read_json_object(checkout_default)
-                return {}
+                raise FileNotFoundError(f"policy_file_empty: {p}")
             data = json.loads(text)
             if not isinstance(data, dict):
                 raise ValueError("policy_root_must_be_json_object")
             return data
-        return {}
+        raise FileNotFoundError(f"policy_file_not_found: {p}")
     return _read_json_object(p)
