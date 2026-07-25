@@ -26,6 +26,7 @@ ENV/
 .coverage
 .coverage.*
 htmlcov/
+.tmp_pytest
 
 # Local environment / secrets
 .env

@@ -12,6 +12,8 @@ def create_router() -> APIRouter:
     @router.get("/admin/oidc/login")
     def admin_oidc_login(request: Request, next: str = "/admin/usage"):
         settings = request.app.state.settings
+        if not settings.admin_browser_oidc_enabled:
+            return JSONResponse(status_code=404, content={"error": {"message": "browser_oidc_admin_disabled"}})
         return admin_oidc_login_response(
             request=request,
             secret=settings.admin_api_secret,
@@ -29,6 +31,8 @@ def create_router() -> APIRouter:
     @router.get("/admin/oidc/callback")
     def admin_oidc_callback(request: Request, code: str = "", state: str = "", next: str = "/admin/usage"):
         settings = request.app.state.settings
+        if not settings.admin_browser_oidc_enabled:
+            return JSONResponse(status_code=404, content={"error": {"message": "browser_oidc_admin_disabled"}})
         response = admin_oidc_callback_response(
             request=request,
             secret=settings.admin_api_secret,

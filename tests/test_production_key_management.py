@@ -85,6 +85,25 @@ def test_settings_production_rejects_insecure_keycloak_defaults(monkeypatch):
     assert any("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH" in e for e in errors)
 
 
+def test_production_disables_unreconciled_browser_oidc_admin_sessions(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "x" * 40)
+    monkeypatch.setenv("MODELKEYGUARD_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_AUTH_MODE", "keycloak")
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_API_SECRET", "a" * 32)
+    monkeypatch.setenv("KEYCLOAK_URL", "https://keycloak.example")
+    monkeypatch.setenv("MODELKEYGUARD_KEYCLOAK_PUBLIC_URL", "https://keycloak.example")
+    monkeypatch.setenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "b" * 32)
+    monkeypatch.setenv("MODELKEYGUARD_GATEWAY_PUBLIC_URL", "https://gateway.example")
+    monkeypatch.setenv("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", "1")
+    settings = AppSettings.from_env()
+    assert any("per-request identity reconciliation" in error for error in settings.validate_for_startup())
+
+    monkeypatch.setenv("MODELKEYGUARD_ADMIN_BROWSER_OIDC_ENABLED", "0")
+    settings = AppSettings.from_env()
+    assert not any("per-request identity reconciliation" in error for error in settings.validate_for_startup())
+
+
 def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):
     f = tmp_path / "graph_key"
     f.write_text("x" * 40, encoding="utf-8")

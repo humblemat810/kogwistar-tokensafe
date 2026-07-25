@@ -64,6 +64,7 @@ class AppSettings:
     admin_required_role: str
     usage_required_role: str
     browser_oidc_client_id: str
+    admin_browser_oidc_enabled: bool
     admin_session_ttl_seconds: int
     require_model_list_auth: bool
     history_enabled: bool
@@ -105,6 +106,7 @@ class AppSettings:
             usage_required_role=read_env_or_file("MODELKEYGUARD_USAGE_REQUIRED_ROLE", "model.usage.read") or "model.usage.read",
             review_pipeline=read_env_or_file("MODELKEYGUARD_REVIEW_PIPELINE", "legacy_adapter") or "legacy_adapter",
             browser_oidc_client_id=read_env_or_file("MODELKEYGUARD_OIDC_BROWSER_CLIENT_ID", "modelguard-admin-web") or "modelguard-admin-web",
+            admin_browser_oidc_enabled=bool_env("MODELKEYGUARD_ADMIN_BROWSER_OIDC_ENABLED", default=True),
             admin_session_ttl_seconds=int(read_env_or_file("MODELKEYGUARD_ADMIN_SESSION_TTL_SECONDS", "3600") or "3600"),
             require_model_list_auth=bool_env("MODELKEYGUARD_REQUIRE_MODEL_LIST_AUTH", default=not is_dev_mode(env)),
             history_enabled=bool_env("MODELKEYGUARD_HISTORY_ENABLED", default=True),
@@ -149,6 +151,11 @@ class AppSettings:
                 errors.append("KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE or KEYCLOAK_INTROSPECTION_CLIENT_SECRET must be configured for production")
             if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
                 errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
+            if self.admin_auth_mode in {"keycloak", "secret_or_keycloak"} and self.admin_browser_oidc_enabled:
+                errors.append(
+                    "browser OIDC admin sessions require per-request identity reconciliation; "
+                    "this build supports direct Keycloak Bearer admin auth only in production"
+                )
             # This signs browser OIDC sessions and state even in keycloak-only
             # mode, so it must never retain a predictable fallback.
             if self.admin_api_secret == "dev-modelkeyguard-admin-secret":
