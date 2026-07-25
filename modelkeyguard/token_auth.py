@@ -61,6 +61,8 @@ class TokenVerifier:
         self.realm = os.getenv("KEYCLOAK_REALM", "modelguard")
         self.introspection_client_id = os.getenv("KEYCLOAK_INTROSPECTION_CLIENT_ID", "modelguard-gateway")
         self.introspection_client_secret = read_env_or_file("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "gateway-secret") or "gateway-secret"
+        allowed = os.getenv("MODELKEYGUARD_KEYCLOAK_ALLOWED_AUDIENCES", "").strip()
+        self.allowed_audiences = {item.strip() for item in allowed.split(",") if item.strip()}
         # Auth mode is the source of truth.  The legacy strict flag remains a
         # compatible alias, but must never be weakened by a local-token fallback.
         configured_mode = os.getenv("MODELKEYGUARD_AUTH_MODE", "local").strip().lower()
@@ -149,6 +151,18 @@ class TokenVerifier:
                 principal_id = edge.target
                 break
         mapping = client_node.payload if client_node else self.policy.get("keycloak_clients", {}).get(client_id, {})
+        # Never mint a gateway principal for an unregistered Keycloak client.
+        # Introspection proves token activity, not application authorization.
+        if not client_node and not mapping:
+            return None
+        audiences = payload.get("aud", [])
+        if isinstance(audiences, str):
+            audiences = [audiences]
+        if not isinstance(audiences, list):
+            audiences = []
+        expected_audiences = self.allowed_audiences or {client_id}
+        if not audiences or not expected_audiences.intersection(str(item) for item in audiences):
+            return None
         principal = self.graph_state.nodes.get(principal_id or "")
         principal_payload = principal.payload if principal else {}
         roles = []
@@ -159,9 +173,9 @@ class TokenVerifier:
                 roles.extend(str(role) for role in realm_roles)
         resource_access = payload.get("resource_access", {})
         if isinstance(resource_access, dict):
-            for value in resource_access.values():
-                if not isinstance(value, dict):
-                    continue
+            # Roles from another client must not grant this client admin access.
+            value = resource_access.get(client_id, {})
+            if isinstance(value, dict):
                 resource_roles = value.get("roles", [])
                 if isinstance(resource_roles, list):
                     roles.extend(str(role) for role in resource_roles)

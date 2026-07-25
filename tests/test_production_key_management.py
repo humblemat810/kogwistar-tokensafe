@@ -69,6 +69,18 @@ def test_settings_production_rejects_graph_key_env_contract_violation(monkeypatc
     assert any("graph_key_env_contract_violation" in e for e in errors)
 
 
+def test_settings_production_rejects_insecure_keycloak_defaults(monkeypatch):
+    monkeypatch.setenv("MODELKEYGUARD_ENV", "production")
+    monkeypatch.setenv("MODELKEYGUARD_GRAPH_KEY", "x" * 40)
+    monkeypatch.setenv("KEYCLOAK_URL", "http://keycloak.internal")
+    monkeypatch.delenv("MODELKEYGUARD_ALLOW_INSECURE_KEYCLOAK", raising=False)
+    monkeypatch.delenv("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", raising=False)
+    settings = AppSettings.from_env()
+    errors = settings.validate_for_startup()
+    assert any("KEYCLOAK_URL must use https" in e for e in errors)
+    assert any("KEYCLOAK_INTROSPECTION_CLIENT_SECRET" in e for e in errors)
+
+
 def test_settings_accepts_graph_key_file(monkeypatch, tmp_path):
     f = tmp_path / "graph_key"
     f.write_text("x" * 40, encoding="utf-8")

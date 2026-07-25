@@ -169,9 +169,9 @@ class ModelKeyGuard:
         self._access_event("ACL_DECISION_ALLOW", request, rid, {"reason": d.reason, "remaining": remaining})
         return d
 
-    def record_usage(self, decision: AccessDecision, estimated_cost_usd: float, actual_cost_usd: float, actual_tokens: int = 0, usage_authoritative: bool | None = None) -> None:
+    def record_usage(self, decision: AccessDecision, estimated_cost_usd: float, actual_cost_usd: float, actual_tokens: int = 0, usage_authoritative: bool | None = None) -> bool:
         if not decision.allowed:
-            return
+            return False
         # Reservation state and every quota-lane debit commit in one named-
         # projection CAS.  This prevents settled-without-debit and partial-lane
         # debit after a worker crash.
@@ -194,6 +194,7 @@ class ModelKeyGuard:
             if settled:
                 self.graph_state.append_access_conversation_event(decision.request_id, "MODEL_USAGE_RESULT", payload)
         self.audit.append(AuditEvent(datetime.now(timezone.utc).isoformat(), "MODEL_KEY_CHECK", decision.principal_id, decision.key_id, decision.namespace, decision.allowed, decision.requires_approval, decision.reason, decision.acl_reason, estimated_cost_usd, actual_cost_usd))
+        return bool(settled)
 
     @staticmethod
     def _projection_payload(row: dict[str, Any] | None) -> dict[str, Any]:

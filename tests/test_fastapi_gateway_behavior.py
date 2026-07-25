@@ -190,7 +190,8 @@ def test_keycloak_service_account_resource_role_counts_as_allowed_role(tmp_path,
             return json.dumps(
                 {
                     "active": True,
-                    "client_id": "modelguard-usage-agent",
+                        "client_id": "modelguard-usage-agent",
+                        "aud": ["modelguard-usage-agent"],
                     "jti": "test-jti",
                     "exp": int(time.time()) + 300,
                     "scope": "openid profile",
@@ -204,6 +205,7 @@ def test_keycloak_service_account_resource_role_counts_as_allowed_role(tmp_path,
 
     monkeypatch.setattr(token_auth.urllib.request, "urlopen", fake_urlopen)
     verifier = TokenVerifier("config/gateway_policy.json")
+    verifier.policy.setdefault("keycloak_clients", {})["modelguard-usage-agent"] = {"principal_id": "service:modelguard-usage-agent", "scopes": []}
     principal = verifier.verify_keycloak_authorization_header("Bearer test-token")
 
     assert "model.usage.read" in principal.groups
@@ -226,7 +228,8 @@ def test_keycloak_service_account_realm_role_counts_as_allowed_role(tmp_path, mo
             return json.dumps(
                 {
                     "active": True,
-                    "client_id": "modelguard-usage-agent",
+                        "client_id": "modelguard-usage-agent",
+                        "aud": ["modelguard-usage-agent"],
                     "jti": "test-jti",
                     "exp": int(time.time()) + 300,
                     "scope": "openid profile",
@@ -240,6 +243,7 @@ def test_keycloak_service_account_realm_role_counts_as_allowed_role(tmp_path, mo
 
     monkeypatch.setattr(token_auth.urllib.request, "urlopen", fake_urlopen)
     verifier = TokenVerifier("config/gateway_policy.json")
+    verifier.policy.setdefault("keycloak_clients", {})["modelguard-usage-agent"] = {"principal_id": "service:modelguard-usage-agent", "scopes": []}
     principal = verifier.verify_keycloak_authorization_header("Bearer test-token")
 
     assert "model.usage.read" in principal.groups
@@ -908,10 +912,10 @@ def test_forwarded_secret_replacement_capture_for_all_providers(tmp_path, monkey
     records = [json.loads(line) for line in capture_path.read_text().splitlines() if line.strip()]
     by_provider = {r["provider"]: r for r in records}
 
-    assert by_provider["openai"]["headers"]["authorization"] == "Bearer fake-real-openai-key"
-    assert by_provider["azure_openai"]["headers"]["api-key"] == "fake-real-azure_openai-key"
-    assert by_provider["gemini"]["headers"]["x-goog-api-key"] == "fake-real-gemini-key"
-    assert by_provider["ollama"]["headers"]["authorization"] == "Bearer fake-real-ollama-key"
+    assert by_provider["openai"]["headers"]["authorization"] == "<redacted>"
+    assert by_provider["azure_openai"]["headers"]["api-key"] == "<redacted>"
+    assert by_provider["gemini"]["headers"]["x-goog-api-key"] == "<redacted>"
+    assert by_provider["ollama"]["headers"]["authorization"] == "<redacted>"
     assert "kgw_demo_doc_ingestor" not in json.dumps(by_provider)
 
 
@@ -946,7 +950,7 @@ def test_azure_native_responses_forwards_replaced_secret(tmp_path, monkeypatch):
     assert azure_records
     last = azure_records[-1]
     assert "/openai/responses?api-version=2025-04-01-preview" in str(last.get("url"))
-    assert last["headers"]["api-key"] == "fake-real-azure_openai-key"
+    assert last["headers"]["api-key"] == "<redacted>"
     assert "kgw_demo_doc_ingestor" not in json.dumps(last)
 
 
@@ -981,7 +985,7 @@ def test_openai_responses_forwards_to_openai_responses_path(tmp_path, monkeypatc
     assert openai_records
     last = openai_records[-1]
     assert str(last.get("url")).endswith("/v1/responses")
-    assert last["headers"]["authorization"] == "Bearer fake-real-openai-key"
+    assert last["headers"]["authorization"] == "<redacted>"
 
 
 def test_azure_keys_can_use_different_upstream_bases(tmp_path, monkeypatch):

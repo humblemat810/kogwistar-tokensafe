@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import socket
 import httpx
 from pathlib import Path
 from dataclasses import dataclass
@@ -652,6 +653,47 @@ def _principal_has_admin_role(principal: TokenPrincipal, required_role: str) -> 
     return required_role in allowed
 
 
+def _upstream_url_allowed(url: str) -> bool:
+    """Reject unsafe provider targets before sending credentials.
+
+    Production may explicitly allow private provider hosts; absent that list,
+    loopback/private/link-local targets are denied. Local development remains
+    compatible with the bundled Ollama endpoint.
+    """
+    try:
+        parsed = urllib.parse.urlsplit(url)
+        host = parsed.hostname
+        if parsed.scheme not in {"http", "https"} or not host or parsed.username or parsed.password:
+            return False
+        configured = {item.strip().lower() for item in os.getenv("MODELKEYGUARD_UPSTREAM_ALLOWED_HOSTS", "").split(",") if item.strip()}
+        host_l = host.lower().rstrip(".")
+        if configured and not any(host_l == item or host_l.endswith("." + item.lstrip("*.")) for item in configured):
+            return False
+        if configured:
+            return True
+        env = os.getenv("MODELKEYGUARD_ENV", "local").lower()
+        if env not in {"prod", "production"}:
+            return True
+        try:
+            ip = ipaddress.ip_address(host_l)
+        except ValueError:
+            try:
+                resolved = {info[4][0] for info in socket.getaddrinfo(host_l, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)}
+            except OSError:
+                return False
+            for address in resolved:
+                try:
+                    resolved_ip = ipaddress.ip_address(address)
+                except ValueError:
+                    continue
+                if resolved_ip.is_private or resolved_ip.is_loopback or resolved_ip.is_link_local or resolved_ip.is_reserved:
+                    return False
+            return True
+        return not (ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved)
+    except (ValueError, TypeError):
+        return False
+
+
 def forward_provider(
     secret: str,
     raw: bytes,
@@ -661,6 +703,8 @@ def forward_provider(
     content_type: str = "application/json",
 ) -> tuple[int, dict[str, str], bytes]:
     target_url = url or default_upstream_url(provider)
+    if not _upstream_url_allowed(target_url):
+        return 502, {"content-type": "application/json"}, json.dumps({"error": {"message": "provider_upstream_not_allowed"}}).encode("utf-8")
     timeout_seconds = float(os.getenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", "180"))
     headers = {"content-type": content_type}
     if provider == "azure_openai":
@@ -737,6 +781,8 @@ def _usage_from_stream_chunk(chunk: bytes, provider: str) -> dict[str, Any] | No
 
 async def _open_upstream_stream(stream: UpstreamStream) -> tuple[Any, Any]:
     timeout = float(os.getenv("MODELKEYGUARD_PROVIDER_TIMEOUT_SECONDS", "180"))
+    if not _upstream_url_allowed(stream.target_url):
+        raise ValueError("provider_upstream_not_allowed")
     client = httpx.AsyncClient(timeout=timeout)
     request = client.build_request(
         "POST", stream.target_url, content=stream.raw, headers=_upstream_headers(stream.secret, stream.provider, stream.content_type)
@@ -907,7 +953,7 @@ def _capture_forward_record(path: str, provider: str, url: str, headers: dict[st
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "provider": provider,
         "url": url,
-        "headers": headers,
+        "headers": {key: ("<redacted>" if key.lower() in {"authorization", "api-key", "x-goog-api-key", "proxy-authorization"} else value) for key, value in headers.items()},
         "body": body_text,
     }
     p = Path(path)
@@ -998,6 +1044,17 @@ def process_chat_completion(
         )
         return 401, {"error": {"message": str(e)}}, {"content-type": "application/json"}
 
+    if "model.invoke" not in set(principal_token.scopes):
+        _set_meta(
+            request_id=f"scope-{time.time_ns()}",
+            ts=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+            decision="BLOCKED",
+            reason="model_invoke_scope_required",
+            http_status=403,
+            provider=provider,
+        )
+        return 403, {"error": {"message": "model_invoke_scope_required"}}, {"content-type": "application/json"}
+
     _set_meta(
         principal_id=principal_token.principal_id,
         on_behalf_of_user_id=principal_token.on_behalf_of_user_id,
@@ -1066,7 +1123,14 @@ def process_chat_completion(
     idem_cache = getattr(guard, "_idempotency_cache", None) or {}
     setattr(guard, "_idempotency_cache", idem_cache)
     idem_scope = f"{principal_token.namespace}:{principal_token.principal_id}:{provider}:{key_id}:{idem_key}"
-    idem_hash = sha256_text(json.dumps(payload, sort_keys=True, separators=(",", ":")))
+    idem_body = forward_body or raw_body or json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    if requested_key_id:
+        idem_body = _strip_modelkeyguard_control_fields(payload)
+    idem_hash = sha256_text(
+        json.dumps(payload, sort_keys=True, separators=(",", ":"))
+        + "\x00"
+        + hashlib.sha256(idem_body).hexdigest()
+    )
     if idem_key:
         cached = _idempotency_read(guard, idem_scope)
         if cached and float(cached.get("expires", 0)) > time.time():
@@ -1297,10 +1361,10 @@ def process_chat_completion(
             fallback_cost=cost,
             fallback_tokens=estimated_tokens,
         )
-        guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=actual_cost, actual_tokens=actual_tokens, usage_authoritative=usage_authoritative)
+        settlement_ok = guard.record_usage(decision, estimated_cost_usd=cost, actual_cost_usd=actual_cost, actual_tokens=actual_tokens, usage_authoritative=usage_authoritative)
         _set_meta(http_status=status, decision="ALLOWED", usage_authoritative=usage_authoritative)
         if idem_key:
-            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "settled", "status": status, "headers": dict(headers), "body": body})
+            _idempotency_write(guard, idem_scope, {**idem_cache.get(idem_scope, {}), "state": "settled" if settlement_ok else "uncertain", "status": status, "headers": dict(headers), "body": body})
     elif 400 <= status < 500:
         # Provider rejected before inference: no usage debit.
         guard.update_reservation(decision.request_id, "released")
@@ -1661,7 +1725,10 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                 async def on_complete(http_status: int, usage: dict[str, Any] | None, released: bool) -> None:
                     terminal.update(http_status=http_status, usage=usage, released=released, settled=not released)
                     if isinstance(data, UpstreamStream):
-                        data.graph_state and app.state.guard.update_reservation(data.request_id, "released" if released else "settled")
+                        # Keep successful reservation forwarding/streaming until
+                        # quota CAS settlement below; otherwise EOF-before-CAS
+                        # crash leaves a false settled state and lost debit.
+                        data.graph_state and app.state.guard.update_reservation(data.request_id, "released" if released else "forwarding")
 
                 async def on_uncertain(http_status: int) -> None:
                     terminal.update(http_status=http_status, uncertain=True)
@@ -1743,24 +1810,28 @@ def create_app(policy_path: str | Path = DEFAULT_POLICY):
                             fallback_tokens=data.estimated_tokens,
                         )
                         usage_authoritative = authoritative
-                        data.decision and app.state.guard.record_usage(
+                        settlement_ok = data.decision and app.state.guard.record_usage(
                             data.decision,
                             estimated_cost_usd=data.estimated_cost,
                             actual_cost_usd=actual_cost,
                             actual_tokens=actual_tokens,
                             usage_authoritative=usage_authoritative,
                         )
+                        if data.graph_state and settlement_ok:
+                            app.state.guard.update_reservation(data.request_id, "settled", actual_cost, actual_tokens)
+                        elif data.graph_state and not settlement_ok:
+                            app.state.guard.update_reservation(data.request_id, "uncertain", actual_cost, actual_tokens)
                         if data.graph_state:
                             data.graph_state.append_access_conversation_event(
                                 data.request_id,
-                                "QUOTA_RESERVATION_SETTLED",
-                                {"usage_authoritative": authoritative, "actual_tokens": actual_tokens, "actual_cost_usd": actual_cost},
+                                "QUOTA_RESERVATION_SETTLED" if settlement_ok else "QUOTA_RESERVATION_UNCERTAIN",
+                                {"usage_authoritative": authoritative, "actual_tokens": actual_tokens, "actual_cost_usd": actual_cost, "settlement_ok": bool(settlement_ok)},
                             )
                         if data.idempotency_scope:
                             _idempotency_write(
                                 app.state.guard,
                                 data.idempotency_scope,
-                                {"state": "settled", "replayable": False, "status": terminal.get("http_status", 200), "headers": {"content-type": adapter.stream_media_type}, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
+                                {"state": "settled" if settlement_ok else "uncertain", "replayable": False, "status": terminal.get("http_status", 200), "headers": {"content-type": adapter.stream_media_type}, "expires": time.time() + float(os.getenv("MODELKEYGUARD_IDEMPOTENCY_RETENTION_SECONDS", "86400"))},
                             )
                     elif isinstance(data, UpstreamStream) and data.idempotency_scope:
                         _idempotency_write(

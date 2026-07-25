@@ -143,6 +143,10 @@ class AppSettings:
                 )
             if self.auth_mode not in {"keycloak", "local_or_keycloak"}:
                 errors.append("MODELKEYGUARD_AUTH_MODE must be keycloak or local_or_keycloak in production")
+            if self.keycloak_url.startswith("http://") and not bool_env("MODELKEYGUARD_ALLOW_INSECURE_KEYCLOAK", default=False):
+                errors.append("KEYCLOAK_URL must use https:// in production (or explicitly set MODELKEYGUARD_ALLOW_INSECURE_KEYCLOAK=1 for isolated internal networks)")
+            if (read_env_or_file("KEYCLOAK_INTROSPECTION_CLIENT_SECRET", "gateway-secret") or "gateway-secret") == "gateway-secret":
+                errors.append("KEYCLOAK_INTROSPECTION_CLIENT_SECRET_FILE or KEYCLOAK_INTROSPECTION_CLIENT_SECRET must be configured for production")
             if self.admin_auth_mode not in {"secret", "keycloak", "secret_or_keycloak"}:
                 errors.append("MODELKEYGUARD_ADMIN_AUTH_MODE must be secret, keycloak, or secret_or_keycloak")
             if self.admin_auth_mode in {"secret", "secret_or_keycloak"} and self.admin_api_secret == "dev-modelkeyguard-admin-secret":
