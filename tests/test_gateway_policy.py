@@ -215,3 +215,13 @@ def test_quota_check_uses_quota_policy_projection_fast_path(tmp_path, monkeypatc
     assert not d.allowed
     assert d.http_status == 429
     assert d.reason == "user_quota_exceeded"
+
+def test_policy_routing_matches_model_and_nested_parameters():
+    from modelkeyguard.gateway import resolve_routing_target
+    policy = {"routing_rules": [
+        {"when": {"model": "modelA"}, "upstream_url": "https://a.example"},
+        {"when": {"provider": "openai", "routing.region": {"in": ["eu"]}}, "upstream_url": "https://b.example"},
+    ]}
+    assert resolve_routing_target(policy, {}, model="modelA", provider="openai", default="https://d.example") == "https://a.example"
+    assert resolve_routing_target(policy, {"routing": {"region": "eu"}}, model="other", provider="openai", default="https://d.example") == "https://b.example"
+    assert resolve_routing_target(policy, {"routing": {"region": "us"}}, model="other", provider="openai", default="https://d.example") == "https://d.example"

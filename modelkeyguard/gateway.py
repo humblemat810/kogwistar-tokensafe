@@ -472,6 +472,55 @@ def _key_upstream_override(policy: dict[str, Any], guard: ModelKeyGuard, key_id:
     return None
 
 
+
+def _route_value(payload: dict[str, Any], key: str, *, model: str, provider: str) -> Any:
+    if key == "model":
+        return model
+    if key == "provider":
+        return provider
+    current: Any = payload
+    for part in key.split("."):
+        if not isinstance(current, dict) or part not in current:
+            return None
+        current = current[part]
+    return current
+
+
+def resolve_routing_target(policy: dict[str, Any], payload: dict[str, Any], *, model: str, provider: str, default: str | None) -> str | None:
+    """Select upstream by model/provider or arbitrary exact request fields.
+
+    Policy shape::
+      routing_rules: [{"when": {"model": "modelA"}, "upstream_url": "..."}]
+    Rules are evaluated in order; all predicates must match. Values may be a
+    scalar, list (membership), or {"in": [...]} / {"exists": bool}. No user
+    supplied URL is accepted: targets remain policy-controlled and pass the
+    normal upstream safety allowlist.
+    """
+    rules = policy.get("routing_rules", [])
+    if not isinstance(rules, list):
+        return default
+    for rule in rules:
+        if not isinstance(rule, dict) or not isinstance(rule.get("upstream_url"), str):
+            continue
+        conditions = rule.get("when", {})
+        if not isinstance(conditions, dict):
+            continue
+        matched = True
+        for field, expected in conditions.items():
+            actual = _route_value(payload, str(field), model=model, provider=provider)
+            if isinstance(expected, dict):
+                if "exists" in expected and bool(actual is not None) != bool(expected["exists"]):
+                    matched = False; break
+                if "in" in expected and actual not in expected["in"]:
+                    matched = False; break
+            elif isinstance(expected, list):
+                if actual not in expected:
+                    matched = False; break
+            elif actual != expected:
+                matched = False; break
+        if matched:
+            return str(rule["upstream_url"]).strip() or default
+    return default
 def _merge_upstream_base(upstream_url: str | None, custom_base: str | None) -> str | None:
     if not custom_base:
         return upstream_url
@@ -1324,7 +1373,8 @@ def process_chat_completion(
         _set_meta(http_status=200)
         return 200, dry_body, {"content-type": "application/json"}
 
-    resolved_upstream_url = _merge_upstream_base(upstream_url, _key_upstream_override(policy, guard, key_id))
+    key_upstream = _merge_upstream_base(upstream_url, _key_upstream_override(policy, guard, key_id))
+    resolved_upstream_url = resolve_routing_target(policy, payload, model=str(model), provider=provider, default=key_upstream)
     provider_body = forward_body or raw_body or json.dumps(payload).encode("utf-8")
     if requested_key_id:
         provider_body = _strip_modelkeyguard_control_fields(payload)
@@ -1904,5 +1954,5 @@ def serve(host: str | None = None, port: int | None = None, policy_path: str | P
     port = port or settings.port
     app = create_app(policy_path)
     print(f"ModelKeyGuard FastAPI gateway listening on http://{host}:{port}")
-    print(f"ACL backend: {app.state.guard.adapter_info.backend} — {app.state.guard.adapter_info.detail}")
+    print(f"ACL backend: {app.state.guard.adapter_info.backend} â€” {app.state.guard.adapter_info.detail}")
     uvicorn.run(app, host=host, port=port)

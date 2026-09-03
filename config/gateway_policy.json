@@ -86,6 +86,7 @@
       "scopes": ["model.invoke", "model.admin"]
     }
   },
+  "routing_rules": [],
   "model_keys": [
     {
       "id": "key:openai:prod",
