@@ -1,6 +1,14 @@
 from .analytics import AnalyticsError, KeycloakServiceAccount, UsageAnalyticsClient
 from .core import AccessDecision, AuditEvent, ModelKey, ModelKeyGuard, Principal, Request
-from .usage_agent import UsageAnalysisAgent
+
+
+def __getattr__(name: str):
+    """Load governance/LLM sidecars only when their public symbol is used."""
+    if name == "UsageAnalysisAgent":
+        from .usage_agent import UsageAnalysisAgent
+
+        return UsageAnalysisAgent
+    raise AttributeError(name)
 
 __all__ = [
     "AccessDecision",
