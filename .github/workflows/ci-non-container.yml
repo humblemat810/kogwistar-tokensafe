@@ -84,8 +84,10 @@ jobs:
           import os
           import sys
           from modelkeyguard import gateway
+          from modelkeyguard import UsageAnalysisAgent
 
           assert sys.implementation.name == "pypy"
+          assert UsageAnalysisAgent.__name__ == "UsageAnalysisAgent"
           os.environ["MODELKEYGUARD_LLM_CALL_CACHE"] = "joblib"
           assert gateway._llm_cache_backend() == "diskcache"
           print("PyPy gateway import/cache smoke passed")
