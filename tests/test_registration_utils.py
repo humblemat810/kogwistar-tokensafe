@@ -812,10 +812,18 @@ def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypat
     fake_engine_module.SearchIndexService = ExplodingSearchIndex
     fake_engine_core_module.engine = fake_engine_module
 
+    fake_embedding_profile_module = ModuleType("kogwistar.engine_core.embedding_profile")
+    class FakeEmbeddingProfile:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+    fake_embedding_profile_module.EmbeddingProfile = FakeEmbeddingProfile
+
     class FakeGraphKnowledgeEngine:
-        def __init__(self, *, persist_directory, embedding_function, backend):
+        def __init__(self, *, persist_directory, embedding_function, backend, embedding_profile, embedding_profile_mode):
             calls["persist_directory"] = persist_directory
             calls["backend"] = backend
+            calls["embedding_profile"] = embedding_profile
+            calls["embedding_profile_mode"] = embedding_profile_mode
             calls["search_index_class"] = fake_engine_module.SearchIndexService
             self.search_index = "postgres-search-index"
             self.meta_sqlite = object()
@@ -845,6 +853,7 @@ def test_kogwistar_runtime_uses_postgres_search_index_in_postgres_mode(monkeypat
     monkeypatch.setitem(sys.modules, "kogwistar", fake_kogwistar_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core", fake_engine_core_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine", fake_engine_module)
+    monkeypatch.setitem(sys.modules, "kogwistar.engine_core.embedding_profile", fake_embedding_profile_module)
     monkeypatch.setitem(sys.modules, "kogwistar.engine_core.engine_postgres", fake_postgres_module)
 
     store = kog_state.KogwistarPostgresGraphStateStore.__new__(kog_state.KogwistarPostgresGraphStateStore)

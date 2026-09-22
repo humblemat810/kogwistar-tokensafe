@@ -5,6 +5,7 @@ import asyncio
 import base64
 import json
 import os
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -945,7 +946,14 @@ async def _stream_upstream(
 
 
 def _llm_joblib_cache_enabled() -> bool:
-    return os.getenv("MODELKEYGUARD_LLM_CALL_CACHE", "0").strip().lower() in {"1", "true", "yes", "joblib"}
+    return os.getenv("MODELKEYGUARD_LLM_CALL_CACHE", "0").strip().lower() in {"1", "true", "yes", "joblib", "diskcache"}
+
+
+def _llm_cache_backend() -> str:
+    requested = os.getenv("MODELKEYGUARD_LLM_CALL_CACHE", "0").strip().lower()
+    if sys.implementation.name == "pypy" and requested in {"1", "true", "yes", "joblib", "diskcache"}:
+        return "diskcache"
+    return "joblib"
 
 
 def _llm_joblib_cache_path(secret: str, raw: bytes, *, provider: str, target_url: str, content_type: str) -> Path:
@@ -970,6 +978,14 @@ def _joblib_module():
     return joblib
 
 
+def _diskcache_module():
+    try:
+        from diskcache import Cache  # type: ignore
+    except Exception as exc:  # pragma: no cover - optional runtime extra
+        raise RuntimeError("MODELKEYGUARD_LLM_CALL_CACHE=diskcache requires `pip install diskcache`") from exc
+    return Cache
+
+
 def _forward_provider_from_joblib_cache(
     secret: str,
     raw: bytes,
@@ -982,8 +998,18 @@ def _forward_provider_from_joblib_cache(
         return None
     path = _llm_joblib_cache_path(secret, raw, provider=provider, target_url=target_url, content_type=content_type)
     if not path.exists():
-        return None
-    cached = _joblib_module().load(path)
+        if _llm_cache_backend() != "diskcache":
+            return None
+    if _llm_cache_backend() == "diskcache":
+        cache = _diskcache_module()(str(path.parent))
+        try:
+            cached = cache.get(path.stem)
+        finally:
+            cache.close()
+        if cached is None:
+            return None
+    else:
+        cached = _joblib_module().load(path)
     if not isinstance(cached, tuple) or len(cached) != 3:
         return None
     status, headers, body = cached
@@ -1005,7 +1031,14 @@ def _store_provider_joblib_cache(
         return
     path = _llm_joblib_cache_path(secret, raw, provider=provider, target_url=target_url, content_type=content_type)
     path.parent.mkdir(parents=True, exist_ok=True)
-    _joblib_module().dump(result, path)
+    if _llm_cache_backend() == "diskcache":
+        cache = _diskcache_module()(str(path.parent))
+        try:
+            cache.set(path.stem, result)
+        finally:
+            cache.close()
+    else:
+        _joblib_module().dump(result, path)
 
 
 def _capture_forward_record(path: str, provider: str, url: str, headers: dict[str, str], raw: bytes) -> None:

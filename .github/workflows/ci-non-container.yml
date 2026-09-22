@@ -7,9 +7,13 @@ on:
 
 jobs:
   non_container_pytest:
-    name: pytest (skip container-required tests)
+    name: pytest (${{ matrix.python-version }}, skip container-required tests)
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13", "3.14"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -17,16 +21,86 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
 
       - name: Install dependencies (non-container profile)
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e . --no-deps
+          pip install \
+            "kogwistar>=0.5.0" "pydantic>=2.6" "pydantic-extension>=0.0.7" \
+            "anyio>=4.0" "Jinja2>=3.1" "mcp>=2.2.0,<3" "httpx>=0.28.1" \
+            "fastapi>=0.115" "uvicorn>=0.30" "python-multipart>=0.0.9" \
+            "cryptography>=42" "python-jose[cryptography]>=3.3" "PyJWT>=2.8" \
+            "RapidFuzz>=3.13.0" "python-dotenv>=1.0.1" "requests>=2.32" \
+            "typing-extensions>=4.8" "pytest>=8" "pytest-asyncio>=1.1" \
+            "pytest-dotenv>=0.5.2" "joblib>=1.4"
 
       - name: Run tests (non-container only)
         env:
           MODELKEYGUARD_CI_NON_CONTAINER: "1"
+          KOGWISTAR_IMPL_MODE: "python"
         run: |
           pytest -q -m "not postgres"
+
+  pypy311_provider_free:
+    name: smoke (PyPy 3.11, provider-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PyPy
+        uses: actions/setup-python@v5
+        with:
+          # 7.3.20 can abort in its AST optimizer on deeply nested async code.
+          python-version: "pypy-3.11-v7.3.23"
+          cache: "pip"
+          cache-dependency-path: requirements-pypy-3.11.txt
+
+      - name: Checkout Kogwistar core source
+        run: |
+          # PyPy 3.11 compatibility fixes land after the v0.5.0 release tag.
+          git clone --depth 1 https://github.com/humblemat810/kogwistar.git "$RUNNER_TEMP/kogwistar-core"
+          echo "PYTHONPATH=$RUNNER_TEMP/kogwistar-core:$PYTHONPATH" >> "$GITHUB_ENV"
+
+      - name: Install PyPy provider-free dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-pypy-3.11.txt
+
+      - name: Verify PyPy can compile gateway
+        run: python -m py_compile modelkeyguard/gateway.py
+
+      - name: PyPy gateway import and cache contract
+        env:
+          MODELKEYGUARD_CI_NON_CONTAINER: "1"
+          MODELKEYGUARD_STORE: "jsonl"
+          KOGWISTAR_IMPL_MODE: "python"
+        run: |
+          python - <<'PY'
+          import os
+          import sys
+          from modelkeyguard import gateway
+          from modelkeyguard import UsageAnalysisAgent
+
+          assert sys.implementation.name == "pypy"
+          assert UsageAnalysisAgent.__name__ == "UsageAnalysisAgent"
+          os.environ["MODELKEYGUARD_LLM_CALL_CACHE"] = "joblib"
+          assert gateway._llm_cache_backend() == "diskcache"
+          print("PyPy gateway import/cache smoke passed")
+          PY
+
+      - name: PyPy policy loader contract
+        env:
+          KOGWISTAR_IMPL_MODE: "python"
+        run: |
+          python - <<'PY'
+          from modelkeyguard.policy_loader import load_policy_json
+
+          policy = load_policy_json("config/gateway_policy.json")
+          assert isinstance(policy, dict)
+          print("PyPy policy loader smoke passed")
+          PY
