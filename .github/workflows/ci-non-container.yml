@@ -61,7 +61,8 @@ jobs:
 
       - name: Checkout Kogwistar core source
         run: |
-          git clone --depth 1 --branch v0.5.0 https://github.com/humblemat810/kogwistar.git "$RUNNER_TEMP/kogwistar-core"
+          # PyPy 3.11 compatibility fixes land after the v0.5.0 release tag.
+          git clone --depth 1 https://github.com/humblemat810/kogwistar.git "$RUNNER_TEMP/kogwistar-core"
           echo "PYTHONPATH=$RUNNER_TEMP/kogwistar-core:$PYTHONPATH" >> "$GITHUB_ENV"
 
       - name: Install PyPy provider-free dependencies
