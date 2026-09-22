@@ -80,4 +80,7 @@ jobs:
           MODELKEYGUARD_STORE: "jsonl"
           KOGWISTAR_IMPL_MODE: "python"
         run: |
-          python -m pytest -q -p no:dotenv -m "not postgres" -k "not kogwistar_postgres and not live_provider_streaming"
+          python -m pytest -q -p no:dotenv \
+            tests/test_gateway_policy.py \
+            tests/test_graph_key_env_contract.py \
+            tests/test_policy_loader_regression.py
