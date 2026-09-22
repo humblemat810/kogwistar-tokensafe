@@ -85,11 +85,12 @@ jobs:
           import os
           import sys
           from modelkeyguard import gateway
-          from modelkeyguard.gateway import load_gateway_policy
+          from modelkeyguard.policy_loader import load_policy_json
 
           assert sys.implementation.name == "pypy"
+          os.environ["MODELKEYGUARD_LLM_CALL_CACHE"] = "joblib"
           assert gateway._llm_cache_backend() == "diskcache"
-          policy = load_gateway_policy("config/gateway_policy.json")
+          policy = load_policy_json("config/gateway_policy.json")
           assert isinstance(policy, dict)
           print("PyPy 3.11 provider-free smoke passed")
           PY
