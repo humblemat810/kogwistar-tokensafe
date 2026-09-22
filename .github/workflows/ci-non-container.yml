@@ -74,23 +74,36 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pypy-3.11.txt
 
-      - name: Run PyPy provider-free smoke checks
+      - name: PyPy compileall
+        env:
+          KOGWISTAR_IMPL_MODE: "python"
+        run: python -m compileall -q modelkeyguard
+
+      - name: PyPy gateway import and cache contract
         env:
           MODELKEYGUARD_CI_NON_CONTAINER: "1"
           MODELKEYGUARD_STORE: "jsonl"
           KOGWISTAR_IMPL_MODE: "python"
         run: |
-          python -m compileall -q modelkeyguard
           python - <<'PY'
           import os
           import sys
           from modelkeyguard import gateway
-          from modelkeyguard.policy_loader import load_policy_json
 
           assert sys.implementation.name == "pypy"
           os.environ["MODELKEYGUARD_LLM_CALL_CACHE"] = "joblib"
           assert gateway._llm_cache_backend() == "diskcache"
+          print("PyPy gateway import/cache smoke passed")
+          PY
+
+      - name: PyPy policy loader contract
+        env:
+          KOGWISTAR_IMPL_MODE: "python"
+        run: |
+          python - <<'PY'
+          from modelkeyguard.policy_loader import load_policy_json
+
           policy = load_policy_json("config/gateway_policy.json")
           assert isinstance(policy, dict)
-          print("PyPy 3.11 provider-free smoke passed")
+          print("PyPy policy loader smoke passed")
           PY
