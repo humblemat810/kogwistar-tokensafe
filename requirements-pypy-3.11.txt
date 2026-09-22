@@ -1,4 +1,9 @@
 # PyPy 3.11 provider-free lane. Keep native/vector/Postgres extras out.
+pydantic>=2.12.5
+pydantic-extension>=0.0.7
+anyio>=4.0
+Jinja2>=3.1
+mcp>=2.2.0,<3
 fastapi>=0.115
 httpx>=0.27
 uvicorn[standard]>=0.30
