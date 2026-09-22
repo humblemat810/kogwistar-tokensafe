@@ -55,7 +55,8 @@ jobs:
       - name: Setup PyPy
         uses: actions/setup-python@v5
         with:
-          python-version: "pypy-3.11-v7.3.20"
+          # 7.3.20 can abort in its AST optimizer on deeply nested async code.
+          python-version: "pypy-3.11-v7.3.23"
           cache: "pip"
           cache-dependency-path: requirements-pypy-3.11.txt
 
@@ -69,6 +70,9 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pypy-3.11.txt
+
+      - name: Verify PyPy can compile gateway
+        run: python -m py_compile modelkeyguard/gateway.py
 
       - name: PyPy gateway import and cache contract
         env:
