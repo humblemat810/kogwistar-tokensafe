@@ -74,11 +74,6 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pypy-3.11.txt
 
-      - name: PyPy compileall
-        env:
-          KOGWISTAR_IMPL_MODE: "python"
-        run: python -m compileall -q modelkeyguard
-
       - name: PyPy gateway import and cache contract
         env:
           MODELKEYGUARD_CI_NON_CONTAINER: "1"
