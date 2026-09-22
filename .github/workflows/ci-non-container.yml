@@ -73,7 +73,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pypy-3.11.txt
-          python -m pip install "pytest-dotenv>=0.5.2"
 
       - name: Run PyPy provider-free tests
         env:
@@ -81,4 +80,4 @@ jobs:
           MODELKEYGUARD_STORE: "jsonl"
           KOGWISTAR_IMPL_MODE: "python"
         run: |
-          pytest -q -m "not postgres" -k "not kogwistar_postgres and not live_provider_streaming"
+          python -m pytest -q -p no:dotenv -m "not postgres" -k "not kogwistar_postgres and not live_provider_streaming"
