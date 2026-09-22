@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import warnings
 from dataclasses import dataclass
 from datetime import datetime
 from types import SimpleNamespace
@@ -420,10 +421,18 @@ class KogwistarPostgresGraphStateStore:
                     except RuntimeError:
                         pass
 
+    def _mutation_uow(self):
+        """Return core UoW; never silently downgrade PostgreSQL mutations."""
+        uow = getattr(self._rt.engine, "uow", None)
+        if not callable(uow):
+            raise RuntimeError("Kogwistar engine lacks atomic unit-of-work capability")
+        return uow()
+
     def _build_runtime(self) -> _KogwistarRuntime:
         enforce_installed_kogwistar_only()
         try:
             import kogwistar.engine_core.engine as engine_module
+            from kogwistar.engine_core.embedding_profile import EmbeddingProfile
             from kogwistar.engine_core.engine_postgres import EnginePostgresConfig, build_postgres_backend
         except Exception as exc:
             raise RuntimeError(
@@ -433,6 +442,19 @@ class KogwistarPostgresGraphStateStore:
 
         cfg = EnginePostgresConfig(dsn=self.dsn, embedding_dim=self.embed_dim)
         backend, uow = build_postgres_backend(cfg)
+
+        profile = EmbeddingProfile(
+            provider=os.getenv("MODELKEYGUARD_EMBEDDING_PROVIDER", "modelkeyguard"),
+            model=os.getenv("MODELKEYGUARD_EMBEDDING_MODEL", "stable-policy-v1"),
+            dimension=self.embed_dim,
+            similarity_metric=os.getenv("MODELKEYGUARD_EMBEDDING_METRIC", "cosine"),
+        )
+        env = os.getenv("MODELKEYGUARD_ENV", "local").strip().lower()
+        profile_mode = os.getenv("MODELKEYGUARD_EMBEDDING_PROFILE_MODE", "enforce" if env in {"prod", "production"} else "adopt").strip().lower()
+        if profile_mode not in {"enforce", "inspect", "adopt"}:
+            raise RuntimeError("MODELKEYGUARD_EMBEDDING_PROFILE_MODE must be enforce, inspect, or adopt")
+        if env in {"prod", "production"} and profile_mode != "enforce":
+            raise RuntimeError("production Kogwistar Postgres requires MODELKEYGUARD_EMBEDDING_PROFILE_MODE=enforce")
 
         def _default_embed(texts: list[str]) -> list[list[float]]:
             return [_stable_embedding(t, dim=self.embed_dim, space="policy") for t in texts]
@@ -444,11 +466,36 @@ class KogwistarPostgresGraphStateStore:
                 persist_directory=None,
                 embedding_function=_default_embed,
                 backend=backend,
+                embedding_profile=profile,
+                embedding_profile_mode=profile_mode,
             )
         finally:
             if original_search_index is not None:
                 engine_module.SearchIndexService = original_search_index
         # Explicitly share the backend transaction boundary used in Kogwistar pg tests.
+        capability = getattr(engine, "atomic_mutation_capability", None)
+        supports_atomic = bool(capability and getattr(capability, "supports_atomic_mutation", lambda: False)())
+        if env in {"prod", "production"} and not supports_atomic:
+            raise RuntimeError("production Kogwistar Postgres backend lacks atomic mutation capability")
+        jobs = getattr(engine, "jobs", None)
+        queue_ready = False
+        require_queue = getattr(jobs, "require_available", None)
+        if callable(require_queue):
+            try:
+                require_queue(enqueue=True, claim=True)
+                queue_ready = True
+            except Exception as exc:
+                if env in {"prod", "production"}:
+                    raise RuntimeError("production Kogwistar backend requires durable index job queue") from exc
+                warnings.warn(
+                    "Kogwistar durable index queue unavailable; index projections run without crash recovery",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+        elif env in {"prod", "production"}:
+            raise RuntimeError("production Kogwistar backend lacks durable index job queue")
+        if queue_ready:
+            engine._phase1_enable_index_jobs = True
         engine._backend_uow = uow
         return _KogwistarRuntime(engine=engine, meta=engine.meta_sqlite)
 
@@ -754,6 +801,10 @@ class KogwistarPostgresGraphStateStore:
     # Graph state API used by ModelKeyGuard.
     # ------------------------------------------------------------------
     def append_node_if_updated(self, node_id: str, kind: str, payload: dict[str, Any]) -> bool:
+        with self._mutation_uow():
+            return self._append_node_if_updated(node_id, kind, payload)
+
+    def _append_node_if_updated(self, node_id: str, kind: str, payload: dict[str, Any]) -> bool:
         existing = self.nodes.get(node_id)
         if node_id == GRAPH_KEY_SENTINEL_NODE_ID and existing is not None:
             if existing.kind != kind or existing.payload != payload:
@@ -812,6 +863,10 @@ class KogwistarPostgresGraphStateStore:
         return True
 
     def append_edge_if_updated(self, edge_id: str, kind: str, source: str, target: str, payload: dict[str, Any]) -> bool:
+        with self._mutation_uow():
+            return self._append_edge_if_updated(edge_id, kind, source, target, payload)
+
+    def _append_edge_if_updated(self, edge_id: str, kind: str, source: str, target: str, payload: dict[str, Any]) -> bool:
         content_hash = canonical_edge_hash(kind, source, target, payload)
         existing = self.edges.get(edge_id)
         existing_hash = None
@@ -896,6 +951,10 @@ class KogwistarPostgresGraphStateStore:
         self.append_edge_if_updated(edge_id, kind, source, target, payload)
 
     def append_event(self, event_type: str, subject_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+        with self._mutation_uow():
+            return self._append_event(event_type, subject_id, payload)
+
+    def _append_event(self, event_type: str, subject_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         seq = self._event_seq() + 1
         event_id = f"event:{event_type}:{seq:08d}"
         ts = iso_now()

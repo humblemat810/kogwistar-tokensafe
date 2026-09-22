@@ -74,6 +74,15 @@ def test_forward_provider_joblib_cache_replays_real_mode_response(tmp_path, monk
     assert "super-secret-provider-key" not in cache_files[0].name
 
 
+def test_pypy_cache_selection_uses_diskcache(monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(sys, "implementation", SimpleNamespace(name="pypy"))
+    monkeypatch.setenv("MODELKEYGUARD_LLM_CALL_CACHE", "joblib")
+    assert gateway._llm_cache_backend() == "diskcache"
+
+
 def test_forward_provider_uses_three_minute_default_timeout(monkeypatch):
     calls = []
 
