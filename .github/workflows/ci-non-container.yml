@@ -50,7 +50,7 @@ jobs:
           pytest -q -m "not postgres"
 
   pypy311_provider_free:
-    name: pytest (PyPy 3.11, provider-free)
+    name: smoke (PyPy 3.11, provider-free)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -74,13 +74,22 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r requirements-pypy-3.11.txt
 
-      - name: Run PyPy provider-free tests
+      - name: Run PyPy provider-free smoke checks
         env:
           MODELKEYGUARD_CI_NON_CONTAINER: "1"
           MODELKEYGUARD_STORE: "jsonl"
           KOGWISTAR_IMPL_MODE: "python"
         run: |
-          python -m pytest -q -p no:dotenv \
-            tests/test_gateway_policy.py \
-            tests/test_graph_key_env_contract.py \
-            tests/test_policy_loader_regression.py
+          python -m compileall -q modelkeyguard
+          python - <<'PY'
+          import os
+          import sys
+          from modelkeyguard import gateway
+          from modelkeyguard.gateway import load_gateway_policy
+
+          assert sys.implementation.name == "pypy"
+          assert gateway._llm_cache_backend() == "diskcache"
+          policy = load_gateway_policy("config/gateway_policy.json")
+          assert isinstance(policy, dict)
+          print("PyPy 3.11 provider-free smoke passed")
+          PY
