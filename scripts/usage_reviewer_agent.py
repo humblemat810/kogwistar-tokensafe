@@ -9,7 +9,8 @@ This CLI has two independent auth paths:
    - Keycloak service-account minting via `MODELKEYGUARD_OIDC_USAGE_CLIENT_SECRET`.
 
 2) Reviewer model-call path (`/api/chat`):
-   - Uses `REVIEWER_SAFE_TOKEN` (preferred), then token fallbacks.
+   - Uses dedicated `REVIEWER_SAFE_TOKEN`; legacy token fallback is disabled
+     unless `MODELKEYGUARD_REVIEW_ALLOW_TOKEN_FALLBACK=1` is explicitly set.
 
 Output shape is stable for automation:
 - `review_status`
@@ -41,6 +42,7 @@ from modelkeyguard.reviewer_agent import (
     DEFAULT_REVIEW_SYSTEM_PROMPT,
     ReviewStatusClient,
     run_langchain_reviewer,  # kept as explicit dependency anchor for tutorial/tests
+    validate_review_result,
 )
 
 
@@ -53,6 +55,14 @@ def _reviewer_safe_token() -> str:
 
 
 def _review_model_token_candidates() -> list[tuple[str, str]]:
+    reviewer_token = _env("REVIEWER_SAFE_TOKEN", "")
+    if reviewer_token:
+        return [("REVIEWER_SAFE_TOKEN", reviewer_token)]
+    # Never silently reuse a gateway/admin credential for an outbound model
+    # call.  Legacy fallback is opt-in for local migration only.
+    if _env("MODELKEYGUARD_REVIEW_ALLOW_TOKEN_FALLBACK", "0") != "1":
+        return []
+
     def _candidate(name: str) -> tuple[str, str]:
         return name, _env(name, "")
 
@@ -98,13 +108,16 @@ def main() -> int:
     _apply_scanner_runtime_overrides(args)
 
     status_client = ReviewStatusClient.from_env()
-    status_client = ReviewStatusClient(
-        base_url=args.base_url,
-        bearer_token=status_client.bearer_token,
-        admin_secret=status_client.admin_secret,
-        keycloak=status_client.keycloak,
-        timeout_seconds=status_client.timeout_seconds,
-    )
+    # Preserve lightweight injected clients used by offline runners/tests.  A
+    # real client is rebuilt only to apply the CLI base URL override.
+    if callable(getattr(status_client, "start", None)):
+        status_client = ReviewStatusClient(
+            base_url=args.base_url,
+            bearer_token=status_client.bearer_token,
+            admin_secret=status_client.admin_secret,
+            keycloak=status_client.keycloak,
+            timeout_seconds=status_client.timeout_seconds,
+        )
 
     policy = try_load_policy()
     graph_state = try_open_graph_state()
@@ -153,7 +166,17 @@ def main() -> int:
             )
         else:
             try:
+                review_run_id = ""
+                starter = getattr(status_client, "start", None)
+                if callable(starter):
+                    run = starter(args.reviewed_by)
+                    if not isinstance(run, dict) or not isinstance(run.get("status"), dict):
+                        raise RuntimeError("review_start_contract_violation")
+                    status = dict(run["status"])
+                    review_run_id = str(run.get("run_id") or "")
                 result = _run_reviewer_once(args, status=status)
+                if not str(result.get("text") or "").strip():
+                    raise RuntimeError("review_result_empty")
                 transition = scanner_state_transition(
                     workflow_name="usage_reviewer",
                     config=runtime_cfg,
@@ -173,12 +196,6 @@ def main() -> int:
                 )
                 print("review_result:")
                 print(json.dumps(result, indent=2, sort_keys=True))
-                if not str(result.get("text") or "").strip():
-                    print(
-                        "warning: reviewer model call succeeded but returned empty text; "
-                        "check model/key routing or tighten the review prompt.",
-                        file=sys.stderr,
-                    )
                 print("reviewer_loop_health:")
                 print(json.dumps(health, indent=2, sort_keys=True))
 
@@ -189,6 +206,7 @@ def main() -> int:
                                 "reviewed_by": args.reviewed_by,
                                 "review_summary": result.get("text", ""),
                                 "status": status,
+                                "review_run_id": review_run_id,
                             }
                         )
                         print("checkpoint:")
@@ -249,11 +267,8 @@ def main() -> int:
 def _run_reviewer_once(args: argparse.Namespace, *, status: dict[str, object]) -> dict[str, object]:
     candidates = _review_model_token_candidates()
     if not candidates:
-        print("error: missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call", file=sys.stderr)
-        print(
-            "hint: export REVIEWER_SAFE_TOKEN (recommended), or KGW_TOKEN/SAFE_TOKEN/OPENAI_API_KEY/MODELKEYGUARD_BEARER_TOKEN",
-            file=sys.stderr,
-        )
+        print("error: missing REVIEWER_SAFE_TOKEN for the reviewer model call", file=sys.stderr)
+        print("hint: export a dedicated least-privilege REVIEWER_SAFE_TOKEN", file=sys.stderr)
         raise SystemExit(2)
 
     result: dict[str, object] | None = None
@@ -274,6 +289,7 @@ def _run_reviewer_once(args: argparse.Namespace, *, status: dict[str, object]) -
             )
             if not isinstance(result, dict) or not result:
                 raise RuntimeError("usage_reviewer runtime contract violation: empty review_result payload")
+            result = validate_review_result(result)
             break
         except RuntimeError as exc:
             last_error = exc

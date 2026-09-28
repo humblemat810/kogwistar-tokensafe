@@ -70,9 +70,17 @@ def create_router() -> APIRouter:
         lookback_minutes = payload.get("lookback_minutes")
         if lookback_minutes is None:
             lookback_minutes = os.getenv("MODELKEYGUARD_REVIEW_LOOKBACK_MINUTES")
-        checkpoint = payload.get("checkpoint_path") or os.getenv("MODELKEYGUARD_REVIEW_CHECKPOINT_PATH")
+        # Output/checkpoint locations are server policy, never client input.
+        # Accepting arbitrary paths here lets an admin token overwrite files
+        # outside the intended review directory.
+        if "out_path" in payload or "checkpoint_path" in payload:
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"code": "review_paths_server_managed", "message": "review output paths are server-managed"}},
+            )
+        checkpoint = os.getenv("MODELKEYGUARD_REVIEW_CHECKPOINT_PATH")
 
-        out_path = Path(payload.get("out_path") or os.getenv("MODELKEYGUARD_REVIEW_OUT", "out/review_results.jsonl"))
+        out_path = Path(os.getenv("MODELKEYGUARD_REVIEW_OUT", "out/review_results.jsonl"))
         result = review_once(
             Path(request.app.state.settings.audit_path),
             Path(request.app.state.settings.policy_path),
