@@ -519,7 +519,7 @@ def test_usage_reviewer_agent_tutorial_and_script_pin_projection_backed_flow():
     assert "run_langchain_reviewer" in script
     assert "advance-checkpoint" in script
     assert "_reviewer_safe_token" in script
-    assert "missing REVIEWER_SAFE_TOKEN for the Ollama-shaped review call" in script
+    assert "missing REVIEWER_SAFE_TOKEN for the reviewer model call" in script
 
 
 def test_governance_quickstart_tutorial_ladder_links_and_contract():

@@ -158,6 +158,10 @@ def test_admin_review_status_and_checkpoint_routes(tmp_path, monkeypatch):
     assert status_after.status_code == 200
     assert graph_state.projections["modelkeyguard.review.checkpoint:runtime"] == checkpoint_before
 
+    run = client.post("/admin/review/start", headers=ADMIN_HEADERS, json={"requested_by": "pytest"})
+    assert run.status_code == 201
+    assert run.json()["run_id"]
+
     checkpoint = client.post(
         "/admin/review/checkpoint",
         headers=ADMIN_HEADERS,
@@ -608,6 +612,8 @@ def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeyp
     checkpoint = tmp_path / "review_checkpoint.json"
     monkeypatch.setenv("MODELKEYGUARD_GRAPH_PATH", str(graph))
     monkeypatch.setenv("MODELKEYGUARD_AUDIT_PATH", str(audit))
+    monkeypatch.setenv("MODELKEYGUARD_REVIEW_OUT", str(out))
+    monkeypatch.setenv("MODELKEYGUARD_REVIEW_CHECKPOINT_PATH", str(checkpoint))
     monkeypatch.setenv("MODELKEYGUARD_DRY_RUN", "1")
     _write_jsonl(
         audit,
@@ -630,8 +636,6 @@ def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeyp
             "run_llm_review": False,
             "sample_size": 100,
             "lookback_minutes": 60,
-            "out_path": str(out),
-            "checkpoint_path": str(checkpoint),
         },
         headers=ADMIN_HEADERS,
     )
@@ -648,13 +652,19 @@ def test_admin_review_run_endpoint_supports_scheduler_controls(tmp_path, monkeyp
             "run_llm_review": False,
             "sample_size": 100,
             "lookback_minutes": 60,
-            "out_path": str(out),
-            "checkpoint_path": str(checkpoint),
         },
         headers=ADMIN_HEADERS,
     )
     assert second.status_code == 200
     assert second.json()["events_seen"] == 0
+
+    rejected = client.post(
+        "/admin/review/run",
+        json={"run_llm_review": False, "out_path": str(tmp_path / "escape.jsonl")},
+        headers=ADMIN_HEADERS,
+    )
+    assert rejected.status_code == 400
+    assert rejected.json()["error"]["code"] == "review_paths_server_managed"
 
 
 def test_admin_security_events_auth_allowlist_and_persist(tmp_path, monkeypatch):
@@ -732,6 +742,8 @@ def test_all_admin_routes_require_authentication(tmp_path, monkeypatch):
     assert client.post("/admin/policy/pricing/revoke", json={}).status_code == 401
     assert client.post("/admin/review/run", json={}).status_code == 401
     assert client.get("/admin/review/status.json").status_code == 401
+    assert client.get("/admin/review").status_code == 401
+    assert client.post("/admin/review/start", json={}).status_code == 401
     assert client.post("/admin/review/checkpoint", json={}).status_code == 401
 
 

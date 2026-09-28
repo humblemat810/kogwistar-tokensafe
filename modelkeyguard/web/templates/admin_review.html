@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ModelKeyGuard Review Center</title>
+  <link rel="stylesheet" href="/static/admin_review.css">
+</head>
+<body>
+  <header class="admin-nav" aria-label="Admin navigation">
+    <strong>ModelKeyGuard</strong>
+    <a href="/admin/keys">Keys</a>
+    <a href="/admin/policy">Policy Ops</a>
+    <a href="/admin/usage">Usage Monitor</a>
+    <a href="/admin/review" aria-current="page">Review Center</a>
+    <a href="/admin/history">History</a>
+    <a href="/healthz">Health</a>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Governance operations</p>
+        <h1>Review Center</h1>
+        <p class="lede">Deterministic policy signals first. LLM output is advisory and never performs an admin action.</p>
+      </div>
+      <div class="actions">
+        <button id="refreshBtn" type="button">Refresh status</button>
+        <button id="startBtn" type="button" class="primary">Start evidence snapshot</button>
+      </div>
+    </section>
+
+    <div id="statusMessage" class="status" role="status" aria-live="polite">Loading review status…</div>
+
+    <section class="metric-grid" aria-label="Review summary">
+      <article class="metric"><span>Decision</span><strong id="decision">—</strong></article>
+      <article class="metric"><span>Conversations</span><strong id="conversationCount">—</strong></article>
+      <article class="metric"><span>Tokens</span><strong id="tokenCount">—</strong></article>
+      <article class="metric"><span>Estimated USD</span><strong id="usdCount">—</strong></article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-heading"><div><p class="eyebrow">Evidence window</p><h2>Triggered policy rules</h2></div><span id="generatedAt" class="muted">—</span></div>
+      <div id="triggers" class="trigger-list"><p class="muted">No status loaded.</p></div>
+    </section>
+
+    <section class="two-column">
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Recent evidence</p><h2>History preview</h2></div></div>
+        <div id="historyPreview" class="table-wrap"><p class="muted">No evidence.</p></div>
+      </article>
+      <article class="panel">
+        <div class="panel-heading"><div><p class="eyebrow">Usage ledger</p><h2>Usage preview</h2></div></div>
+        <div id="usagePreview" class="table-wrap"><p class="muted">No usage.</p></div>
+      </article>
+    </section>
+
+    <section id="runPanel" class="panel snapshot-panel" hidden>
+      <p class="eyebrow">Server-owned snapshot</p>
+      <h2>Ready for reviewer</h2>
+      <p>Give this run ID to the controlled reviewer process. Checkpoint can advance only for this frozen window.</p>
+      <code id="runId"></code>
+      <button id="copyRunIdBtn" type="button">Copy run ID</button>
+    </section>
+  </main>
+  <script src="/static/admin_review.js"></script>
+</body>
+</html>

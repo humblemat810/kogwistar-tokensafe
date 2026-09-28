@@ -734,6 +734,9 @@ def _get_named_projection(graph_state: GraphStateStore, namespace: str, key: str
         try:
             payload = getter(namespace, key)
             if isinstance(payload, dict):
+                inner = payload.get("payload")
+                if isinstance(inner, dict) and ("namespace" in payload or "key" in payload):
+                    return inner
                 return payload
         except Exception:
             pass

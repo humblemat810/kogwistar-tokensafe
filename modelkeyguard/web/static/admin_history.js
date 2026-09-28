@@ -64,21 +64,19 @@ async function refresh() {
   const resp = await fetch("/admin/history.json?" + filterParams().toString());
   const data = await resp.json();
   const body = q("historyBody");
-  body.innerHTML = "";
+  body.replaceChildren();
   for (const row of (data.data || [])) {
     const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${row.ts || ""}</td>
-      <td><code>${row.request_id || ""}</code></td>
-      <td>${row.provider || ""}</td>
-      <td>${row.route_family || ""}</td>
-      <td>${row.principal_id || ""}</td>
-      <td>${row.on_behalf_of_user_id || ""}</td>
-      <td>${row.key_id || ""}</td>
-      <td>${row.model || ""}</td>
-      <td>${row.decision || ""}</td>
-      <td>${row.http_status || ""}</td>
-      <td><button data-request-id="${row.request_id || ""}">View</button></td>`;
+    ["ts", "request_id", "provider", "route_family", "principal_id", "on_behalf_of_user_id", "key_id", "model", "decision", "http_status"].forEach((key) => {
+      const cell = document.createElement("td");
+      if (key === "request_id") { const code = document.createElement("code"); code.textContent = row[key] || ""; cell.appendChild(code); }
+      else { cell.textContent = row[key] == null ? "" : String(row[key]); }
+      tr.appendChild(cell);
+    });
+    const actionCell = document.createElement("td");
+    const button = document.createElement("button");
+    button.type = "button"; button.dataset.requestId = row.request_id || ""; button.textContent = "View";
+    actionCell.appendChild(button); tr.appendChild(actionCell);
     body.appendChild(tr);
   }
   for (const btn of body.querySelectorAll("button[data-request-id]")) {

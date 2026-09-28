@@ -1,15 +1,21 @@
 function q(name) { return document.getElementById(name); }
 
-function subjectLink(type, value) {
-  if (!value) {
-    return "";
+function appendValueCell(row, value, linkType = "") {
+  const cell = document.createElement("td");
+  if (linkType && value) {
+    const p = new URLSearchParams();
+    p.set("subject_type", linkType);
+    p.set("subject_id", value);
+    p.set("time_range", q("timeRange").value);
+    p.set("bucket", q("bucket").value);
+    const link = document.createElement("a");
+    link.href = `/admin/usage?${p.toString()}`;
+    link.textContent = String(value);
+    cell.appendChild(link);
+  } else {
+    cell.textContent = value == null ? "" : String(value);
   }
-  const p = new URLSearchParams();
-  p.set("subject_type", type);
-  p.set("subject_id", value);
-  p.set("time_range", q("timeRange").value);
-  p.set("bucket", q("bucket").value);
-  return `<a href="/admin/usage?${p.toString()}">${value}</a>`;
+  row.appendChild(cell);
 }
 
 function formatTop(items, valueKey, labelKey) {
@@ -123,10 +129,17 @@ async function refresh() {
   q("topReasons").textContent = formatTop(data.charts.top_deny_reasons || [], "count", "reason");
 
   const body = q("eventsBody");
-  body.innerHTML = "";
+  body.replaceChildren();
   (data.drilldown.events || []).slice(-100).reverse().forEach((e) => {
     const tr = document.createElement("tr");
-    tr.innerHTML = `<td>${e.ts || ""}</td><td>${subjectLink("principal", e.principal_id || "")}</td><td>${subjectLink("user", e.on_behalf_of_user_id || "")}</td><td>${subjectLink("key", e.key_id || "")}</td><td>${subjectLink("token", e.token_id || "")}</td><td>${e.model || ""}</td><td>${e.decision || ""}</td><td>${e.reason || ""}</td>`;
+    appendValueCell(tr, e.ts);
+    appendValueCell(tr, e.principal_id, "principal");
+    appendValueCell(tr, e.on_behalf_of_user_id, "user");
+    appendValueCell(tr, e.key_id, "key");
+    appendValueCell(tr, e.token_id, "token");
+    appendValueCell(tr, e.model);
+    appendValueCell(tr, e.decision);
+    appendValueCell(tr, e.reason);
     body.appendChild(tr);
   });
 }

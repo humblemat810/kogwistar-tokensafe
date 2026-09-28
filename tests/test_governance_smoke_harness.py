@@ -239,7 +239,7 @@ def test_usage_reviewer_script_loop_smoke_success(monkeypatch: pytest.MonkeyPatc
         lambda **kwargs: {
             "base_url": kwargs["base_url"],
             "model": kwargs["model"],
-            "text": "review-ok",
+            "text": '{"schema_version":1,"verdict":"investigate","severity":"high","evidence_request_ids":["req-script-review-1"],"rationale":"keyword trigger requires review","recommended_action":"human_review"}',
             "key_id": kwargs.get("key_id", ""),
         },
     )
@@ -265,7 +265,7 @@ def test_usage_reviewer_script_loop_smoke_async_runtime(monkeypatch: pytest.Monk
     monkeypatch.setenv("REVIEWER_SAFE_TOKEN", "safe-token")
     monkeypatch.setattr("modelkeyguard.reviewer_agent.ReviewStatusClient.from_env", lambda: _FakeStatusClient(status_payload))
     monkeypatch.setattr("modelkeyguard.reviewer_agent.ReviewStatusClient.status", lambda self: dict(status_payload))
-    monkeypatch.setattr("modelkeyguard.governance_runtime.run_usage_reviewer_runtime", lambda **kwargs: {"text": "ok", "model": kwargs["model"]})
+    monkeypatch.setattr("modelkeyguard.governance_runtime.run_usage_reviewer_runtime", lambda **kwargs: {"text": '{"schema_version":1,"verdict":"investigate","severity":"high","evidence_request_ids":["req-script-review-async"],"rationale":"keyword trigger requires review","recommended_action":"human_review"}', "model": kwargs["model"]})
     _capture_sleep(monkeypatch)
     code, out, _err = _run_script(
         script,
